@@ -1,0 +1,12 @@
+.git
+.github
+infra/
+scripts/
+**/*_test.go
+**/testdata/
+**/__pycache__/
+**/.pytest_cache/
+.env
+**/*.md
+data/maxmind/
+postman/
