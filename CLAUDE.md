@@ -7,7 +7,7 @@
 - **Storage**: PostgreSQL 16 (single store; multi-tenant via RLS + `tenant_id` columns; JSONB customer baselines)
 - **Transport**: REST (FastAPI / uvicorn)
 - **Infra**: ECS Fargate (production `ca-central-1`, test/staging `us-east-2`) · Docker Compose (local) | Ceiling: 100 TPS, p95 < 200ms
-- **Config prefix**: `FG_` (pydantic-settings, sourced from `.env`)
+- **Config**: pydantic-settings, no env prefix (env var names match field names verbatim, e.g. `DATABASE_URL`, `HMAC_SECRET`); sourced from `.env` in dev, platform secret manager in prod
 
 ## Load by Task
 | Task | Read |

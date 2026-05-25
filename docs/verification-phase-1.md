@@ -176,7 +176,7 @@ All four sources confirmed accessible and unchanged from the freight_risk integr
 
 **Two enrichment-source decisions for Phase 1 plan**:
 
-1. **License-key storage** — MaxMind and IP2Proxy each have a single secret. Store under `FG_MAXMIND_LICENSE_KEY` / `FG_IP2PROXY_DOWNLOAD_TOKEN`. Loaded by pydantic-settings.
+1. **License-key storage** — MaxMind and IP2Proxy each have a single secret. Store under `MAXMIND_LICENSE_KEY` / `IP2PROXY_DOWNLOAD_TOKEN` (no env prefix per operator amendment 2026-05-25). Loaded by pydantic-settings.
 2. **Refresh script execution model** — `scripts/fetch_enrichment.py` runs out-of-process. In v1 it runs as an ECS scheduled task (Phase 6) or local cron (dev). The app reads `ip_enrichment` row freshness via the `updated_at` column; serves stale-but-cached if upstream is unavailable. Both these are already in Design Context — flag-only.
 
 **Verification gap not closed**: I have not actually attempted a download from any source. The URLs are documented but not pinged. Live verification belongs in Batch 1D when the refresh script lands. If any source's auth has changed since the freight_risk integration, Phase 1 will surface it.

@@ -33,6 +33,7 @@ Layer 2 (account-prior + trust-score consumption) is deferred to Phase 2.
 | Recipient-overlap rules origin | freight_risk's catalog (NOT FreightSentry port). Land naturally in Phase 2 with the full 84-rule catalog port. | Verification §1.2 |
 | 30-day recent-activity count | **Not persisted as a column.** Computed on demand via `COUNT(*) FROM shipments WHERE booking_ts > now() - interval '30 days'` for rules / admin endpoints that need it. Rules needing a decay-weighted approximation read `customer_baselines.value_n` (post-decay; exposed via Context as `customer_observations`). | Operator amendment 2026-05-25 |
 | `customer_baselines.value_n` exposed to rule conditions | Available in Context as the `customer_observations` field — the decay-weighted booking-count proxy. Used by maturity-sensitive rules (e.g. `customer_observations >= 10` guard on novelty/lock-in rules). | Operator amendment 2026-05-25 |
+| Env-var naming | **No `FG_` prefix.** pydantic-settings reads env var names that match field names verbatim (e.g. `DATABASE_URL`, `HMAC_SECRET`, `MAXMIND_LICENSE_KEY`, `IP2PROXY_DOWNLOAD_TOKEN`, `AUTH_ENABLED`, `LOG_LEVEL`). The FreightSentry-era `FG_` prefix is dropped — clean env vars only. | Operator amendment 2026-05-25 (post-1A.7) |
 | `customer_locked_cloud_api` | Derived in `build_context` (Phase 2). Phase 1's customer_baselines schema supports it (cloud_share + api_share + effective_observations all stored). | Verification §3.4 |
 
 ---
@@ -318,7 +319,7 @@ upcoming commits: {N+1} through {1D.last} sections. Read only those sections.
 **Files**:
 - `docker-compose.yml` (new — postgres:16-alpine, app service built from Dockerfile)
 - `Dockerfile` (new — python:3.13-slim base, uv install, copy app, EXPOSE 8000, entrypoint via uvicorn)
-- `.env.example` (new — FG_DATABASE_URL, FG_HMAC_SECRET, FG_API_TOKEN_PREFIX, FG_MAXMIND_LICENSE_KEY, FG_IP2PROXY_DOWNLOAD_TOKEN, FG_LOG_LEVEL)
+- `.env.example` (new — DATABASE_URL, HMAC_SECRET, API_TOKEN_PREFIX, MAXMIND_LICENSE_KEY, IP2PROXY_DOWNLOAD_TOKEN, LOG_LEVEL, AUTH_ENABLED) — no env prefix per operator amendment 2026-05-25
 - `.env` (gitignored; operator copies from example)
 
 **Validation**:

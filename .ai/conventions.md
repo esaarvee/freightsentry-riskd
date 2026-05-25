@@ -46,7 +46,7 @@ Single conventions file for the project. Load this for any coding or test-writin
 
 ### Config and secrets
 
-- All config in `app/config.py` via a single `Settings` pydantic-settings class. Env vars prefixed `FG_`. Examples: `FG_DATABASE_URL`, `FG_HMAC_SECRET`, `FG_MAXMIND_LICENSE_KEY`.
+- All config in `app/config.py` via a single `Settings` pydantic-settings class. No env prefix — env var names match field names verbatim (e.g. `DATABASE_URL`, `HMAC_SECRET`, `MAXMIND_LICENSE_KEY`).
 - Secret values: never logged, never returned in API responses, never included in exception messages. Audit log fields containing HMAC'd PII are acceptable.
 - `Settings()` is constructed once at lifespan; pass via FastAPI `Depends(get_settings)`.
 
@@ -178,7 +178,7 @@ mock_conn.fetchrow.return_value = {"trust_score": 0.8, "is_blocked": False}
 
 ### Config in tests
 
-- `monkeypatch.setenv("FG_X", "value")` then re-construct `Settings()`. Never write `os.environ` directly.
+- `monkeypatch.setenv("DATABASE_URL", "value")` (or whichever field) then re-construct `Settings()`. Never write `os.environ` directly.
 
 ### Fixtures
 

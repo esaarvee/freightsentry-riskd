@@ -14,7 +14,7 @@ Your scope is everything the senior engineer reviewer does NOT cover deeply. You
 ## Setup
 
 Before reviewing, load:
-- `.ai/conventions.md` — FG_ env prefix, dependency posture, PII handling rules, guardrails
+- `.ai/conventions.md` — env-var conventions (no prefix), dependency posture, PII handling rules, guardrails
 - `.ai/decisions.md` — auth, RLS, HMAC, IP threat-intel decisions
 - `.ai/rules.md` — DSL evaluator contract (security boundary)
 - `.ai/gotchas/index.md` — load relevant sub-files for libraries touched by the diff
@@ -71,7 +71,7 @@ See `.claude/agents/_shared/review-mechanics.md` for the Plan Context check orde
 - Privilege escalation: user-controlled input used to bypass permission checks
 - Cross-tenant access: a request authenticated as tenant_a reading or writing tenant_b's data is a critical finding. RLS enforces this at the DB layer, but a missing `SET LOCAL app.tenant_id` makes RLS toothless. Verify the tenant context is set per request before any DB read.
 - API token scope: admin tokens have broader permissions; a route checking only "authenticated" without checking role can allow non-admin tokens to hit admin endpoints.
-- **Safe carve-out**: `FG_AUTH_ENABLED=false` in `docker-compose.yml` is the intended local dev behavior. Only flag `auth_enabled=False` (or equivalent) in non-config source code.
+- **Safe carve-out**: `AUTH_ENABLED=false` in `docker-compose.yml` is the intended local dev behavior. Only flag `auth_enabled=False` (or equivalent) in non-config source code.
 
 ### DoS Vectors
 

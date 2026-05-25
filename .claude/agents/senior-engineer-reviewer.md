@@ -49,7 +49,7 @@ See `.claude/agents/_shared/review-mechanics.md` for the Plan Context check orde
 - **FastAPI**: dependency injection via `Depends`; status codes appropriate to outcome; `HTTPException` with `detail`
 - **asyncpg parameter binding**: positional parameters (`$1`, `$2`) only — never f-string SQL with user input
 - **Connection lifecycle**: `async with pool.acquire() as conn:` per request; tenant context (`SET LOCAL app.tenant_id`) set inside the `async with`
-- **Config**: `FG_` prefix via pydantic-settings; `Settings()` constructed once at app lifespan; tests use `monkeypatch.setenv` + reconstruct `Settings()`
+- **Config**: pydantic-settings with no env prefix (env var names match field names verbatim, e.g. `DATABASE_URL`, `HMAC_SECRET`); `Settings()` constructed once at app lifespan; tests use `monkeypatch.setenv` + reconstruct `Settings()`
 - **Type hints**: every function signature typed; `mypy app/` strict mode passes
 
 ### Domain-Specific

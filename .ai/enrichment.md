@@ -99,12 +99,12 @@ class Enricher:
 
 `scripts/fetch_enrichment.py` downloads fresh source files into `data/enrichment/`:
 
-- MaxMind: requires `FG_MAXMIND_LICENSE_KEY`. URL pattern in `.ai/decisions.md`.
+- MaxMind: requires `MAXMIND_LICENSE_KEY`. URL pattern in `.ai/decisions.md`.
 - FireHOL: public Git raw URLs; no auth.
-- IP2Proxy: requires `FG_IP2PROXY_DOWNLOAD_TOKEN`.
+- IP2Proxy: requires `IP2PROXY_DOWNLOAD_TOKEN`.
 - Cloud CIDRs: public URLs per provider; AWS auto-fetches latest; Azure scrapes the dated JSON filename from the Microsoft download page.
 
-Runs out-of-process: as ECS scheduled task in production (Phase 6), or local cron in dev. App reads from `data/enrichment/` (loader path configurable via `FG_ENRICHMENT_DATA_DIR`).
+Runs out-of-process: as ECS scheduled task in production (Phase 6), or local cron in dev. App reads from `data/enrichment/` (loader path configurable via `ENRICHMENT_DATA_DIR`).
 
 ---
 

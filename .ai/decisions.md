@@ -235,7 +235,7 @@ All four, lazy-cached in `ip_enrichment` Postgres table keyed by IP. Cache fresh
 | IP2Proxy LITE PX11 | `https://lite.ip2location.com/database-download?database=PX11LITEBIN&token=…` | Free signup → token | CC-BY-SA 4.0 | Monthly |
 | Cloud provider CIDRs | AWS: `https://ip-ranges.amazonaws.com/ip-ranges.json` · GCP: `https://www.gstatic.com/ipranges/cloud.json` · Azure: weekly download from `https://www.microsoft.com/en-us/download/details.aspx?id=56519` · Cloudflare: `https://www.cloudflare.com/ips-v4` | None | Public | Continuously (AWS), weekly (GCP/Azure), rare (Cloudflare) |
 
-Secret storage: `FG_MAXMIND_LICENSE_KEY`, `FG_IP2PROXY_DOWNLOAD_TOKEN` (Pydantic Settings; AWS Secrets Manager in prod).
+Secret storage: `MAXMIND_LICENSE_KEY`, `IP2PROXY_DOWNLOAD_TOKEN` (Pydantic Settings; AWS Secrets Manager in prod). No env prefix per operator amendment 2026-05-25.
 
 `is_proxy` from IP2Proxy is gated on non-empty `proxy_type` (sentinel values: `""`, `-`, `INVALID IP ADDRESS`, `NOT SUPPORTED`, `INVALID DATABASE FILE`, `DATABASE NOT FOUND`, plus non-printable-byte payloads). Naive port without the gate produces false-positives.
 
