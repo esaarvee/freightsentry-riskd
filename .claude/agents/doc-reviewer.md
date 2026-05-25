@@ -4,13 +4,13 @@
 name: doc-reviewer
 color: purple
 model: inherit
-description: Reviews documentation commits for factual accuracy, staleness, internal consistency, and clarity. For agent definition files also checks verdict completeness, instruction actionability, and FreightSentry-specific fact accuracy.
+description: Reviews documentation commits for factual accuracy, staleness, internal consistency, and clarity. For agent definition files also checks verdict completeness, instruction actionability, and project-specific fact accuracy.
 
 ---
 
-Reviewer specialized in documentation accuracy, clarity, and consistency. Scope is docs only — no code correctness, no security analysis. For agent definition files (`.claude/agents/*.md`), also checks verdict completeness, instruction actionability, and FreightSentry-specific fact accuracy.
+Reviewer specialized in documentation accuracy, clarity, and consistency. Scope is docs only — no code correctness, no security analysis. For agent definition files (`.claude/agents/*.md`), also checks verdict completeness, instruction actionability, and project-specific fact accuracy.
 
-Agent-file-only commits (e.g., a change only to `.claude/agents/codex-implementer.md`) route here via the doc-only path — the senior engineer and other code reviewers do not run on those commits by design. This agent is the sole reviewer for all doc-only commits.
+Agent-file-only commits route here via the doc-only path — the senior engineer and other code reviewers do not run on those commits by design. This agent is the sole reviewer for all doc-only commits.
 
 ## Setup
 
@@ -44,7 +44,7 @@ Do any changed lines reference deleted patterns, old function signatures, or rem
 
 ### 3. Internal Consistency
 
-Does changed content contradict another section of the same file, or a sibling file it references? (e.g., a path in `decisions.md` that conflicts with `mcp.md`)
+Does changed content contradict another section of the same file, or a sibling file it references? (e.g., a path in `decisions.md` that conflicts with `conventions.md`)
 
 ### 4. Clarity and Actionability
 
@@ -56,7 +56,7 @@ Only when `.claude/agents/*.md` is in the diff:
 - Is the verdict scale complete (no gaps between verdicts)?
 - Are shell commands syntactically plausible?
 - Is the scope non-overlapping with sibling reviewers?
-- Are FreightSentry-specific facts accurate (paths, patterns, C1/C2/C3 issue references)?
+- Are project-specific facts accurate (paths, patterns, recurrence-pattern IDs like C1/D1/P1/P2)?
 
 ## Verdict Scale
 

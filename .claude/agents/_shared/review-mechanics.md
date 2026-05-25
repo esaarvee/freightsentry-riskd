@@ -5,8 +5,9 @@
 > Covers git command conventions, diff-reading rules, Plan Context check
 > order, and output format expectations.
 >
-> Reviewer-specific dimensions, verdict scales, FreightSentry patterns
-> (C1/C2/C3, D1/D2/D3, P1/P2), recurrence citation rules, and safety
+> Reviewer-specific dimensions, verdict scales, project-specific recurring
+> patterns (C1, C3, D1, D2, D3, P1, P2 — see each agent's own file for
+> what each pattern means), recurrence citation rules, and safety
 > carve-outs remain in each agent's own file.
 
 ## Git commands
