@@ -1,28 +1,25 @@
-# FreightSentry — AI Context Index
+# freightsentry-riskd — AI Context Index
 > Points to knowledge. Doesn't hold it. Load only what the task needs.
 
 ## Project Identity
-- **App**: FreightSentry — real-time fraud detection for freight aggregation platform
-- **Stack**: Python 3.14 Gateway · Go 1.25 Rules Engine · Go 1.25 Async Worker
-- **Storage**: PostgreSQL 16 (fraud) · MySQL 8 (platform, read-only) · Redis 7
-- **Transport**: gRPC internal · REST external · Redis Streams async
-- **Infra**: ECS Fargate (prod) · Docker Compose (local) | Ceiling: 100 TPS, p95 < 100ms sync path
-- **Config prefix**: `FG_` (Python pydantic-settings) · Go reads `os.Getenv` directly
+- **App**: freightsentry-riskd — real-time fraud detection SaaS for freight aggregation platforms
+- **Stack**: Python 3.13+ · FastAPI · asyncpg · Pydantic v2 · Alembic
+- **Storage**: PostgreSQL 16 (single store; multi-tenant via RLS + `tenant_id` columns; JSONB customer baselines)
+- **Transport**: REST (FastAPI / uvicorn)
+- **Infra**: ECS Fargate (production `ca-central-1`, test/staging `us-east-2`) · Docker Compose (local) | Ceiling: 100 TPS, p95 < 200ms
+- **Config prefix**: `FG_` (pydantic-settings, sourced from `.env`)
 
 ## Load by Task
 | Task | Read |
 |---|---|
-| Any coding task | `.ai/conventions-freightsentry.md` + the language file matching the diff (`conventions-python.md` and/or `conventions-go.md`) |
-| Any test-writing task | `.ai/conventions-freightsentry.md` + `conventions-testing.md` + language file (`conventions-python.md` / `conventions-go.md`) + `.ai/contracts/<service>.md` + `.ai/gotchas/index.md` |
-| Enrichment or behavioral flags | `.ai/enrichment.md` |
-| Scoring model or rule design | `.ai/rules.md` + `services/rules-engine/configs/rules.yaml` |
-| Stream payloads or Redis keys | `.ai/schema.md` |
+| Any coding task | `.ai/conventions.md` |
+| Any test-writing task | `.ai/conventions.md` + `.ai/gotchas/index.md` |
+| Enrichment work | `.ai/enrichment.md` |
+| Scoring model or rule design | `.ai/rules.md` + `app/rules.yaml` |
+| Stream payloads or async patterns | `.ai/conventions.md` (asyncio + asyncpg sections) |
 | Architecture or tech-stack proposal | `.ai/decisions.md` |
-| DB schema or migrations | `services/gateway/app/migrations/versions/` |
-| REST API work | `services/gateway/app/routes/<relevant>.py` |
-| gRPC or proto changes | `proto/fraud_evaluation.proto` |
-| MCP server / tool work | `.ai/mcp.md` |
-| ECS / deployment | `docs/06-infrastructure.md` |
+| DB schema or migrations | `alembic/versions/` |
+| REST API work | `app/api/<relevant>.py` |
 | Plan mode / commit cycle | This file + `.claude/agents/*.md` |
 | Repo navigation | Use Glob/Grep tools |
 
@@ -46,7 +43,7 @@ The only per-plan preference still asked via AskUserQuestion:
 
 - **Commit strategy**: atomic (one logical change per commit) / batched (group related changes)
 
-Resolve every other architectural decision via AskUserQuestion DURING plan creation and record the answers in a "Decisions absorbed" table at the top of the plan (see [REFACTOR_PLAN_B5plus.md](REFACTOR_PLAN_B5plus.md) for the canonical example). During execution the plan is the source of truth — see "Autonomous Execution" below.
+Resolve every other architectural decision via AskUserQuestion DURING plan creation and record the answers in a "Decisions absorbed" table at the top of the plan. During execution the plan is the source of truth — see "Autonomous Execution" below.
 
 ### Plan Structure
 
@@ -54,12 +51,11 @@ Each planned commit should specify:
 - **Changes**: what files are modified and why
 - **Tests**: what test changes accompany the code
 - **Validation**: which commands verify correctness
-- **Service**: which service is affected (gateway / rules-engine / async-worker / proto / infra)
 
 **Declared breaks subsection (per commit)**: identify transitional states the commit introduces — code, schema, or contracts that are temporarily broken or incomplete because the resolving change lands in a later commit.
 
 For each transitional state, add a `Declared breaks` subsection to the commit. Each entry specifies:
-- **Scope**: what specifically is in a transitional state (be precise — 'field X removed from EvaluationRequest', not 'proto changed')
+- **Scope**: what specifically is in a transitional state (be precise — 'field X removed from BookingRequest', not 'model changed')
 - **Resolved in**: which later commit number resolves the transitional state, with a one-line reference to what that commit does
 
 Reviewers consult this subsection to plan-suppress findings that match declared scope. Reviewer correctness depends on declarations being specific enough to distinguish declared-and-expected breakage from incidental bugs. Over-declaring degrades reviewer accuracy.
@@ -68,7 +64,7 @@ When a commit introduces no transitional state, omit the `Declared breaks` subse
 
 Common cases to declare:
 - Function/method added but not yet called by production code
-- Proto field added/moved/removed with consumer update in later commit
+- Pydantic model field added/moved/removed with consumer update in later commit
 - Schema column added before writer wired up (or vice versa)
 - Test deleted before replacement test lands
 - Interface introduced before its second implementation
@@ -83,26 +79,28 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
 
 ### Validation Commands
 
-| Service | Command |
+| Task | Command |
 |---|---|
-| Rules Engine | `cd services/rules-engine && go test ./internal/... -race -count=1 -shuffle=on` |
-| Async Worker | `cd services/async-worker && go test ./internal/... -race -count=1 -shuffle=on` |
-| Gateway | `cd services/gateway && pytest tests/ -v --asyncio-mode=auto` |
-| Go build (both) | `cd services/rules-engine && go build ./...` then `cd services/async-worker && go build ./...` |
-| Python lint | `cd services/gateway && ruff check app/ tests/` |
-| Proto regen | `make -C local-dev proto` (from repo root) |
+| Python lint | `ruff check app/ tests/` |
+| Python type-check | `mypy app/` |
+| Tests | `pytest tests/ -v --asyncio-mode=auto` |
+| Schema migrate (local) | `docker compose exec app alembic upgrade head` |
+| Schema round-trip | `docker compose exec app alembic downgrade base && docker compose exec app alembic upgrade head` |
+| Schema verify | `docker compose exec postgres psql -U riskd -d riskd -c '\dt+ public'` |
+| Local stack up | `docker compose up -d` |
+| Local stack down | `docker compose down -v` |
 
 ### 6-Step Commit Cycle
 
 1. **Implement** — write the code changes for one planned commit
-2. **Validate** — run the validation commands for the affected service(s). All must pass.
+2. **Validate** — run the validation commands for the affected paths. All must pass.
 3. **Review** — first detect commit type, then route to the appropriate review panel.
 
-   **Detect commit type**: collect all changed file paths via `git diff --name-only HEAD` and `git diff --cached --name-only` (which includes newly staged files). If EVERY changed file is a `.md` file (anywhere in the repo), under `.ai/`, or under `docs/` → **doc-only path**. If ANY file falls outside those patterns (`.yaml`, `.go`, `.py`, `.proto`, `.json`, etc.) → **code path**.
+   **Detect commit type**: collect all changed file paths via `git diff --name-only HEAD` and `git diff --cached --name-only` (which includes newly staged files). If EVERY changed file is a `.md` file (anywhere in the repo), under `.ai/`, or under `docs/` → **doc-only path**. If ANY file falls outside those patterns (`.py`, `.yaml`, `.sql`, `.json`, `Dockerfile`, `.toml`, etc.) → **code path**.
 
    **Slice the plan file in the invocation prompt**: when a plan file is in play, do not have reviewers read the whole file. Specify the current commit position (commit number + brief title) and the section ranges or section headers for the current commit and upcoming commits N+1 through M. Reviewers fetch only those sections via Read offset/limit or section anchors.
 
-   Example invocation suffix: `Plan file: REFACTOR_PLAN_B5plus.md, current commit: 5.2 of 12 (C-3 part 1 — \`is_blocked\` + \`fraud_confirmed_count\` writers), upcoming commits: 5.3 through 7.L sections. Read only those sections.`
+   Example invocation suffix: `Plan file: PLAN_PHASE_1.md, current commit: 1B.2 (initial migration), upcoming commits: 1B.3 through 1D.8 sections. Read only those sections.`
 
    The reviewer agents are tuned to load plan context lazily — telling them up-front which sections matter avoids loading thousands of lines of unrelated commit history per cycle.
 
@@ -125,7 +123,7 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
    When tests changed, also run:
    - Test Reviewer: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/test-reviewer.md and follow its instructions to review the current uncommitted test changes. Run git diff to see the changes.")`
 
-   When diff includes any file matching `migrations/versions/`, `*.sql`, or ORM model files (e.g. `models.py`, `models/*.py`), also run:
+   When diff includes any file matching `alembic/versions/`, `*.sql`, or ORM/Pydantic model files (e.g. `app/models.py`, `app/models/*.py`), also run:
    - DB Reviewer: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/db-reviewer.md and follow its instructions to review the current uncommitted changes. Run git diff to see the changes.")`
 
    Code path merge gate:
@@ -157,7 +155,7 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
 | Security Auditor | `.claude/agents/security-auditor.md` | CRITICAL VULNERABILITY → HIGH RISK → MEDIUM RISK → LOW RISK / CLEAN | Every code-path commit cycle |
 | Code Flow Reviewer | `.claude/agents/code-flow-reviewer.md` | REJECT → NEEDS REFACTOR → MINOR ISSUES → CLEAN | Every code-path commit cycle |
 | Test Reviewer | `.claude/agents/test-reviewer.md` | GARBAGE → NEEDS WORK → ACCEPTABLE → ACTUALLY GOOD | Tests changed |
-| DB Reviewer | `.claude/agents/db-reviewer.md` | REJECT → NEEDS MAJOR WORK → NEEDS MINOR FIXES → APPROVED WITH RESERVATIONS → SHIP IT | `migrations/versions/`, `*.sql`, or ORM model files in diff |
+| DB Reviewer | `.claude/agents/db-reviewer.md` | REJECT → NEEDS MAJOR WORK → NEEDS MINOR FIXES → APPROVED WITH RESERVATIONS → SHIP IT | `alembic/versions/`, `*.sql`, or ORM/Pydantic model files in diff |
 | Doc Reviewer | `.claude/agents/doc-reviewer.md` | REJECT → NEEDS EDITS → MINOR TWEAKS → PUBLISH | Doc-only commits |
 
 ### Reviewer routing decision tree
@@ -167,7 +165,7 @@ After detecting code-path (per step 3 above), classify the diff and route accord
 #### Complete skip — no review
 
 The diff qualifies for complete skip if ALL hold:
-- No changes to `.py`, `.go`, `.proto`, `.yaml`, `.sql`, `.json`, Dockerfile, or Makefile
+- No changes to `.py`, `.yaml`, `.sql`, `.json`, `.toml`, `Dockerfile`, `Makefile`, or `pyproject.toml`
 - No changes to test files
 - Total line change under 20 lines OR purely whitespace, formatting, or comment text
 
@@ -182,34 +180,35 @@ Specific always-skip patterns:
 
 If complete skip doesn't apply, check lightweight skip criteria. Single reviewer invocation for narrowly-scoped changes:
 
-- Single-line constant change with no surrounding logic change → **senior-engineer only**, *unless the constant controls a timeout, size cap, iteration bound, retry count, or any other security-load-bearing limit, in which case full panel runs* (T3 resolution)
+- Single-line constant change with no surrounding logic change → **senior-engineer only**, *unless the constant controls a timeout, size cap, iteration bound, retry count, or any other security-load-bearing limit, in which case full panel runs*
 - Variable rename across single file with no semantic change → **senior-engineer only**
-- Adding test cases to existing test file, no production code change → **test-reviewer + senior-engineer** (T4 resolution — Senior reinstated)
-- Single dependency version bump in `go.mod` or `requirements.txt` → **security-auditor + senior-engineer**
+- Adding test cases to existing test file, no production code change → **test-reviewer + senior-engineer**
+- Single dependency version bump in `pyproject.toml` → **security-auditor + senior-engineer**
 - TODO/FIXME comment add/remove → no reviewer; complete skip
-
-(Note: the previously-proposed `Docstring update matching existing behavior → complete skip` rule is intentionally absent — T2 resolution. Docstring/code divergence is a known catch class.)
 
 #### Partial panel — diff-routed subset
 
 If lightweight skip doesn't apply, check partial-panel criteria:
 
-- ONLY `rules.yaml` changed (weights or conditions, not new rule classes) → **senior-engineer + code-flow**
+- ONLY `app/rules.yaml` changed (weights or conditions, not new rule classes) → **senior-engineer + code-flow**
 - ONLY documentation under `docs/` outside `.ai/` → **doc-reviewer only**
-- ONLY config-value change in `docker-compose` or `.env.example` → **security-auditor + senior-engineer**
-- ONLY test file additions or changes, no production code → **test-reviewer + senior-engineer + code-flow-reviewer** (T1 resolution — Code-Flow included)
+- ONLY config-value change in `docker-compose*.yml` or `.env.example` → **security-auditor + senior-engineer**
+- ONLY test file additions or changes, no production code → **test-reviewer + senior-engineer + code-flow-reviewer**
 
 #### Full panel
 
-If none of the above apply, run the full code-path panel as specified in step 3 (senior-engineer + security-auditor + code-flow-reviewer; test-reviewer when tests changed; db-reviewer when migrations/`*.sql`/ORM models changed).
+If none of the above apply, run the full code-path panel as specified in step 3 (senior-engineer + security-auditor + code-flow-reviewer; test-reviewer when tests changed; db-reviewer when migrations/`*.sql`/model files changed).
 
 #### Never Skip (overrides all above)
 
 Regardless of size or routing, never skip review for:
 - Any change to authentication, authorization, credential handling, or secret loading
 - Any change to migrations or schema (including comments — migration comments are load-bearing for future audit)
-- Any change to `rules.yaml` weights, thresholds, or conditions that adds or removes a rule (vs adjusting an existing rule's parameters)
+- Any change to `app/rules.yaml` weights, thresholds, or conditions that adds or removes a rule (vs adjusting an existing rule's parameters)
 - Any change to the scoring formula or noisy-OR composition
+- Any change to the DSL evaluator (`app/dsl.py`) — the rule-eval sandbox
+- Any change to RLS policies (`alembic/versions/*` touching `CREATE POLICY` / `ENABLE ROW LEVEL SECURITY`)
+- Any change to PII handling (HMAC at egress / `signals.hmac_hex`)
 - Any change marked by the operator as significant
 - Any commit that introduces a new file (vs editing existing files), unless purely `.md` documentation under `docs/`
 
@@ -235,4 +234,4 @@ For multi-hour autonomous runs, the operator should additionally:
 - Confirm the plan absorbs every decision before approval.
 - Expect to be paged only when a row lands in `.claude/STATUS.md` `Unforeseen / checkpoints`, or at plan boundaries.
 
-The project allowlist in [.claude/settings.json](.claude/settings.json) is a defense-in-depth backstop for sessions started WITHOUT `bypassPermissions` — it covers the highest-frequency non-auto-allowed commands (`go test`, `go build`, `ruff check`). Personal/machine-specific allowlist entries belong in `.claude/settings.local.json` (gitignored).
+The project allowlist in [.claude/settings.json](.claude/settings.json) is a defense-in-depth backstop for sessions started WITHOUT `bypassPermissions` — it covers the highest-frequency non-auto-allowed commands (`pytest`, `ruff check`, `mypy`, `alembic`). Personal/machine-specific allowlist entries belong in `.claude/settings.local.json` (gitignored).
