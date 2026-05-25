@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-riskd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-riskd}
+      POSTGRES_DB: ${POSTGRES_DB:-riskd}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-riskd} -d ${POSTGRES_DB:-riskd}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://riskd:riskd@postgres:5432/riskd}
+      HMAC_SECRET: ${HMAC_SECRET}
+      API_TOKEN_PREFIX: ${API_TOKEN_PREFIX:-rsk_}
+      MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}
+      IP2PROXY_DOWNLOAD_TOKEN: ${IP2PROXY_DOWNLOAD_TOKEN:-}
+      ENRICHMENT_DATA_DIR: ${ENRICHMENT_DATA_DIR:-/app/data/enrichment}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:
