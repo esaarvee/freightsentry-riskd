@@ -1,12 +1,48 @@
+# Git / CI
 .git
 .github
-infra/
-scripts/
-**/*_test.go
-**/testdata/
-**/__pycache__/
-**/.pytest_cache/
+.gitignore
+.gitattributes
+
+# Env / secrets (env vars injected at runtime via the platform secret manager)
 .env
+.env.local
+.env.*.local
+.env.example
+
+# Test caches / coverage
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Virtualenv (image installs its own)
+.venv/
+venv/
+env/
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Docs (not needed at runtime)
 **/*.md
-data/maxmind/
-postman/
+docs/
+.ai/
+.claude/
+
+# Local-only enrichment data (mounted as a volume in production)
+data/
+local-dev/
+
+# Tests (not shipped to production image)
+tests/
