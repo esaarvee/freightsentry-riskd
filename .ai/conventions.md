@@ -28,7 +28,7 @@ Single conventions file for the project. Load this for any coding or test-writin
 - Pydantic v2 for request/response models in `app/models.py`. Response models are the authoritative wire schema — anything not in a response model does not leak.
 - asyncpg for Postgres. Single connection pool at app lifespan. Per-request connection acquired via `async with pool.acquire() as conn:`. No SQLAlchemy ORM — raw SQL with parameter binding only.
 - pydantic-settings with env prefix `FG_` (loaded from `.env` in dev, AWS Secrets Manager in prod). Settings are loaded once at app lifespan; never re-read at request time.
-- Alembic for migrations. Async-mode `env.py`. Every migration must define `upgrade()` AND `downgrade()` (round-trip tested).
+- Alembic for migrations. **Sync** `env.py` using psycopg (v3) — the runtime app uses asyncpg, but alembic uses sync psycopg because asyncpg's prepared-statement protocol rejects multi-statement DDL scripts. The two drivers coexist without runtime impact. Every migration must define `upgrade()` AND `downgrade()` (round-trip tested).
 
 ### Async discipline
 
