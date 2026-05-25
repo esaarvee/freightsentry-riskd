@@ -1,40 +1,34 @@
 # Gotchas Index
 > Load this file first. Pull only the sub-file relevant to your task.
-> Cap: each sub-file ≤ 30 lines. Promote to conventions.md when a pattern recurs 3+ times.
+> Cap: each sub-file ≤ 60 lines. Promote to `.ai/conventions.md` when a pattern recurs 3+ times.
 
 | Scope | File | Load when |
 |---|---|---|
-| pgx/v5 | `.ai/gotchas/pgx.md` | any Go db work (async-worker) |
-| miniredis/v2 | `.ai/gotchas/miniredis.md` | Go test writing touching Redis |
-| testify | `.ai/gotchas/testify.md` | any Go test writing |
-| scoring / float math | `.ai/gotchas/scoring.md` | scorer, rules, velocity work |
-| cidranger | `.ai/gotchas/cidranger.md` | threatintel store or IP matching work |
-| maxminddb | `.ai/gotchas/maxminddb.md` | geolookup store or IP geolocation work |
-| fsnotify | `.ai/gotchas/fsnotify.md` | rules loader, hot-reload, or file-watch work |
-| local dev / OrbStack | `.ai/gotchas/local-dev.md` | IDE run config, go mod, local infra |
-| pii HMAC parity | `.ai/gotchas/pii-parity.md` | touching `internal/pii`, `statdict.ContainsHMAC`, or `deadcode` audit output |
-| cloudip duplicated parser | `.ai/gotchas/cloudip-dup.md` | touching either service's `internal/cloudip/` or the upstream cloud-IP list format |
+| Python async + Pydantic + FastAPI | `.ai/gotchas/python.md` | any Python code work |
+| Postgres + asyncpg + JSONB + RLS | `.ai/gotchas/postgres.md` | any schema, migration, or DB-access work |
+| Scoring / float math | `.ai/gotchas/scoring.md` | scorer, rules, velocity work |
+| Local dev / Docker Compose | `.ai/gotchas/local-dev.md` | local stack startup, env config |
 
-## Module → Gotcha Files
+## Module → Gotcha files
 
-When testing a specific module, load these gotcha files:
+When working on a specific module, load these gotcha files:
 
-| Module being tested | Load these gotcha files |
+| Module | Load these gotcha files |
 |---|---|
-| `scoring/scorer.go` | scoring.md, testify.md |
-| `rules/loader.go` | fsnotify.md, testify.md |
-| `velocity/checker.go` | miniredis.md, testify.md |
-| `audit/handler.go` | pgx.md, miniredis.md, testify.md |
-| `ai/handler.go` | pgx.md, testify.md |
-| `feedback/handler.go` | pgx.md, testify.md |
-| `blacklist/syncer.go` | pgx.md, testify.md, miniredis.md |
-| `streams/consumer.go` | miniredis.md, testify.md |
-| `threatintel/*` | cidranger.md, testify.md |
-| `geolookup/*` | maxminddb.md, testify.md |
-| `enrichment.py` | scoring.md |
+| `app/scoring.py` | scoring.md, python.md |
+| `app/rules.py` | scoring.md, python.md |
+| `app/dsl.py` | python.md |
+| `app/baseline.py` | postgres.md, python.md |
+| `app/enrich.py` | postgres.md, python.md |
+| `app/velocity.py` | postgres.md |
+| `app/context.py` | python.md |
+| `app/db.py`, `app/auth.py` | postgres.md, python.md |
+| `app/api/*.py` | python.md |
+| `alembic/versions/*.py` | postgres.md |
 
 ## Maintenance rules
-- **Append** when implementation reveals a behavior that contradicts naive expectations
-- **Promote** to `.ai/conventions.md` when the same gotcha recurs in 3+ different tasks — then delete from here
-- **Expire** when the relevant dependency is upgraded — audit the file and remove stale entries
-- **Never** let a sub-file exceed 30 lines; if it does, promote the oldest/most general entries
+
+- **Append** when implementation reveals a behavior that contradicts naive expectations.
+- **Promote** to `.ai/conventions.md` when the same gotcha recurs in 3+ different tasks — then delete from here.
+- **Expire** when the relevant dependency is upgraded — audit the file and remove stale entries.
+- **Never** let a sub-file exceed 60 lines; if it does, promote the oldest/most general entries to `.ai/conventions.md`.

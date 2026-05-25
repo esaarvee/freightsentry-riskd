@@ -1,34 +1,38 @@
-# Local Dev (OrbStack) Gotchas
+# Local dev gotchas
 
-## Use .orb.local DNS — never localhost or 127.0.0.1
-OrbStack's TCP proxy accepts connections but causes go-redis v9 HELLO handshake timeouts
-when using localhost/127.0.0.1. IDE run configs must use the OrbStack service DNS names.
+## Docker Compose: app + postgres only
+
+`docker-compose.yml` (added in 1B.1) declares two services: `app` (Python 3.13+, FastAPI via uvicorn) and `postgres` (postgres:16-alpine). No Redis, no MySQL, no second worker, no LLM container.
 
 ```
-# WRONG — causes go-redis v9 HELLO timeout
-REDIS_URL=redis://localhost:6379
-FG_DB_HOST=localhost
-
-# CORRECT
-REDIS_URL=redis://redis.freightcom-risk.orb.local:6379
-FG_DB_HOST=postgres.freightcom-risk.orb.local
-FG_PLATFORM_DB_HOST=mysql.freightcom-risk.orb.local
-OLLAMA_URL=http://ollama.freightcom-risk.orb.local:11434
+docker compose up -d           # both services
+docker compose up -d postgres  # postgres only (for host-run tests)
+docker compose down -v         # tear down + delete volumes
 ```
 
-**Exception**: `FG_RULES_ENGINE_ADDR=localhost:50051` is correct — the rules engine runs
-on the host (not in Docker) when launched from the IDE.
+## DB URL hostname differs by execution context
 
-## go mod tidy must run from the service directory, not repo root
-Both Go services have independent go.mod files. Running `go mod tidy` from repo root does nothing.
+Compose-up form: hostname is the service name (`postgres`). From the host (running tests outside the container): `localhost`.
 
-```bash
-# WRONG
-cd /repo && go mod tidy
+```
+# inside the container (e.g. docker compose run --rm app pytest tests/integration/)
+FG_DATABASE_URL=postgresql://riskd:riskd@postgres:5432/riskd
 
-# CORRECT
-cd services/rules-engine && go mod tidy
-cd services/async-worker && go mod tidy
+# from the host
+FG_DATABASE_URL=postgresql://riskd:riskd@localhost:5432/riskd
 ```
 
-Also applies to `go test ./internal/...` and `go build ./...` — always run from the service directory.
+## `.env` is gitignored; `.env.example` is committed
+
+Never commit `.env`. Always copy from `.env.example` and fill in operator-supplied secrets (MaxMind license key, IP2Proxy download token, HMAC secret) locally. CI / staging / prod inject env vars via the platform secret manager.
+
+## Alembic must run with the right `FG_DATABASE_URL`
+
+Round-trip test from the host:
+
+```
+FG_DATABASE_URL=postgresql://riskd:riskd@localhost:5432/riskd \
+  alembic downgrade base && alembic upgrade head
+```
+
+A common foot-gun: running `alembic upgrade head` with the in-container URL (`@postgres:5432`) from the host — it silently fails to connect.
