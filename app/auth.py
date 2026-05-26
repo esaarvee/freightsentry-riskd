@@ -62,6 +62,10 @@ async def require_api_token(
 ) -> AuthContext:
     settings = get_settings()
     if not settings.auth_enabled:
+        # Synthetic principal for local-dev only; production must keep
+        # AUTH_ENABLED=true. Warning level so the wrong-environment case
+        # is loud in non-local log sinks.
+        _log.warning("auth.carveout_active", tenant_id=1, metric=True)
         return AuthContext(tenant_id=1, role="tenant")
 
     token = _extract_bearer(authorization)

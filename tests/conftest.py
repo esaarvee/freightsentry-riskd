@@ -59,7 +59,12 @@ async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
 async def seeded_api_token(
     db_conn: asyncpg.Connection, seeded_tenant: int
 ) -> AsyncIterator[tuple[str, int]]:
-    """Insert an API token for the seeded tenant; yield (plaintext_token, tenant_id)."""
+    """Insert a tenant-role API token; yield (plaintext_token, tenant_id).
+
+    Explicit cleanup (DELETE on api_tokens) runs before the tenant teardown
+    deletes the parent row. Don't rely on FK CASCADE — be explicit so test
+    isolation doesn't depend on schema-level cascade behaviour.
+    """
     plaintext = secrets.token_urlsafe(24)
     token_hash = _hash_token(plaintext)
     await db_conn.execute(
@@ -67,6 +72,23 @@ async def seeded_api_token(
         seeded_tenant,
         token_hash,
         "tenant",
+    )
+    yield plaintext, seeded_tenant
+    await db_conn.execute("DELETE FROM api_tokens WHERE token_hash = $1", token_hash)
+
+
+@pytest_asyncio.fixture
+async def seeded_admin_token(
+    db_conn: asyncpg.Connection, seeded_tenant: int
+) -> AsyncIterator[tuple[str, int]]:
+    """Insert an admin-role API token; yield (plaintext_token, tenant_id)."""
+    plaintext = secrets.token_urlsafe(24)
+    token_hash = _hash_token(plaintext)
+    await db_conn.execute(
+        "INSERT INTO api_tokens (tenant_id, token_hash, role) VALUES ($1, $2, $3)",
+        seeded_tenant,
+        token_hash,
+        "admin",
     )
     yield plaintext, seeded_tenant
     await db_conn.execute("DELETE FROM api_tokens WHERE token_hash = $1", token_hash)
@@ -85,7 +107,9 @@ async def client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
         ) as c:
             yield c
     finally:
-        app.dependency_overrides.clear()
+        # Scoped removal (not clear()) so sibling fixtures that layer their
+        # own overrides don't get wiped.
+        app.dependency_overrides.pop(require_api_token, None)
 
 
 @pytest_asyncio.fixture
