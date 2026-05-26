@@ -9,10 +9,13 @@ import pytest
 from app.velocity import (
     count_ip_daily,
     count_ip_hourly,
+    count_recipient_distinct_customers_30d,
     count_user_30d,
     count_user_daily,
+    count_user_distinct_ips_30d,
     count_user_hourly,
 )
+from tests.conftest import create_tenant_with_token
 
 
 @pytest.fixture
@@ -40,6 +43,7 @@ async def _seed_shipment(
     request_id: str,
     source_ip: str,
     booking_ts: datetime,
+    destination_hmac: str = "stub-hmac-velocity",
 ) -> None:
     await conn.execute(
         """
@@ -50,7 +54,7 @@ async def _seed_shipment(
         )
         VALUES ($1, $2, $3, $4, $5::inet,
                 '{}'::jsonb, '{}'::jsonb, 100, 'web', $6,
-                'stub-hmac-velocity')
+                $7)
         """,
         tenant_id,
         customer_id,
@@ -58,6 +62,7 @@ async def _seed_shipment(
         request_id,
         source_ip,
         booking_ts,
+        destination_hmac,
     )
 
 
@@ -253,3 +258,272 @@ async def test_velocity_scoped_to_tenant(
         from tests.conftest import _cleanup_tenant
 
         await _cleanup_tenant(db_conn, other_tenant)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B.2 helpers: distinct-IP diversity + recipient cross-customer overlap
+# ---------------------------------------------------------------------------
+
+
+async def test_count_user_distinct_ips_30d_counts_unique_ips(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_user: int,
+) -> None:
+    """3 bookings from 2 distinct IPs → 2. Repeats of the same IP do
+    not inflate the count (DISTINCT semantics)."""
+    now = datetime.now(tz=UTC)
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "diversity-1",
+        "203.0.113.1",
+        now - timedelta(days=1),
+    )
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "diversity-2",
+        "203.0.113.2",
+        now - timedelta(days=2),
+    )
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "diversity-3",
+        "203.0.113.1",
+        now - timedelta(days=3),
+    )
+
+    count = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
+    assert count == 2
+
+
+async def test_count_user_distinct_ips_30d_empty(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+) -> None:
+    """Customer with no shipments in the 30-day window returns 0."""
+    count = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
+    assert count == 0
+
+
+async def test_count_user_distinct_ips_30d_excludes_window(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_user: int,
+) -> None:
+    """A 60-day-old shipment from another IP does not contribute — the
+    30-day window is enforced at SQL."""
+    now = datetime.now(tz=UTC)
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "windowed-1",
+        "203.0.113.10",
+        now - timedelta(days=5),
+    )
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "windowed-2",
+        "203.0.113.20",
+        now - timedelta(days=60),
+    )
+
+    count = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
+    assert count == 1
+
+
+async def test_count_user_distinct_ips_30d_excludes_cross_tenant(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_user: int,
+) -> None:
+    """SECURITY: tenant scoping is the boundary. Seed shipments under
+    both tenants from the same IP; the count for seeded_tenant must
+    only include seeded_tenant rows. Symmetric to the recipient cross-
+    tenant test — both helpers share the same tenant-isolation risk
+    class."""
+    now = datetime.now(tz=UTC)
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "ip-iso-a",
+        "203.0.113.50",
+        now - timedelta(days=1),
+    )
+
+    async with create_tenant_with_token(db_conn) as (_token_b, tenant_b):
+        b_customer: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+            tenant_b,
+            "ip-iso-other-cust",
+        )
+        b_user_id: int = await db_conn.fetchval(
+            "INSERT INTO users (tenant_id, customer_id, external_id) VALUES ($1, $2, $3) RETURNING id",
+            tenant_b,
+            b_customer,
+            "ip-iso-other-user",
+        )
+        await _seed_shipment(
+            db_conn,
+            tenant_b,
+            b_customer,
+            b_user_id,
+            "ip-iso-b",
+            "203.0.113.50",
+            now - timedelta(days=1),
+        )
+
+        # seeded_tenant query must NOT see tenant_b's row, even though
+        # both share IP 203.0.113.50.
+        count_a = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
+        assert count_a == 1, f"seeded_tenant should see 1 distinct IP, got {count_a}"
+
+
+async def test_count_recipient_distinct_customers_30d_within_tenant(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_user: int,
+) -> None:
+    """3 different customers in the same tenant shipping to the same
+    destination_hmac → 3."""
+    now = datetime.now(tz=UTC)
+    shared_hmac = "recipient-distinct-within"
+    for i in range(3):
+        cid: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+            seeded_tenant,
+            f"recip-cust-{i}",
+        )
+        await _seed_shipment(
+            db_conn,
+            seeded_tenant,
+            cid,
+            seeded_user,
+            f"recip-w-{i}",
+            f"203.0.113.{100 + i}",
+            now - timedelta(days=1),
+            destination_hmac=shared_hmac,
+        )
+
+    count = await count_recipient_distinct_customers_30d(db_conn, seeded_tenant, shared_hmac)
+    assert count == 3
+
+
+async def test_count_recipient_distinct_customers_30d_excludes_cross_tenant(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_user: int,
+) -> None:
+    """SECURITY-LOAD-BEARING. 2 customers in tenant_a + 2 customers in
+    tenant_b all shipping to the same destination_hmac. Query for
+    tenant_a returns 2 (NOT 4)."""
+    now = datetime.now(tz=UTC)
+    shared_hmac = "recipient-distinct-cross-tenant"
+
+    # Tenant A customers under seeded_tenant + seeded_user.
+    for i in range(2):
+        cid: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+            seeded_tenant,
+            f"recip-a-{i}",
+        )
+        await _seed_shipment(
+            db_conn,
+            seeded_tenant,
+            cid,
+            seeded_user,
+            f"recip-cx-a-{i}",
+            f"203.0.113.{200 + i}",
+            now - timedelta(days=1),
+            destination_hmac=shared_hmac,
+        )
+
+    async with create_tenant_with_token(db_conn) as (_token_b, tenant_b):
+        # Tenant B: bootstrap a customer + user (FK requirements for the
+        # tenant_b shipments below) — neither contributes to the recipient
+        # count since the bootstrap customer doesn't ship anywhere.
+        b_bootstrap_customer: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+            tenant_b,
+            "recip-b-bootstrap-cust",
+        )
+        b_user_id: int = await db_conn.fetchval(
+            "INSERT INTO users (tenant_id, customer_id, external_id) VALUES ($1, $2, $3) RETURNING id",
+            tenant_b,
+            b_bootstrap_customer,
+            "recip-b-bootstrap-user",
+        )
+        for i in range(2):
+            cid: int = await db_conn.fetchval(
+                "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+                tenant_b,
+                f"recip-b-{i}",
+            )
+            await _seed_shipment(
+                db_conn,
+                tenant_b,
+                cid,
+                b_user_id,
+                f"recip-cx-b-{i}",
+                f"203.0.113.{210 + i}",
+                now - timedelta(days=1),
+                destination_hmac=shared_hmac,
+            )
+
+        count_a = await count_recipient_distinct_customers_30d(db_conn, seeded_tenant, shared_hmac)
+        assert count_a == 2, f"tenant_a should see 2 customers, got {count_a}"
+
+        count_b = await count_recipient_distinct_customers_30d(db_conn, tenant_b, shared_hmac)
+        # tenant_b has 2 customers shipping to D plus the 1 bootstrap
+        # customer (not shipping anywhere) — count_b counts only the 2
+        # who actually shipped to the destination.
+        assert count_b == 2, f"tenant_b should see 2 customers, got {count_b}"
+
+
+async def test_count_recipient_distinct_customers_30d_excludes_window(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_user: int,
+) -> None:
+    """Customers whose only matching shipment is 60+ days old don't
+    contribute. The 30-day window cap is the DoS bound (Pattern C3)."""
+    now = datetime.now(tz=UTC)
+    shared_hmac = "recipient-distinct-stale"
+    for i in range(3):
+        cid: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
+            seeded_tenant,
+            f"recip-stale-{i}",
+        )
+        await _seed_shipment(
+            db_conn,
+            seeded_tenant,
+            cid,
+            seeded_user,
+            f"recip-stale-{i}",
+            f"203.0.113.{220 + i}",
+            now - timedelta(days=45),
+            destination_hmac=shared_hmac,
+        )
+
+    count = await count_recipient_distinct_customers_30d(db_conn, seeded_tenant, shared_hmac)
+    assert count == 0
