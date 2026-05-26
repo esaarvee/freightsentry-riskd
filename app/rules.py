@@ -27,60 +27,74 @@ import yaml
 
 from app.dsl import collect_names, parse_condition
 
-ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset({
-    # Request fields
-    "shipment_value",
-    "is_api_booking",
-    "is_platform_booking",
-    "booking_hour_utc",
-    "booking_weekday",
-    # Customer + maturity
-    "customer_observations",
-    "account_age_days",
-    "total_shipments",
-    "flagged_count",
-    "fraud_confirmed_count",
-    "trust_score",
-    # IP enrichment
-    "is_cloud_ip",
-    "is_datacenter_ip",
-    "is_vpn",
-    "is_tor",
-    "is_proxy",
-    "ip_in_level1",
-    "ip_in_level2",
-    "ip_in_threat_list",
-    "ip_threat_score",
-    "ip_country",
-    "ip_distance_km",
-    "ip_country_changed",
-    "ip2p_threat_botnet",
-    "ip2p_threat_scanner",
-    "ip2p_threat_spam",
-    # Familiarity (baseline-derived)
-    "is_new_ip",
-    "ip_fully_new",
-    "ip_family_familiar",
-    "is_new_route",
-    "origin_address_familiar",
-    "destination_address_familiar",
-    "origin_ip_country_familiar",
-    # Velocity (SQL-backed)
-    "velocity_user_hourly",
-    "velocity_user_daily",
-    "velocity_user_30d",
-    "velocity_ip_hourly",
-    "velocity_ip_daily",
-    # Value + cadence
-    "value_zscore",
-    "cadence_zscore_hours",
-    "is_abnormally_dormant",
-    # Email/phone classifiers
-    "is_email_disposable",
-    "is_email_blocklisted",
-    "is_email_suspicious_pattern",
-    "is_phone_dummy_pattern",
-})
+ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
+    {
+        # Request fields
+        "shipment_value",
+        "is_api_booking",
+        "is_platform_booking",
+        "booking_hour_utc",
+        "booking_weekday",
+        # Customer + maturity
+        "customer_observations",
+        "account_age_days",
+        "total_shipments",
+        "flagged_count",
+        "fraud_confirmed_count",
+        "trust_score",
+        # IP enrichment
+        "is_cloud_ip",
+        "is_datacenter_ip",
+        "is_vpn",
+        "is_tor",
+        "is_proxy",
+        "ip_in_level1",
+        "ip_in_level2",
+        "ip_in_threat_list",
+        "ip_threat_score",
+        "ip_country",
+        "ip_distance_km",
+        "ip_country_changed",
+        "ip2p_threat_botnet",
+        "ip2p_threat_scanner",
+        "ip2p_threat_spam",
+        "ip2p_threat_any",
+        "is_residential_asn",
+        # Familiarity (baseline-derived)
+        "ip_familiarity_tier",
+        "is_new_ip",
+        "ip_new_known_asn",
+        "ip_fully_new",
+        "ip_family_familiar",
+        "is_new_route",
+        "origin_address_familiar",
+        "destination_address_familiar",
+        "origin_ip_country_familiar",
+        # Velocity (SQL-backed)
+        "velocity_user_hourly",
+        "velocity_user_daily",
+        "velocity_user_30d",
+        "velocity_ip_hourly",
+        "velocity_ip_daily",
+        "customer_distinct_ips_30d",
+        "recipient_cross_customer_count",
+        # Value + cadence
+        "value_zscore",
+        "cadence_zscore_hours",
+        "is_abnormally_dormant",
+        # Phase 2B Layer-2 / 2C-rule inputs
+        "customer_locked_cloud_api",
+        "customer_locked_web_only",
+        "days_since_last_booking",
+        "is_new_user",
+        "impossible_travel",
+        # Email/phone classifiers
+        "is_email_disposable",
+        "is_email_blocklisted",
+        "is_email_suspicious_pattern",
+        "is_phone_dummy_pattern",
+    }
+)
 
 
 ActionLiteral = Literal["", "BLOCK"]
@@ -153,19 +167,19 @@ def load_rules(yaml_path: Path) -> RuleSet:
             # (violates the .ai/decisions.md guardrail "no negative-
             # weight rules"); weights > 1 would push score above the
             # band ceiling. Fail fast at lifespan startup.
-            msg = (
-                f"rule {raw['name']!r}: weight {weight} must be in [0.0, 1.0]"
-            )
+            msg = f"rule {raw['name']!r}: weight {weight} must be in [0.0, 1.0]"
             raise ValueError(msg)
 
         evaluator = parse_condition(condition)
-        rules.append(Rule(
-            name=raw["name"],
-            description=raw.get("description", ""),
-            condition=condition,
-            weight=weight,
-            action=action_raw,
-            maturity_sensitive=bool(raw.get("maturity_sensitive", False)),
-            evaluator=evaluator,
-        ))
+        rules.append(
+            Rule(
+                name=raw["name"],
+                description=raw.get("description", ""),
+                condition=condition,
+                weight=weight,
+                action=action_raw,
+                maturity_sensitive=bool(raw.get("maturity_sensitive", False)),
+                evaluator=evaluator,
+            )
+        )
     return RuleSet(rules=tuple(rules), thresholds=thresholds)
