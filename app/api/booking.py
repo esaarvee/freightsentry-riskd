@@ -136,6 +136,7 @@ async def evaluate_booking(
             if payload.contact and payload.contact.origin_email
             else None
         )
+        destination_hmac = hmac_hex(payload.shipment.destination.address, secret)
 
         # Fold THIS booking into the baseline (positive observation).
         baseline.add_observation(
@@ -162,11 +163,13 @@ async def evaluate_booking(
             """
             INSERT INTO shipments (
                 tenant_id, customer_id, user_id, request_id, source_ip,
-                origin, destination, value, channel, booking_ts
+                origin, destination, value, channel, booking_ts,
+                destination_hmac
             )
             VALUES (
                 $1, $2, $3, $4, $5,
-                $6::jsonb, $7::jsonb, $8, $9, $10
+                $6::jsonb, $7::jsonb, $8, $9, $10,
+                $11
             )
             RETURNING id
             """,
@@ -180,6 +183,7 @@ async def evaluate_booking(
             payload.shipment.value,
             payload.shipment.channel,
             payload.booking_ts,
+            destination_hmac,
         )
 
         # Persist decision.
