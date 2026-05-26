@@ -104,3 +104,48 @@ rules:
     condition: "NOT origin_ip_country_familiar AND customer_observations >= 10"
     weight: 0.3
     maturity_sensitive: true
+
+  # =====================================================================
+  # Phase 2C.1 — Trust-conditioned rules
+  # Layer 2 in 2A.3 made trust_score meaningful at scoring time; these
+  # rules fire when low trust + corroborating evidence compound.
+  # =====================================================================
+
+  - name: very_low_trust
+    description: "Customer trust below 0.2 — broad reputational baseline"
+    condition: "trust_score < 0.2"
+    weight: 0.15
+    maturity_sensitive: true
+
+  - name: low_trust_high_value
+    description: "Low-trust customer attempting a high-value booking"
+    condition: "trust_score < 0.3 AND shipment_value > 1000"
+    weight: 0.20
+    maturity_sensitive: true
+
+  - name: low_trust_vpn
+    description: "Low-trust customer arriving from VPN infrastructure"
+    condition: "trust_score < 0.3 AND is_vpn"
+    weight: 0.20
+    maturity_sensitive: true
+
+  - name: very_low_trust_velocity
+    description: "Very-low-trust customer with hourly booking burst (>3)"
+    condition: "trust_score < 0.2 AND velocity_user_hourly > 3"
+    weight: 0.35
+    maturity_sensitive: true
+
+  - name: threat_score_moderate
+    description: "IP threat composite score above 0.5"
+    condition: "ip_threat_score > 0.5"
+    weight: 0.25
+
+  - name: flags_with_value
+    description: "Customer with >3 prior flags attempting a high-value booking"
+    condition: "flagged_count > 3 AND shipment_value > 2000"
+    weight: 0.40
+
+  - name: vpn_known_user
+    description: "Established customer (not new) booking from VPN"
+    condition: "is_vpn AND NOT is_new_user"
+    weight: 0.25
