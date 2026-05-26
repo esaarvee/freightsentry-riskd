@@ -157,6 +157,36 @@ class CustomerBaseline:
         `customer_observations` (operator amendment 2026-05-25)."""
         return self.value_n
 
+    @property
+    def cloud_share(self) -> float:
+        """Share of decay-weighted IP observations from cloud IPs.
+
+        Returns 0.0 when the customer has no IP-type observations. The
+        ratio is stable under uniform decay (numerator and denominator
+        decay by the same factor).
+        """
+        total = sum(self.ip_type_hist.values())
+        if total <= 0:
+            return 0.0
+        return float(self.ip_type_hist.get("cloud", 0.0)) / total
+
+    @property
+    def api_share(self) -> float:
+        """Share of decay-weighted bookings from the api channel."""
+        total = sum(self.channel_hist.values())
+        if total <= 0:
+            return 0.0
+        return float(self.channel_hist.get("api", 0.0)) / total
+
+    def days_since_last_booking(self, now_ts: datetime) -> int | None:
+        """Whole-day count since last_booking_ts. Returns None for the
+        first-ever booking (no prior baseline observation). Negative
+        deltas (now_ts in the past) clamp to 0."""
+        if self.last_booking_ts is None:
+            return None
+        delta = now_ts - self.last_booking_ts
+        return max(0, delta.days)
+
     # -----------------------------------------------------------------------
     # Load
     # -----------------------------------------------------------------------
@@ -211,8 +241,7 @@ class CustomerBaseline:
             )
             if row is None:
                 msg = (
-                    "customer_baselines row not found after reserve-insert — "
-                    "concurrency anomaly"
+                    "customer_baselines row not found after reserve-insert — " "concurrency anomaly"
                 )
                 raise RuntimeError(msg)
         return cls._from_row(row)
@@ -248,8 +277,12 @@ class CustomerBaseline:
             cadence_mean_h=float(row["cadence_mean_h"]),
             cadence_m2_h=float(row["cadence_m2_h"]),
             last_booking_ts=row["last_booking_ts"],
-            last_booking_lat=float(row["last_booking_lat"]) if row["last_booking_lat"] is not None else None,
-            last_booking_lon=float(row["last_booking_lon"]) if row["last_booking_lon"] is not None else None,
+            last_booking_lat=float(row["last_booking_lat"])
+            if row["last_booking_lat"] is not None
+            else None,
+            last_booking_lon=float(row["last_booking_lon"])
+            if row["last_booking_lon"] is not None
+            else None,
             last_booking_country=row["last_booking_country"],
             decay_anchor_date=row["decay_anchor_date"],
             first_seen=row["first_seen"],
@@ -285,11 +318,19 @@ class CustomerBaseline:
         # Other stat-dicts — uniform 90 d
         default_factor = _decay_factor(delta_days, HALF_LIFE_DEFAULT)
         for sd in (
-            self.origin_stats, self.dest_stats, self.lane_stats,
-            self.ip_netblock_stats, self.ip_asn_stats, self.country_stats,
-            self.origin_ip_country_stats, self.email_hmacs, self.phone_hmacs,
-            self.rejected_email_hmacs, self.rejected_phone_hmacs,
-            self.email_domain_stats, self.phone_prefix_stats,
+            self.origin_stats,
+            self.dest_stats,
+            self.lane_stats,
+            self.ip_netblock_stats,
+            self.ip_asn_stats,
+            self.country_stats,
+            self.origin_ip_country_stats,
+            self.email_hmacs,
+            self.phone_hmacs,
+            self.rejected_email_hmacs,
+            self.rejected_phone_hmacs,
+            self.email_domain_stats,
+            self.phone_prefix_stats,
         ):
             for entry in sd.values():
                 entry["n"] = float(entry.get("n", 0.0)) * default_factor
@@ -507,18 +548,35 @@ class CustomerBaseline:
                 last_seen                = now(),
                 updated_at               = now()
             """,
-            self.tenant_id, self.customer_id,
-            json.dumps(self.origin_stats), json.dumps(self.dest_stats),
-            json.dumps(self.lane_stats), json.dumps(self.ip_stats),
-            json.dumps(self.ip_netblock_stats), json.dumps(self.ip_asn_stats),
-            json.dumps(self.country_stats), json.dumps(self.origin_ip_country_stats),
-            json.dumps(self.email_hmacs), json.dumps(self.phone_hmacs),
-            json.dumps(self.rejected_email_hmacs), json.dumps(self.rejected_phone_hmacs),
-            json.dumps(self.email_domain_stats), json.dumps(self.phone_prefix_stats),
-            json.dumps(self.ip_type_hist), json.dumps(self.hour_hist),
-            json.dumps(self.weekday_hist), json.dumps(self.channel_hist),
-            self.value_n, self.value_mean, self.value_m2,
-            self.cadence_n, self.cadence_mean_h, self.cadence_m2_h,
-            self.last_booking_ts, self.last_booking_lat, self.last_booking_lon,
-            self.last_booking_country, self.decay_anchor_date,
+            self.tenant_id,
+            self.customer_id,
+            json.dumps(self.origin_stats),
+            json.dumps(self.dest_stats),
+            json.dumps(self.lane_stats),
+            json.dumps(self.ip_stats),
+            json.dumps(self.ip_netblock_stats),
+            json.dumps(self.ip_asn_stats),
+            json.dumps(self.country_stats),
+            json.dumps(self.origin_ip_country_stats),
+            json.dumps(self.email_hmacs),
+            json.dumps(self.phone_hmacs),
+            json.dumps(self.rejected_email_hmacs),
+            json.dumps(self.rejected_phone_hmacs),
+            json.dumps(self.email_domain_stats),
+            json.dumps(self.phone_prefix_stats),
+            json.dumps(self.ip_type_hist),
+            json.dumps(self.hour_hist),
+            json.dumps(self.weekday_hist),
+            json.dumps(self.channel_hist),
+            self.value_n,
+            self.value_mean,
+            self.value_m2,
+            self.cadence_n,
+            self.cadence_mean_h,
+            self.cadence_m2_h,
+            self.last_booking_ts,
+            self.last_booking_lat,
+            self.last_booking_lon,
+            self.last_booking_country,
+            self.decay_anchor_date,
         )
