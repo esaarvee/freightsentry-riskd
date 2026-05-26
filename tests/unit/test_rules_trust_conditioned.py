@@ -144,7 +144,9 @@ def test_vpn_known_user_excludes_new(ruleset: RuleSet) -> None:
 
 
 def test_all_trust_conditioned_rules_load(ruleset: RuleSet) -> None:
-    """All 7 rules added in 2C.1 must be present after rule-loader runs."""
+    """All 7 rules added in 2C.1 must be present after rule-loader runs.
+    Set-membership only — the canonical total-count audit lives in 2C.7,
+    so per-commit count assertions don't churn as later commits land."""
     expected = {
         "very_low_trust",
         "low_trust_high_value",
@@ -157,8 +159,3 @@ def test_all_trust_conditioned_rules_load(ruleset: RuleSet) -> None:
     actual = {r.name for r in ruleset.rules}
     missing = expected - actual
     assert not missing, f"missing trust-conditioned rules: {missing}"
-
-
-def test_total_rule_count_after_2c1(ruleset: RuleSet) -> None:
-    """Phase 1 baseline = 14; 2C.1 adds 7 → 21."""
-    assert len(ruleset.rules) == 21

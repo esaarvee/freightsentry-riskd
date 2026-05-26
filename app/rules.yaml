@@ -149,3 +149,37 @@ rules:
     description: "Established customer (not new) booking from VPN"
     condition: "is_vpn AND NOT is_new_user"
     weight: 0.25
+
+  # =====================================================================
+  # Phase 2C.2 — Dormancy + customer lock-in (case-1 / case-2 ATO
+  # primary detectors). Dormancy = silent customer suddenly active;
+  # lock-in = customer's strong baseline (cloud+api or web-only)
+  # being violated by the current booking's infrastructure shape.
+  # =====================================================================
+
+  - name: dormant_vpn
+    description: "Dormant customer suddenly active over VPN"
+    condition: "is_abnormally_dormant AND is_vpn"
+    weight: 0.55
+
+  - name: dormant_new_ip
+    description: "Dormant customer suddenly active from a fully-new IP"
+    condition: "is_abnormally_dormant AND ip_fully_new"
+    weight: 0.35
+    maturity_sensitive: true
+
+  - name: ip_distance_dormant
+    description: "Dormant customer reactivating from an IP >1000km from last booking"
+    condition: "ip_distance_km > 1000 AND is_abnormally_dormant"
+    weight: 0.40
+    maturity_sensitive: true
+
+  - name: cloud_api_customer_deviation_iptype
+    description: "Established cloud+API customer booking from a non-cloud, non-datacenter IP"
+    condition: "customer_locked_cloud_api AND is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip AND customer_observations >= 20"
+    weight: 0.55
+
+  - name: locked_customer_unfamiliar_ip
+    description: "Established cloud+API customer arriving from a fully-new IP"
+    condition: "customer_locked_cloud_api AND is_api_booking AND ip_fully_new AND customer_observations >= 20"
+    weight: 0.45
