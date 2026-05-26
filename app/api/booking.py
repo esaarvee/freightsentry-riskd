@@ -97,29 +97,10 @@ async def evaluate_booking(
             msg = "customer row vanished after upsert — should not happen"
             raise RuntimeError(msg)
 
-        # Build Context (parallel reads + decay + derived flags). Baseline
-        # is loaded FOR UPDATE inside this transaction.
-        context_env, baseline, enrichment = await build_context(
-            conn,
-            tenant_id=auth.tenant_id,
-            customer_id=customer_id,
-            customer_row=customer_row,
-            enricher=enricher,
-            payload=payload,
-        )
-
-        # Score. CustomerState carries the Layer 2 inputs (trust + maturity
-        # + flags) typed; build_context() populated these into ctx already.
-        customer_state = CustomerState(
-            trust_score=context_env["trust_score"],
-            account_age_days=context_env["account_age_days"],
-            total_shipments=context_env["total_shipments"],
-            flagged_count=context_env["flagged_count"],
-        )
-        result = score(ruleset, context_env, customer_state=customer_state)
-
         # HMAC PII at ingress (real hmac_hex now that signal_helpers ships).
-        # Plaintext does not propagate past this point.
+        # Plaintext does not propagate past this point. destination_hmac
+        # is computed up-front because build_context() needs it for the
+        # recipient cross-customer count query.
         secret = settings.hmac_secret.encode("utf-8")
         email_hmac = (
             hmac_hex(payload.contact.origin_email, secret)
@@ -137,6 +118,28 @@ async def evaluate_booking(
             else None
         )
         destination_hmac = hmac_hex(payload.shipment.destination.address, secret)
+
+        # Build Context (sequential reads + decay + derived flags). Baseline
+        # is loaded FOR UPDATE inside this transaction.
+        context_env, baseline, enrichment = await build_context(
+            conn,
+            tenant_id=auth.tenant_id,
+            customer_id=customer_id,
+            customer_row=customer_row,
+            enricher=enricher,
+            payload=payload,
+            destination_hmac=destination_hmac,
+        )
+
+        # Score. CustomerState carries the Layer 2 inputs (trust + maturity
+        # + flags) typed; build_context() populated these into ctx already.
+        customer_state = CustomerState(
+            trust_score=context_env["trust_score"],
+            account_age_days=context_env["account_age_days"],
+            total_shipments=context_env["total_shipments"],
+            flagged_count=context_env["flagged_count"],
+        )
+        result = score(ruleset, context_env, customer_state=customer_state)
 
         # Fold THIS booking into the baseline (positive observation).
         baseline.add_observation(
