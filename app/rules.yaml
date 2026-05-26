@@ -242,3 +242,66 @@ rules:
     description: "Destination address shipped to by >10 distinct customers in this tenant (30d) — likely fraud-ring drop point"
     condition: "recipient_cross_customer_count > 10"
     weight: 0.60
+
+  # =====================================================================
+  # Phase 2C.5 — Velocity (additional) + identity-novelty rules
+  # Velocity-spike rules complementing Phase 1's basic customer_daily_
+  # volume_spike, plus simple identity-novelty rules.
+  # =====================================================================
+
+  - name: velocity_spike_hourly_ui
+    description: "Hourly velocity burst on the UI channel (>60 in an hour)"
+    condition: "is_platform_booking AND velocity_user_hourly > 60"
+    weight: 0.45
+    maturity_sensitive: true
+
+  - name: velocity_spike_hourly_api
+    description: "Hourly velocity burst on the API channel (>500 in an hour)"
+    condition: "is_api_booking AND velocity_user_hourly > 500"
+    weight: 0.25
+    maturity_sensitive: true
+
+  - name: velocity_spike_daily_ui
+    description: "Daily UI velocity spike (>300/day) on a relatively new account"
+    condition: "is_platform_booking AND velocity_user_daily > 300 AND customer_observations < 30"
+    weight: 0.35
+
+  - name: velocity_spike_daily_api
+    description: "Daily API velocity spike (>50/day) on a relatively new account (tuned per verification §2.2)"
+    condition: "is_api_booking AND velocity_user_daily > 50 AND customer_observations < 30"
+    weight: 0.25
+
+  - name: ip_velocity_threat
+    description: "IP velocity >5/day combined with threat-list membership"
+    condition: "velocity_ip_daily > 5 AND ip_in_threat_list"
+    weight: 0.35
+
+  - name: user_velocity_vpn
+    description: "Customer daily velocity >3 combined with VPN"
+    condition: "velocity_user_daily > 3 AND is_vpn"
+    weight: 0.30
+
+  - name: user_velocity_new_user
+    description: "New user posting >3 bookings per day"
+    condition: "velocity_user_daily > 3 AND is_new_user"
+    weight: 0.35
+
+  - name: dummy_email_blocklisted
+    description: "Contact email matches a known blocklist (high-confidence spam/abuse signal)"
+    condition: "is_email_blocklisted"
+    weight: 0.55
+
+  - name: dummy_email_suspicious_pattern
+    description: "Contact email matches a suspicious-pattern heuristic"
+    condition: "is_email_suspicious_pattern"
+    weight: 0.30
+
+  - name: vpn_new_user
+    description: "New user arriving via VPN"
+    condition: "is_vpn AND is_new_user"
+    weight: 0.40
+
+  - name: high_value_new_user
+    description: "Brand-new user attempting a high-value (>5000) shipment"
+    condition: "shipment_value > 5000 AND is_new_user"
+    weight: 0.35
