@@ -22,6 +22,7 @@ from typing import Any
 
 import asyncpg
 import pytest
+import structlog
 from httpx import AsyncClient
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
@@ -116,9 +117,10 @@ async def test_unfamiliar_ip_against_established_customer_triggers_signals(
     await _seed_established_customer(db_conn, tenant_id)
 
     payload = _seed_payload(request_id="case2-first-residential", source_ip="198.51.100.42")
-    response = await unauth_client.post(
-        _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
-    )
+    with structlog.testing.capture_logs() as captured:
+        response = await unauth_client.post(
+            _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
+        )
     assert response.status_code == 200
     body = response.json()
 
@@ -130,6 +132,26 @@ async def test_unfamiliar_ip_against_established_customer_triggers_signals(
 
     # Real scoring ran — the 1C.1 stub ALLOW 0.0 is gone.
     assert body["score"] > 0.0, "Phase 1 stub ALLOW 0.0 should be replaced by real scoring"
+
+    # Observability sanity: risk.evaluation log emitted with the full
+    # Layer 2 + Layer 3 component set tagged metric=True for the Phase 5
+    # CloudWatch sink. Locate by event name; the booking endpoint emits
+    # exactly one per request.
+    risk_events = [e for e in captured if e.get("event") == "risk.evaluation"]
+    assert (
+        len(risk_events) == 1
+    ), f"Expected exactly one risk.evaluation event; got {len(risk_events)}"
+    event = risk_events[0]
+    assert event["metric"] is True
+    assert event["request_id"] == "case2-first-residential"
+    # Case-2 customer: age=90d (age_frac=0.5), shipments=20 (ship_frac=0.4)
+    # → maturity = 0.20. base_prior = 0.10 * (1 - 0.20) = 0.08 — strict
+    # `> 0` catches the Layer 2 short-circuit regression class. The 0.0
+    # lower bound on the others is structural (noisy-OR cannot go negative).
+    assert event["account_prior"] > 0.0
+    assert event["signal_score"] >= 0.0
+    assert 0.0 < event["maturity"] < 1.0
+    assert event["score"] == pytest.approx(body["score"])
 
 
 async def test_velocity_burst_from_one_ip_trips_ip_velocity_high_ui(

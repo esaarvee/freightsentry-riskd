@@ -216,13 +216,18 @@ async def evaluate_booking(
         )
 
     _log.info(
-        "booking.evaluated",
-        request_id=payload.request_id,
+        "risk.evaluation",
+        metric=True,
         tenant_id=auth.tenant_id,
+        request_id=payload.request_id,
         decision=result.decision,
         score=result.score,
-        rule_count=len(result.triggered_rules),
-        metric=True,
+        account_prior=result.account_prior,
+        signal_score=result.signal_score,
+        maturity=result.maturity,
+        triggered_rules=list(result.triggered_rules),
+        trust_score=context_env["trust_score"],
+        flagged_count=context_env["flagged_count"],
     )
     return BookingResponse(
         request_id=payload.request_id,
