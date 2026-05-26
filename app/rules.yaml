@@ -221,3 +221,24 @@ rules:
     description: "Established web-only customer suddenly using the API channel"
     condition: "customer_locked_web_only AND is_api_booking AND customer_observations >= 20"
     weight: 0.50
+
+  # =====================================================================
+  # Phase 2C.4 — Recipient overlap rules
+  # Cross-customer destination-hmac overlap detection. Tier-disjoint:
+  # the lower-weight `_many_customers` rule fires in the 4-10 range,
+  # the higher-weight `_very_many_customers` rule fires for >10. The
+  # upper bound on the lower rule prevents both firing simultaneously
+  # (avoiding noisy-OR compounding that the freight_risk catalogue
+  # source did not intend).
+  # =====================================================================
+
+  - name: recipient_used_by_many_customers
+    description: "Destination address shipped to by 4-10 distinct customers in this tenant (30d)"
+    condition: "recipient_cross_customer_count > 3 AND recipient_cross_customer_count <= 10 AND customer_observations >= 10"
+    weight: 0.40
+    maturity_sensitive: true
+
+  - name: recipient_used_by_very_many_customers
+    description: "Destination address shipped to by >10 distinct customers in this tenant (30d) — likely fraud-ring drop point"
+    condition: "recipient_cross_customer_count > 10"
+    weight: 0.60
