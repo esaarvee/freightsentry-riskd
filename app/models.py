@@ -1,0 +1,97 @@
+"""Pydantic v2 request/response models for the booking endpoint.
+
+Booking payload schema per .ai/decisions.md § Endpoints. Required fields
+listed in the inner models without `= None`; optional fields default to
+None so absence is distinguishable from a sentinel (the booking endpoint
+upserts customers using COALESCE so a None field leaves the existing DB
+value alone).
+"""
+
+from datetime import datetime
+from decimal import Decimal
+from ipaddress import IPv4Address
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class Address(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    address: str
+    city: str | None = None
+    country: str | None = None
+    postal_code: str | None = None
+
+
+class CustomerData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    external_id: str
+    registered_address: str | None = None
+    business_name: str | None = None
+    first_seen_at: datetime | None = None
+    is_api_partner: bool | None = None
+
+
+class EnterpriseData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    external_id: str
+
+
+class UserData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    external_id: str
+    first_seen_at: datetime | None = None
+
+
+class ShipmentData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    origin: Address
+    destination: Address
+    value: Decimal = Field(..., ge=Decimal("0"))
+    channel: str
+
+
+class ContactData(BaseModel):
+    """PII fields. HMAC at ingress lands 1D.1 (signal_helpers.hmac_hex)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin_email: str | None = None
+    origin_phone: str | None = None
+    destination_email: str | None = None
+    destination_phone: str | None = None
+
+
+class BookingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str
+    customer: CustomerData
+    user: UserData
+    source_ip: IPv4Address  # v1 is IPv4-only per .ai/decisions.md
+    shipment: ShipmentData
+    booking_ts: datetime
+
+    enterprise: EnterpriseData | None = None
+    contact: ContactData | None = None
+
+
+class RiskFactor(BaseModel):
+    name: str
+    description: str
+    weight: float
+
+
+class BookingResponse(BaseModel):
+    request_id: str
+    decision: Literal["ALLOW", "REVIEW", "BLOCK"]
+    score: float = Field(..., ge=0.0, le=1.0)
+    classification: Literal["GREEN", "YELLOW", "RED"]
+    risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    triggered_rules: list[str]
+    risk_factors: list[RiskFactor]

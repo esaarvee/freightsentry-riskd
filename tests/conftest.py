@@ -46,12 +46,29 @@ async def db_conn(_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
 
 @pytest_asyncio.fixture
 async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
-    """Insert a tenant; cleanup on teardown."""
+    """Insert a tenant; cleanup all dependent rows on teardown.
+
+    FKs are non-CASCADE in the migration (deliberate — prevents accidental
+    bulk deletes in production). The fixture compensates by deleting in
+    reverse-FK order so tests don't have to.
+    """
     tenant_id: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
         f"test-tenant-{secrets.token_hex(4)}",
     )
     yield tenant_id
+    for table in (
+        "feedback",
+        "decisions",
+        "customer_baselines",
+        "shipments",
+        "users",
+        "customers",
+        "enterprises",
+        "api_tokens",
+        "app_users",
+    ):
+        await db_conn.execute(f"DELETE FROM {table} WHERE tenant_id = $1", tenant_id)
     await db_conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
 
 
