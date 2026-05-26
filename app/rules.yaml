@@ -414,3 +414,47 @@ rules:
     description: "IP flagged as open proxy (NOT VPN and NOT Tor — distinct proxy class)"
     condition: "is_proxy AND NOT is_vpn AND NOT is_tor"
     weight: 0.30
+
+  # =====================================================================
+  # Phase 2C.7 — IP-familiarity tier + closing pieces
+  # The 3 IP-familiarity-tier rules from freight_risk plus 2 compound
+  # rules whose conditions re-use existing fields without adaptation.
+  #
+  # Triaged from this commit per plan (reason in PLAN_PHASE_2C.md):
+  # - unknown_email_for_customer, unknown_phone_for_customer: would
+  #   require adapted condition (proxy fields). Defer to Phase 3+
+  #   when is_new_email / is_new_phone fields land.
+  # - user_ip_rotation_elevated, user_ip_rotation_high: would require
+  #   semantic mismatch (customer_distinct_ips_30d vs
+  #   user_unique_non_cloud_ips_daily — different metrics). Defer
+  #   until a proper distinct-non-cloud-IP counter lands.
+  # =====================================================================
+
+  - name: ip_family_familiar_cloud
+    description: "Cloud IP from a familiar /24 — known infrastructure, low signal"
+    condition: "ip_family_familiar AND is_cloud_ip AND customer_observations >= 10"
+    weight: 0.05
+    maturity_sensitive: true
+
+  - name: ip_family_familiar_residential
+    description: "Residential IP from a familiar /24 — higher signal than cloud"
+    condition: "ip_family_familiar AND NOT is_cloud_ip AND customer_observations >= 10"
+    weight: 0.15
+    maturity_sensitive: true
+
+  - name: ip_new_known_asn_rule
+    description: "New IP and /24 but from a known ASN for this established customer"
+    condition: "ip_new_known_asn AND customer_observations >= 20"
+    weight: 0.30
+    maturity_sensitive: true
+
+  - name: value_novelty_compound
+    description: "Above-baseline value combined with fully-new IP for an established customer"
+    condition: "value_zscore > 1.5 AND ip_fully_new AND customer_observations >= 20"
+    weight: 0.35
+    maturity_sensitive: true
+
+  - name: locked_customer_new_ip_family
+    description: "Locked cloud+API customer arriving from a known-ASN but new IP — narrower than locked_customer_unfamiliar_ip"
+    condition: "customer_locked_cloud_api AND is_api_booking AND ip_new_known_asn AND customer_observations >= 20"
+    weight: 0.30
