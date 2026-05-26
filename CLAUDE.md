@@ -36,7 +36,7 @@ When planning work, create a logical sequence of atomic commits. Each commit in 
 
 Defaults (do NOT ask the user — they are pre-decided in this file):
 
-- **Review cadence**: every code-path commit runs the full parallel review panel; every doc-only commit runs the doc-reviewer. The "When to Skip" clause below covers trivial cases (typo / comment / whitespace / config-only).
+- **Review cadence**: every code-path commit runs the full parallel review panel; every doc-only commit runs the doc-reviewer. Trivial-path commits skip reviewers entirely (see "Triage gate" below). Lightweight-path commits run a narrowly scoped subset.
 - **Max review cycles**: iterate until APPROVED WITH RESERVATIONS or higher; if still not approved after **3 cycles**, stop and surface the disagreement to the user. The cap is an escape hatch for reviewer/code deadlock, not a quality compromise.
 
 The only per-plan preference still asked via AskUserQuestion:
@@ -83,20 +83,41 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
 |---|---|
 | Python lint | `ruff check app/ tests/` |
 | Python type-check | `mypy app/` |
-| Tests | `pytest tests/ -v --asyncio-mode=auto` |
+| Tests (full) | `pytest tests/ -v --asyncio-mode=auto` |
+| Tests (unit only, fast) | `pytest tests/unit/ -x --no-header -q` |
 | Schema migrate (local) | `docker compose exec app alembic upgrade head` |
 | Schema round-trip | `docker compose exec app alembic downgrade base && docker compose exec app alembic upgrade head` |
 | Schema verify | `docker compose exec postgres psql -U riskd -d riskd -c '\dt+ public'` |
 | Local stack up | `docker compose up -d` |
 | Local stack down | `docker compose down -v` |
 
+### Pre-commit enforcement
+
+Validation gates run via `pre-commit` hooks as non-bypassable enforcement. Configuration in `.pre-commit-config.yaml` at repo root.
+
+Hooks fire on `git commit` and block the commit if any fail:
+
+- `ruff check --fix --exit-non-zero-on-fix` — lint with auto-fix
+- `ruff format` — Python formatting
+- `mypy app/` (strict mode) — type checking on `app/` only
+- `pytest tests/unit/ -x --no-header -q` — fast unit tests only (integration tests in `tests/integration/` are too slow for the per-commit hook)
+
+Install once per worktree:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Subagents MUST NOT mark a task done until pre-commit passes locally. Failures from pre-commit are the implementer's responsibility to fix; they are NOT material for the reviewer panel — if pre-commit catches it, reviewers shouldn't need to.
+
+**Bypass policy.** `git commit --no-verify` is allowed only for declared-break commits introducing transitional state, and only when the declared break explicitly names which gates are bypassed and why. The next commit in the same plan must restore the gates. Outside declared breaks, `--no-verify` is a workflow violation — reviewers flag any commit using `--no-verify` without matching declared-break documentation as a process failure.
+
 ### 6-Step Commit Cycle
 
 1. **Implement** — write the code changes for one planned commit
-2. **Validate** — run the validation commands for the affected paths. All must pass.
-3. **Review** — first detect commit type, then route to the appropriate review panel.
-
-   **Detect commit type**: collect all changed file paths via `git diff --name-only HEAD` and `git diff --cached --name-only` (which includes newly staged files). If EVERY changed file is a `.md` file (anywhere in the repo), under `.ai/`, or under `docs/` → **doc-only path**. If ANY file falls outside those patterns (`.py`, `.yaml`, `.sql`, `.json`, `Dockerfile`, `.toml`, etc.) → **code path**.
+2. **Validate** — run the validation commands for the affected paths. Pre-commit hooks enforce the basic gates (lint, format, types, unit tests); the agent runs broader validation as needed (integration tests, schema round-trip).
+3. **Review** — first apply the triage gate, then route to the appropriate reviewer panel (see "Triage gate and reviewer routing" below).
 
    **Slice the plan file in the invocation prompt**: when a plan file is in play, do not have reviewers read the whole file. Specify the current commit position (commit number + brief title) and the section ranges or section headers for the current commit and upcoming commits N+1 through M. Reviewers fetch only those sections via Read offset/limit or section anchors.
 
@@ -104,7 +125,7 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
 
    The reviewer agents are tuned to load plan context lazily — telling them up-front which sections matter avoids loading thousands of lines of unrelated commit history per cycle.
 
-   **Doc-only path** (single agent):
+   **Doc-only path** (single agent, applies to triage-gate documentation routes):
    - Doc Reviewer: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/doc-reviewer.md and follow its instructions to review the current uncommitted changes.")`
 
    Doc-only merge gate:
@@ -113,9 +134,9 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
    - MINOR TWEAKS → accept with note
    - PUBLISH → proceed
 
-   **Code path** — invoke all reviewer agents as PARALLEL subagents:
+   **Code path** — invoke reviewer agents as PARALLEL subagents per the routing in "Triage gate and reviewer routing".
 
-   Always run:
+   Standard-panel agents:
    - Senior Engineer Reviewer: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/senior-engineer-reviewer.md and follow its instructions to review the current uncommitted changes. Run git diff to see the changes.")`
    - Security Auditor: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/security-auditor.md and follow its instructions to review the current uncommitted changes. Run git diff to see the changes.")`
    - Code Flow Reviewer: `Agent(subagent_type="general-purpose", prompt="Read .claude/agents/code-flow-reviewer.md and follow its instructions to review the current uncommitted changes. Run git diff to see the changes.")`
@@ -151,72 +172,91 @@ Cases that are NOT declared breaks (flag normally, do not suppress):
 
 | Agent | File | Verdicts | Invoked When |
 |---|---|---|---|
-| Senior Engineer | `.claude/agents/senior-engineer-reviewer.md` | REJECT → NEEDS MAJOR WORK → NEEDS MINOR FIXES → APPROVED WITH RESERVATIONS → SHIP IT | Every code-path commit cycle |
-| Security Auditor | `.claude/agents/security-auditor.md` | CRITICAL VULNERABILITY → HIGH RISK → MEDIUM RISK → LOW RISK / CLEAN | Every code-path commit cycle |
-| Code Flow Reviewer | `.claude/agents/code-flow-reviewer.md` | REJECT → NEEDS REFACTOR → MINOR ISSUES → CLEAN | Every code-path commit cycle |
+| Senior Engineer | `.claude/agents/senior-engineer-reviewer.md` | REJECT → NEEDS MAJOR WORK → NEEDS MINOR FIXES → APPROVED WITH RESERVATIONS → SHIP IT | Standard-panel code commits |
+| Security Auditor | `.claude/agents/security-auditor.md` | CRITICAL VULNERABILITY → HIGH RISK → MEDIUM RISK → LOW RISK / CLEAN | Standard-panel code commits |
+| Code Flow Reviewer | `.claude/agents/code-flow-reviewer.md` | REJECT → NEEDS REFACTOR → MINOR ISSUES → CLEAN | Standard-panel code commits |
 | Test Reviewer | `.claude/agents/test-reviewer.md` | GARBAGE → NEEDS WORK → ACCEPTABLE → ACTUALLY GOOD | Tests changed |
 | DB Reviewer | `.claude/agents/db-reviewer.md` | REJECT → NEEDS MAJOR WORK → NEEDS MINOR FIXES → APPROVED WITH RESERVATIONS → SHIP IT | `alembic/versions/`, `*.sql`, or ORM/Pydantic model files in diff |
 | Doc Reviewer | `.claude/agents/doc-reviewer.md` | REJECT → NEEDS EDITS → MINOR TWEAKS → PUBLISH | Doc-only commits |
 
-### Reviewer routing decision tree
+### Triage gate and reviewer routing
 
-After detecting code-path (per step 3 above), classify the diff and route accordingly. Apply rules in order; first match wins. The **Never Skip** override applies regardless.
+Apply the triage gate BEFORE any reviewer routing. The triage gate is a fast filter that bypasses reviewer panels entirely for genuinely trivial changes. Only changes that don't qualify for the trivial path proceed to the lightweight / standard / never-skip ladder.
 
-#### Complete skip — no review
+#### Triage gate — trivial path (no reviewers)
 
-The diff qualifies for complete skip if ALL hold:
-- No changes to `.py`, `.yaml`, `.sql`, `.json`, `.toml`, `Dockerfile`, `Makefile`, or `pyproject.toml`
-- No changes to test files
-- Total line change under 20 lines OR purely whitespace, formatting, or comment text
+A change qualifies for the trivial path if ALL changed files fall in these categories, AND the change is non-substantive:
 
-Specific always-skip patterns:
-- Typo fix in comment or docstring (no behavior change)
-- Formatting-only change (whitespace, line breaks, indentation)
-- Comment text update without changing what the comment refers to
-- Markdown file edits in `docs/` outside `docs/runbooks/`
-- Changes purely inside `.git/`, `.vscode/`, `.idea/`, or IDE configuration
+**Config files (non-substantive edits only):**
+- `pyproject.toml` (tool configuration, formatter rules, line length — NOT dependency adds/removes/version bumps)
+- `uv.lock`, `poetry.lock`, `requirements*.txt` (lock-file syncs without explicit dep changes)
+- `.gitignore`, `.dockerignore`, `.editorconfig`
+- `.env.example` (placeholder additions only — must not contain real values)
+- `alembic.ini` (alembic configuration, NOT new migration files)
+- `.pre-commit-config.yaml` (hook version bumps; new hooks added go to standard path)
 
-#### Lightweight skip — single reviewer
+**Documentation files (non-decision edits):**
+- `README.md` (description, usage, links — NOT architectural intent changes)
+- Files under `docs/` (NOT `docs/runbooks/` — those carry operational procedures)
+- Comments and docstrings in any file (whitespace + `#` / `"""` lines only, no executable changes)
 
-If complete skip doesn't apply, check lightweight skip criteria. Single reviewer invocation for narrowly-scoped changes:
+**Test data (data only):**
+- Files under `tests/fixtures/` or `tests/data/` (JSON, YAML, CSV) — NOT test code
 
-- Single-line constant change with no surrounding logic change → **senior-engineer only**, *unless the constant controls a timeout, size cap, iteration bound, retry count, or any other security-load-bearing limit, in which case full panel runs*
+**Text-only fixes:**
+- Typo fixes in log messages, error messages, user-facing strings (no behavior change)
+- Whitespace, formatting, indentation only
+
+Trivial path behavior:
+- Pre-commit hooks still run (mandatory)
+- No reviewer panel invocation
+- Commit proceeds; commit message footer: `Review: triage-gate-trivial`
+- No mid-batch checkpoint required
+
+#### Lightweight path — single reviewer or two-reviewer subset
+
+If trivial doesn't apply, check lightweight criteria. Narrow-scope changes get a small reviewer subset:
+
+- Single dependency add/bump/remove in `pyproject.toml` → **security-auditor + senior-engineer**
+- Single-line constant change with no surrounding logic change → **senior-engineer only**, *unless the constant controls a timeout, size cap, iteration bound, retry count, or any security-load-bearing limit — then full panel runs*
 - Variable rename across single file with no semantic change → **senior-engineer only**
 - Adding test cases to existing test file, no production code change → **test-reviewer + senior-engineer**
-- Single dependency version bump in `pyproject.toml` → **security-auditor + senior-engineer**
-- TODO/FIXME comment add/remove → no reviewer; complete skip
-
-#### Partial panel — diff-routed subset
-
-If lightweight skip doesn't apply, check partial-panel criteria:
-
 - ONLY `app/rules.yaml` changed (weights or conditions, not new rule classes) → **senior-engineer + code-flow**
-- ONLY documentation under `docs/` outside `.ai/` → **doc-reviewer only**
-- ONLY config-value change in `docker-compose*.yml` or `.env.example` → **security-auditor + senior-engineer**
+- ONLY documentation under `docs/runbooks/` (operational procedures) → **doc-reviewer only**
+- ONLY config-value change in `docker-compose*.yml` or production deploy config → **security-auditor + senior-engineer**
 - ONLY test file additions or changes, no production code → **test-reviewer + senior-engineer + code-flow-reviewer**
 
-#### Full panel
+#### Standard path — full panel
 
-If none of the above apply, run the full code-path panel as specified in step 3 (senior-engineer + security-auditor + code-flow-reviewer; test-reviewer when tests changed; db-reviewer when migrations/`*.sql`/model files changed).
+If neither trivial nor lightweight applies, run the full code-path panel (senior-engineer + security-auditor + code-flow-reviewer; test-reviewer when tests changed; db-reviewer when migrations/SQL/model files changed).
 
 #### Never Skip (overrides all above)
 
 Regardless of size or routing, never skip review for:
 - Any change to authentication, authorization, credential handling, or secret loading
-- Any change to migrations or schema (including comments — migration comments are load-bearing for future audit)
-- Any change to `app/rules.yaml` weights, thresholds, or conditions that adds or removes a rule (vs adjusting an existing rule's parameters)
-- Any change to the scoring formula or noisy-OR composition
+- Any change to migrations or schema (including comments — migration comments are load-bearing for audit)
+- Any change to `app/rules.yaml` weights, thresholds, or conditions that adds or removes a rule (vs adjusting an existing rule's parameters — lightweight)
+- Any change to the scoring formula or noisy-OR composition (`app/scoring.py`)
 - Any change to the DSL evaluator (`app/dsl.py`) — the rule-eval sandbox
 - Any change to RLS policies (`alembic/versions/*` touching `CREATE POLICY` / `ENABLE ROW LEVEL SECURITY`)
-- Any change to PII handling (HMAC at egress / `signals.hmac_hex`)
+- Any change to PII handling (HMAC at egress / `signal_helpers.hmac_hex`)
 - Any change marked by the operator as significant
-- Any commit that introduces a new file (vs editing existing files), unless purely `.md` documentation under `docs/`
+- Any commit that introduces a new `.py` file under `app/` (vs editing existing files)
+
+#### Borderline rule
+
+When unsure between trivial and lightweight, or between lightweight and standard, route to the heavier path. The cost of an unnecessary reviewer pass is much lower than the cost of a missed catch. Specifically:
+
+- A config change that affects runtime behavior (e.g. pyproject dependency that pulls a different library version): lightweight at minimum
+- A docstring update that contains executable code examples: standard path
+- A README change that revises architectural intent: standard path (treat as `.ai/decisions.md` edit)
+- A `.ai/decisions.md` amendment: ALWAYS standard path with doc-reviewer at minimum
 
 #### Operator override
 
 If the user says "skip review" or "just commit", respect that and include in the commit message footer: `Review: operator-skipped`.
 
-If the user requests a class-wide skip rule change, surface as a question — the change should land in CLAUDE.md explicitly, not as implicit conversation memory.
+If the user requests a class-wide skip rule change, surface as a question — the change should land in this file explicitly, not as implicit conversation memory.
 
 ### Autonomous Execution
 
@@ -235,3 +275,99 @@ For multi-hour autonomous runs, the operator should additionally:
 - Expect to be paged only when a row lands in `.claude/STATUS.md` `Unforeseen / checkpoints`, or at plan boundaries.
 
 The project allowlist in [.claude/settings.json](.claude/settings.json) is a defense-in-depth backstop for sessions started WITHOUT `bypassPermissions` — it covers the highest-frequency non-auto-allowed commands (`pytest`, `ruff check`, `mypy`, `alembic`). Personal/machine-specific allowlist entries belong in `.claude/settings.local.json` (gitignored).
+
+### Tangential issue handling
+
+When a subagent encounters an issue tangential to its current task — a bug in adjacent code, an unclear comment, a missing TODO follow-up, a schema drift, a stale doc — it MUST NOT fix inline or stop work. Instead:
+
+1. Append a structured entry to `.claude/BUGS.md`:
+
+   ```
+   ## YYYY-MM-DD — <one-line summary>
+   
+   Discovered by: <subagent role> during <task ID, e.g. PLAN_PHASE_2.md 2D.3>
+   Location: <file:line or N/A>
+   Severity: low | medium | high
+   Observation: <2-3 sentences of what's wrong>
+   Suggested action: <one line> OR "investigation needed"
+   ```
+
+2. Continue with the original task.
+
+3. At the next operator checkpoint, the per-batch summary line includes `N issues logged to BUGS.md`.
+
+**EXCEPTION**: severity = high (security risk, data corruption potential, RLS bypass, auth bypass, secret exposure, scoring-formula error that produces wrong decisions) interrupts the task. Surface to `.claude/STATUS.md` immediately and wait for operator instruction before continuing.
+
+`.claude/BUGS.md` is distinct from `.claude/STATUS.md`:
+- **BUGS.md** — issues the agent kept going past; operator triages between phases
+- **STATUS.md** — checkpoints the agent stopped at; operator addresses before resumption
+
+The operator drains BUGS.md at phase boundaries. Items get triaged into: dropped as out-of-scope, pulled into the current phase's amendment, or scheduled for a future phase. Drained entries get a `RESOLVED: <commit> / DROPPED / DEFERRED to <plan>` line appended; never deleted from history.
+
+### Phase scope discipline
+
+Each work phase has a distinct job. Verification, planning, and execution should not blur into each other during a run.
+
+- **Verification phase** discovers facts about the codebase. Writes to `docs/verification-phase-N.md`. Does NOT change code, plans, or decisions. Reads anywhere the bootstrap prompt directs; writes only the verification doc.
+
+- **Planning phase** produces MASTER_PLAN amendments (if any) and PLAN_PHASE_N.md. Reads verification output and the design context. Does NOT re-explore the codebase; if planning needs facts not in verification, return to verification rather than shortcut.
+
+- **Execution phase** applies the plan. Reads what the plan says to read; modifies what the plan says to modify. Does NOT decide new things or re-plan in flight.
+
+When execution encounters something the plan didn't anticipate:
+
+- **Trivial drift** (a renamed import, a stale path reference, a missing comment): fix inline with a one-line STATUS.md note; commit message references the deviation.
+- **Substantive drift** (the plan's approach won't work, a different design is needed, a constraint was missed): STOP. Surface via AskUserQuestion or append to STATUS.md `Unforeseen / checkpoints`. Do not paper over and continue.
+- **Tangential issues** (something is wrong, but it's not blocking and not in scope): log to BUGS.md per "Tangential issue handling" above and continue.
+
+Blurring the phases — discovering things in execution, re-planning in flight, amending decisions without operator approval — is how the codebase drifts away from its documented state. The plan is the contract.
+
+### Parallel sessions and worktrees
+
+When two Claude Code sessions need to work on different changes simultaneously (e.g., bugfix while a feature lands; Phase N+1 setup while Phase N wraps), use `git worktree` rather than branch-switching in the main repo.
+
+#### Setup
+
+From the main repo root:
+
+```bash
+git worktree add ../freightsentry-riskd-<topic> -b <branch>
+```
+
+Examples:
+```bash
+git worktree add ../freightsentry-riskd-phase-3 -b feature/phase-3
+git worktree add ../freightsentry-riskd-bugfix-auth -b fix/auth-rls-gap
+```
+
+Each worktree is a separate working directory with its own checked-out branch. Sessions run from their own worktree path:
+
+```bash
+cd ../freightsentry-riskd-phase-3
+claude  # this session sees only feature/phase-3 state
+```
+
+#### Conventions
+
+- Worktree directory names follow `freightsentry-riskd-<topic>` for visual disambiguation in shell prompts and process lists.
+- Each worktree gets its own Claude Code session, started from that directory.
+- Pre-commit hooks live in `.git/hooks/` (and `.git/` is shared across worktrees) — hooks replicate automatically; no per-worktree install needed.
+- `.claude/STATUS.md` and `.claude/BUGS.md` are shared (same `.git/`) — entries from different sessions interleave; the date stamp and task-ID disambiguate.
+- Both sessions can read each other's working files via `../freightsentry-riskd-<other>/` paths, but this is rarely needed — coordination happens through STATUS / BUGS / plan files at merge time.
+
+#### When NOT to use worktrees
+
+- For changes that touch the same files concurrently. Use sequential commits on one branch instead — worktrees don't resolve concurrent edit conflicts, they isolate them.
+- For trivial changes that take under 30 minutes. Branch switching in the main repo is lower-overhead.
+- For exploratory work that may not produce a commit. Worktrees are a commitment to a branch.
+
+#### Cleanup
+
+After the branch merges back to main:
+
+```bash
+git worktree remove ../freightsentry-riskd-<topic>
+git branch -d <branch>
+```
+
+The worktree's `.git` references are cleaned up automatically by `git worktree remove`.

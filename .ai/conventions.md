@@ -27,13 +27,14 @@ Single conventions file for the project. Load this for any coding or test-writin
 - FastAPI for the REST surface. Routes live in `app/api/<topic>.py`. One module per logical endpoint group.
 - Pydantic v2 for request/response models in `app/models.py`. Response models are the authoritative wire schema — anything not in a response model does not leak.
 - asyncpg for Postgres. Single connection pool at app lifespan. Per-request connection acquired via `async with pool.acquire() as conn:`. No SQLAlchemy ORM — raw SQL with parameter binding only.
-- pydantic-settings with env prefix `FG_` (loaded from `.env` in dev, AWS Secrets Manager in prod). Settings are loaded once at app lifespan; never re-read at request time.
+- pydantic-settings, no env prefix (env var names match field names verbatim, e.g. `DATABASE_URL`, `HMAC_SECRET`). Settings are loaded once at app lifespan; never re-read at request time.
 - Alembic for migrations. **Sync** `env.py` using psycopg (v3) — the runtime app uses asyncpg, but alembic uses sync psycopg because asyncpg's prepared-statement protocol rejects multi-statement DDL scripts. The two drivers coexist without runtime impact. Every migration must define `upgrade()` AND `downgrade()` (round-trip tested).
 
 ### Async discipline
 
 - `async def` everywhere on the request path.
-- `asyncio.gather` for parallel independent loads. **Do not** use `gather` for fire-and-forget — exceptions only surface for the first failure; remaining tasks may complete or hang silently.
+- `asyncio.gather` for parallel independent loads, EXCEPT against a single asyncpg connection — asyncpg serialises operations on a connection and raises `InterfaceError: another operation is in progress` when concurrent reads share the connection. Use sequential awaits inside a transaction, or acquire separate connections from the pool for parallel reads.
+- Never use `gather` for fire-and-forget — exceptions only surface for the first failure; remaining tasks may complete or hang silently.
 - Never call blocking code (`requests.get`, `time.sleep`, filesystem reads without `aiofiles`) from an `async def` function on the request path.
 - For background work that genuinely should not block the response (rare in this project — see decisions.md on synchronous persistence), wrap in `asyncio.create_task` and `asyncio.shield` if it must outlive the request.
 
@@ -52,7 +53,7 @@ Single conventions file for the project. Load this for any coding or test-writin
 
 ### PII handling
 
-- Emails, phones, and any operator-supplied free text identifying a person → HMAC at ingress using `signals.hmac_hex(value, settings.hmac_secret)`. Store the HMAC hex only. The plaintext does not leave the request handler.
+- Emails, phones, and any operator-supplied free text identifying a person → HMAC at ingress using `signal_helpers.hmac_hex(value, settings.hmac_secret)`. Store the HMAC hex only. The plaintext does not leave the request handler.
 - `hmac_hex` is **not** decorated with `@lru_cache` — a cache keyed on the secret hazards rotation.
 - The HMAC secret rotates via env-var update + container redeploy. Stat-dict entries created under the old secret are not portable across rotations — accept the cost or stage rotation across a cold period.
 
@@ -66,6 +67,7 @@ Single conventions file for the project. Load this for any coding or test-writin
 
 - `ruff check app/ tests/` — line-length 100, default ruleset plus selected extras (UP, B, SIM, I, N). No `# noqa` without a comment explaining why.
 - `mypy app/` strict mode. No `# type: ignore` without a comment.
+- `ruff` (lint + format), `mypy`, and `pytest tests/unit/` run via `pre-commit` hooks on every commit as non-bypassable gates. Hook config in `.pre-commit-config.yaml`. See `CLAUDE.md` "Pre-commit enforcement" for the bypass rules around declared-break commits.
 
 ### Comments
 
@@ -118,6 +120,16 @@ tests/
   security/
   fixtures/
 ```
+
+---
+
+## Tangential-issue discipline
+
+When implementing a task, if you notice an issue in adjacent code that's not part of the current task (a bug, a stale comment, a missing TODO follow-up, schema drift, a dead branch), do NOT fix it inline. Log it to `.claude/BUGS.md` per the format in `CLAUDE.md` "Tangential issue handling" and continue. Operator drains the bug log at phase boundaries.
+
+Exception: high-severity issues (security, data corruption, RLS bypass, secret exposure, scoring-formula error producing wrong decisions) interrupt the task — surface to `.claude/STATUS.md` and wait for operator instruction.
+
+The temptation to "fix it while I'm here" is the leading cause of plan drift. Resist it.
 
 ---
 
@@ -193,6 +205,7 @@ mock_conn.fetchrow.return_value = {"trust_score": 0.8, "is_blocked": False}
 - Per-test transaction with rollback: the `db` fixture begins a transaction and rolls back on teardown so tests are isolated.
 - RLS-aware: the fixture sets `app.tenant_id` per test scenario.
 - Layered: `tests/unit/` for pure-Python; `tests/integration/` for DB-touching; `tests/security/` for DSL-evaluator lockdown and similar adversarial tests.
+- Pre-commit hook runs `tests/unit/` only (speed). `tests/integration/` and `tests/security/` run in the 6-step cycle's "Validate" step and in CI.
 
 ### Time and randomness
 
