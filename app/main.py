@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
+from app.api.health import router as health_router
 from app.config import get_settings
 from app.db import close_pool, init_pool
 from app.logging import configure_logging
@@ -32,3 +33,4 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="freightsentry-riskd", lifespan=lifespan)
+app.include_router(health_router, prefix="/health", tags=["health"])

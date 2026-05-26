@@ -1,0 +1,97 @@
+"""Shared test fixtures.
+
+Pool initialised once per session; tests share the same asyncpg pool the
+running app would use. Per-test seed cleanup is explicit via the
+`seeded_tenant` / `seeded_api_token` fixtures (commit + delete rather
+than per-test rollback, because the auth dependency in app/auth.py
+acquires a SEPARATE connection from the same pool and won't see
+uncommitted transactional data).
+"""
+
+import secrets
+from collections.abc import AsyncIterator
+
+import asyncpg
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from app.auth import AuthContext, _hash_token, require_api_token
+from app.config import get_settings
+from app.db import close_pool, init_pool
+from app.main import app
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _pool() -> AsyncIterator[asyncpg.Pool]:
+    """Initialise the app's asyncpg pool once for the test session.
+
+    Event loop is session-scoped (see pyproject.toml `asyncio_default_*`).
+    `autouse=True` ensures every test has the pool ready even if it
+    doesn't request the fixture explicitly (e.g. direct
+    `require_api_token` calls that hit `get_pool()` internally).
+    """
+    settings = get_settings()
+    pool = await init_pool(settings)
+    yield pool
+    await close_pool()
+
+
+@pytest_asyncio.fixture
+async def db_conn(_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
+    """Single connection from the shared pool. NOT auto-transactional —
+    callers manage their own transactions for seed/cleanup."""
+    async with _pool.acquire() as conn:
+        yield conn
+
+
+@pytest_asyncio.fixture
+async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
+    """Insert a tenant; cleanup on teardown."""
+    tenant_id: int = await db_conn.fetchval(
+        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        f"test-tenant-{secrets.token_hex(4)}",
+    )
+    yield tenant_id
+    await db_conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+
+
+@pytest_asyncio.fixture
+async def seeded_api_token(
+    db_conn: asyncpg.Connection, seeded_tenant: int
+) -> AsyncIterator[tuple[str, int]]:
+    """Insert an API token for the seeded tenant; yield (plaintext_token, tenant_id)."""
+    plaintext = secrets.token_urlsafe(24)
+    token_hash = _hash_token(plaintext)
+    await db_conn.execute(
+        "INSERT INTO api_tokens (tenant_id, token_hash, role) VALUES ($1, $2, $3)",
+        seeded_tenant,
+        token_hash,
+        "tenant",
+    )
+    yield plaintext, seeded_tenant
+    await db_conn.execute("DELETE FROM api_tokens WHERE token_hash = $1", token_hash)
+
+
+@pytest_asyncio.fixture
+async def client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
+    """HTTP client with auth dependency overridden to a synthetic AuthContext.
+    Route tests don't need to think about auth."""
+    app.dependency_overrides[require_api_token] = lambda: AuthContext(
+        tenant_id=1, role="tenant"
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def unauth_client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
+    """HTTP client without dependency overrides — exercises real auth."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c

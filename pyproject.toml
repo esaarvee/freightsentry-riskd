@@ -89,7 +89,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+# Session-scoped event loop so the session-scoped asyncpg pool (see
+# tests/conftest.py::_pool) can serve all tests without cross-loop
+# context errors. Per-test isolation comes from explicit
+# seeded_tenant / seeded_api_token cleanup, not from event-loop reset.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 addopts = [
     "-ra",
