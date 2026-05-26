@@ -305,3 +305,112 @@ rules:
     description: "Brand-new user attempting a high-value (>5000) shipment"
     condition: "shipment_value > 5000 AND is_new_user"
     weight: 0.35
+
+  # =====================================================================
+  # Phase 2C.6 — Value-anomaly + geographic + threat-intel composites
+  #
+  # Triage notes (per PLAN_PHASE_2C.md):
+  # - threat_intel_level1 (freight_risk 29) NOT ported — Phase 1's
+  #   blacklisted_ip BLOCK rule already covers ip_in_level1 at Layer 1.
+  #   Adding it as a Layer 3 contribution would be redundant (Layer 1
+  #   short-circuit means Layer 3 never runs when BLOCK fires).
+  # - outside_allowed_country (freight_risk 181) DEFERRED to Phase 4 —
+  #   the condition references ip_outside_allowed_country which depends
+  #   on tenant-level country_allowlist config (Phase 4 scope).
+  # =====================================================================
+
+  # Value-anomaly (6 rules)
+
+  - name: extreme_value
+    description: "Shipment value > 3σ above customer's baseline mean (>=10 observations)"
+    condition: "value_zscore > 3.0 AND customer_observations >= 10"
+    weight: 0.40
+    maturity_sensitive: true
+
+  - name: above_normal_value
+    description: "Shipment value 2-3σ above customer's baseline mean"
+    condition: "value_zscore > 2.0 AND value_zscore <= 3.0 AND customer_observations >= 10"
+    weight: 0.15
+    maturity_sensitive: true
+
+  - name: above_normal_value_vpn
+    description: "2σ above baseline AND on VPN — anomaly + infrastructure mismatch"
+    condition: "value_zscore > 2.0 AND is_vpn"
+    weight: 0.25
+
+  - name: absolute_high_value
+    description: "Absolute high-value shipment (>10000) regardless of customer baseline"
+    condition: "shipment_value > 10000"
+    weight: 0.20
+
+  - name: threat_intel_high_value
+    description: "FireHOL-listed IP combined with high-value (>2000) shipment"
+    condition: "ip_in_threat_list AND shipment_value > 2000"
+    weight: 0.30
+
+  - name: ip2p_threat_high_value
+    description: "IP2Proxy threat tag combined with high-value (>2000) shipment"
+    condition: "ip2p_threat_any AND shipment_value > 2000"
+    weight: 0.40
+
+  # Geographic (5 rules)
+
+  - name: ip_intercontinental_jump
+    description: "IP distance >5000km from customer's last booking — implausible same-day travel"
+    condition: "ip_distance_km > 5000"
+    weight: 0.35
+
+  - name: ip_long_distance_new_ip
+    description: "IP distance >2000km from last booking + IP is new for this customer"
+    condition: "ip_distance_km > 2000 AND is_new_ip"
+    weight: 0.25
+
+  - name: ip_country_change
+    description: "IP country differs from last booking + IP is new for this customer"
+    condition: "ip_country_changed AND is_new_ip"
+    weight: 0.25
+
+  - name: api_country_change_unfamiliar
+    description: "API booking + new IP + IP country changed — high-stakes API ATO indicator"
+    condition: "is_api_booking AND ip_country_changed AND is_new_ip"
+    weight: 0.55
+
+  - name: impossible_travel_geo
+    description: "Same-day booking from >500km away from last known location"
+    condition: "impossible_travel"
+    weight: 0.65
+
+  # Threat-intel composites (excluding redundant Layer-1 duplicates) (6 rules)
+  # Note: ip2p_threat_scanner_signal and ip2p_threat_spam_signal carry the
+  # `_signal` suffix to avoid collision with the homonymous Context boolean
+  # fields ip2p_threat_scanner / ip2p_threat_spam used inside the conditions.
+
+  - name: threat_level2_vpn
+    description: "FireHOL Level 2 IP combined with VPN"
+    condition: "ip_in_level2 AND is_vpn"
+    weight: 0.20
+
+  - name: ip2p_threat_scanner_signal
+    description: "IP2Proxy threat tag indicates port scanner activity"
+    condition: "ip2p_threat_scanner"
+    weight: 0.50
+
+  - name: ip2p_threat_spam_signal
+    description: "IP2Proxy threat tag indicates spam-infrastructure IP"
+    condition: "ip2p_threat_spam"
+    weight: 0.35
+
+  - name: ip2p_threat_new_user
+    description: "Any IP2Proxy threat tag + brand-new user"
+    condition: "ip2p_threat_any AND is_new_user"
+    weight: 0.40
+
+  - name: ip2p_threat_api
+    description: "Any IP2Proxy threat tag + API booking channel"
+    condition: "ip2p_threat_any AND is_api_booking"
+    weight: 0.45
+
+  - name: open_proxy
+    description: "IP flagged as open proxy (NOT VPN and NOT Tor — distinct proxy class)"
+    condition: "is_proxy AND NOT is_vpn AND NOT is_tor"
+    weight: 0.30
