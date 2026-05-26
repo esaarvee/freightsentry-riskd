@@ -26,7 +26,7 @@ repos:
           - pydantic>=2.7
           - pydantic-settings
           - fastapi
-          - asyncpg-stubs
+          - structlog
           - types-PyYAML
 
   - repo: local
