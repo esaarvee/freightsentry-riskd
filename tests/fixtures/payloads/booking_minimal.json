@@ -1,0 +1,13 @@
+{
+  "request_id": "e2e-min-001",
+  "customer": {"external_id": "e2e-cust-min"},
+  "user": {"external_id": "e2e-user-min"},
+  "source_ip": "192.0.2.10",
+  "shipment": {
+    "origin": {"address": "10 Origin Lane"},
+    "destination": {"address": "20 Destination Ave"},
+    "value": 50.00,
+    "channel": "api"
+  },
+  "booking_ts": "2026-05-26T08:00:00Z"
+}

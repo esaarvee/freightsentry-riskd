@@ -8,10 +8,15 @@ acquires a SEPARATE connection from the same pool and won't see
 uncommitted transactional data).
 """
 
+import json
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
 
 import asyncpg
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
@@ -19,6 +24,43 @@ from app.auth import AuthContext, _hash_token, require_api_token
 from app.config import get_settings
 from app.db import close_pool, init_pool
 from app.main import app
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Single source of truth for cascade-cleanup. Reverse-FK order so children
+# delete before parents. Add new tenant-scoped tables here, NOT inline in
+# each fixture — duplicating this list across fixtures is how cleanup
+# drifts (e.g., 1D.1+ may add new tenant-scoped tables).
+_TENANT_SCOPED_TABLES: tuple[str, ...] = (
+    "feedback",
+    "decisions",
+    "customer_baselines",
+    "shipments",
+    "users",
+    "customers",
+    "enterprises",
+    "api_tokens",
+    "app_users",
+)
+
+
+async def _cleanup_tenant(conn: asyncpg.Connection, tenant_id: int) -> None:
+    for table in _TENANT_SCOPED_TABLES:
+        await conn.execute(f"DELETE FROM {table} WHERE tenant_id = $1", tenant_id)
+    await conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+
+
+@pytest.fixture
+def load_payload() -> Callable[[str], dict[str, Any]]:
+    """Return a loader for JSON payload fixtures under tests/fixtures/payloads/."""
+
+    def _load(name: str) -> dict[str, Any]:
+        path = _FIXTURES_DIR / "payloads" / f"{name}.json"
+        with path.open(encoding="utf-8") as f:
+            data: dict[str, Any] = json.load(f)
+        return data
+
+    return _load
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
@@ -57,19 +99,7 @@ async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
         f"test-tenant-{secrets.token_hex(4)}",
     )
     yield tenant_id
-    for table in (
-        "feedback",
-        "decisions",
-        "customer_baselines",
-        "shipments",
-        "users",
-        "customers",
-        "enterprises",
-        "api_tokens",
-        "app_users",
-    ):
-        await db_conn.execute(f"DELETE FROM {table} WHERE tenant_id = $1", tenant_id)
-    await db_conn.execute("DELETE FROM tenants WHERE id = $1", tenant_id)
+    await _cleanup_tenant(db_conn, tenant_id)
 
 
 @pytest_asyncio.fixture
@@ -136,3 +166,28 @@ async def unauth_client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
         yield c
+
+
+@asynccontextmanager
+async def create_tenant_with_token(
+    db_conn: asyncpg.Connection,
+) -> AsyncIterator[tuple[str, int]]:
+    """Context-manager helper that creates a second tenant + api_token and
+    cascade-cleans on exit. Use inside tests that need >1 tenant (e.g.
+    cross-tenant isolation checks)."""
+    tenant_id: int = await db_conn.fetchval(
+        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        f"test-tenant-{secrets.token_hex(4)}",
+    )
+    plaintext = secrets.token_urlsafe(24)
+    token_hash = _hash_token(plaintext)
+    await db_conn.execute(
+        "INSERT INTO api_tokens (tenant_id, token_hash, role) VALUES ($1, $2, $3)",
+        tenant_id,
+        token_hash,
+        "tenant",
+    )
+    try:
+        yield plaintext, tenant_id
+    finally:
+        await _cleanup_tenant(db_conn, tenant_id)

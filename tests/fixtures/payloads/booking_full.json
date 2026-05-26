@@ -1,0 +1,39 @@
+{
+  "request_id": "e2e-full-001",
+  "customer": {
+    "external_id": "e2e-cust-full",
+    "registered_address": "100 Corporate Plaza, Suite 4",
+    "business_name": "Acme Logistics Inc",
+    "first_seen_at": "2025-12-01T00:00:00Z",
+    "is_api_partner": true
+  },
+  "enterprise": {"external_id": "e2e-ent-full"},
+  "user": {
+    "external_id": "e2e-user-full",
+    "first_seen_at": "2025-12-15T00:00:00Z"
+  },
+  "source_ip": "203.0.113.50",
+  "shipment": {
+    "origin": {
+      "address": "100 Industrial Park",
+      "city": "Mississauga",
+      "country": "CA",
+      "postal_code": "L5N 6P9"
+    },
+    "destination": {
+      "address": "500 Distribution Center",
+      "city": "Chicago",
+      "country": "US",
+      "postal_code": "60607"
+    },
+    "value": 12500.75,
+    "channel": "api"
+  },
+  "contact": {
+    "origin_email": "ops@acme-logistics.example",
+    "origin_phone": "+15551234567",
+    "destination_email": "receiving@distco.example",
+    "destination_phone": "+13125559876"
+  },
+  "booking_ts": "2026-05-26T14:30:00Z"
+}
