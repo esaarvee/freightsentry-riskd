@@ -86,6 +86,34 @@ rules:
         load_rules(path)
 
 
+@pytest.mark.parametrize("bad_weight", [-0.1, -1.0, 1.01, 2.0, 100.0])
+def test_weight_out_of_range_raises(tmp_path: Path, bad_weight: float) -> None:
+    path = _write_yaml(tmp_path, f"""
+rules:
+  - name: bad_weight
+    condition: "is_vpn"
+    weight: {bad_weight}
+""")
+    with pytest.raises(ValueError, match="must be in"):
+        load_rules(path)
+
+
+def test_weight_at_boundaries_accepted(tmp_path: Path) -> None:
+    """0.0 and 1.0 are valid boundary values."""
+    path = _write_yaml(tmp_path, """
+rules:
+  - name: zero_weight
+    condition: "is_vpn"
+    weight: 0.0
+  - name: max_weight
+    condition: "is_vpn"
+    weight: 1.0
+""")
+    ruleset = load_rules(path)
+    assert ruleset.rules[0].weight == 0.0
+    assert ruleset.rules[1].weight == 1.0
+
+
 def test_unsupported_action_raises(tmp_path: Path) -> None:
     path = _write_yaml(tmp_path, """
 rules:

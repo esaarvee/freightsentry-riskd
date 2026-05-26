@@ -16,17 +16,17 @@ import structlog
 from fastapi import APIRouter, Depends
 
 from app.auth import AuthContext, require_api_token
-from app.baseline import IP_TYPE_CLOUD, IP_TYPE_DC, IP_TYPE_RESIDENTIAL
+from app.baseline import classify_ip_type
 from app.config import Settings, get_settings
 from app.context import build_context
 from app.db import get_conn, set_tenant_id
-from app.enrich import Enricher, EnrichmentRow
+from app.enrich import Enricher
 from app.models import BookingRequest, BookingResponse, RiskFactor
 from app.rules import RuleSet
 from app.runtime import get_enricher, get_ruleset
 from app.scoring import score
 from app.services.entity_upsert import upsert_customer, upsert_user
-from app.signal_helpers import hmac_hex, netblock_24
+from app.signal_helpers import email_domain, hmac_hex, netblock_24
 
 _log = structlog.get_logger(__name__)
 
@@ -87,9 +87,13 @@ async def evaluate_booking(
         )
 
         # Reload customer row post-upsert so build_context sees current
-        # first_seen / total_shipments / flag counts.
+        # first_seen / total_shipments / flag counts. Explicit
+        # `tenant_id = $1` is defense-in-depth above RLS (which is
+        # dormant under the Phase 1 superuser per .claude/STATUS.md).
         customer_row = await conn.fetchrow(
-            "SELECT * FROM customers WHERE id = $1", customer_id
+            "SELECT * FROM customers WHERE id = $1 AND tenant_id = $2",
+            customer_id,
+            auth.tenant_id,
         )
         if customer_row is None:
             msg = "customer row vanished after upsert — should not happen"
@@ -123,8 +127,8 @@ async def evaluate_booking(
             else None
         )
         email_domain_val = (
-            payload.contact.origin_email.split("@", 1)[-1].lower()
-            if payload.contact and payload.contact.origin_email and "@" in payload.contact.origin_email
+            email_domain(payload.contact.origin_email) or None
+            if payload.contact and payload.contact.origin_email
             else None
         )
 
@@ -132,7 +136,7 @@ async def evaluate_booking(
         baseline.add_observation(
             ts=payload.booking_ts,
             ip=str(payload.source_ip),
-            ip_type=_classify_ip_type(enrichment),
+            ip_type=classify_ip_type(enrichment),
             ip_netblock=netblock_24(str(payload.source_ip)),
             ip_asn=enrichment.asn_org,
             ip_country=enrichment.country,
@@ -194,15 +198,16 @@ async def evaluate_booking(
             risk_factor_json,
         )
 
-        # Update customer counters.
+        # Update customer counters — tenant_id filter as defense-in-depth.
         await conn.execute(
             """
             UPDATE customers
                SET last_seen = now(),
                    total_shipments = total_shipments + 1
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $2
             """,
             customer_id,
+            auth.tenant_id,
         )
 
     _log.info(
@@ -228,17 +233,3 @@ async def evaluate_booking(
     )
 
 
-def _classify_ip_type(e: EnrichmentRow) -> str | None:
-    """Map enrichment fields to baseline ip_type tag for per-IP-type decay.
-
-    Priority: cloud (CIDR / cloud-provider ASN) → datacenter (ASN keyword
-    match) → residential (default for known-but-not-cloud IPs) → None
-    (no enrichment data at all).
-    """
-    if e.is_cloud:
-        return IP_TYPE_CLOUD
-    if e.is_datacenter:
-        return IP_TYPE_DC
-    if e.asn_org:
-        return IP_TYPE_RESIDENTIAL
-    return None

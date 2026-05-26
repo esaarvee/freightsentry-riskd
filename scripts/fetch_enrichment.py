@@ -82,7 +82,11 @@ def _fetch_maxmind(data_dir: Path, license_key: str | None, *, dry_run: bool) ->
                 for member in tar.getmembers():
                     if member.name.endswith(f"GeoLite2-{edition}.mmdb"):
                         member.name = f"GeoLite2-{edition}.mmdb"
-                        tar.extract(member, data_dir)
+                        # filter="data" enforces no path traversal /
+                        # symlink shenanigans and is required for
+                        # forward compatibility with Python 3.14+
+                        # (which makes it the default).
+                        tar.extract(member, data_dir, filter="data")
                         break
             dest.unlink()
 

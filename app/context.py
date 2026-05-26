@@ -21,8 +21,9 @@ import asyncpg
 
 from app.baseline import CustomerBaseline
 from app.enrich import Enricher, EnrichmentRow
-from app.models import Address, BookingRequest, ContactData
+from app.models import BookingRequest, ContactData
 from app.signal_helpers import (
+    composite_threat_score,
     haversine_km,
     is_email_blocklisted,
     is_email_disposable,
@@ -121,7 +122,11 @@ async def build_context(
         "ip_in_level1": enrichment.fh_level1,
         "ip_in_level2": enrichment.fh_level2,
         "ip_in_threat_list": enrichment.fh_level1 or enrichment.fh_level2,
-        "ip_threat_score": _threat_score(enrichment),
+        "ip_threat_score": composite_threat_score(
+            fh_level1=enrichment.fh_level1,
+            fh_level2=enrichment.fh_level2,
+            ip2p_threat=enrichment.threat,
+        ),
         "ip_country": enrichment.country or "",
         "ip_distance_km": haversine_km(
             enrichment.lat,
@@ -176,23 +181,6 @@ async def build_context(
     return ctx, baseline, enrichment
 
 
-def _threat_score(e: EnrichmentRow) -> float:
-    """Composite [0,1] from FireHOL hits + IP2Proxy threat tags."""
-    score = 0.0
-    if e.fh_level1:
-        score += 0.8
-    elif e.fh_level2:
-        score += 0.5
-    if e.threat:
-        if "BOTNET" in e.threat:
-            score += 0.4
-        if "SCANNER" in e.threat:
-            score += 0.3
-        if "SPAM" in e.threat:
-            score += 0.2
-    return min(1.0, score)
-
-
 def _any_email_match(
     contact: ContactData | None, classifier: Any
 ) -> bool:
@@ -213,7 +201,3 @@ def _any_phone_match(
         if phone and classifier(phone):
             return True
     return False
-
-
-# Suppress unused-import warning while Address is kept for future signal modules.
-_ = Address

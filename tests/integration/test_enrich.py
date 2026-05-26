@@ -127,5 +127,15 @@ def test_enricher_handles_missing_data_dir(tmp_path: Path) -> None:
     sources lazy-load on first use; missing files log a warning, not raise."""
     nonexistent = tmp_path / "does-not-exist"
     enricher = Enricher(data_dir=nonexistent)
-    # _load_sources should not raise even with no files present.
-    enricher._load_sources()
+    enricher._load_sources()  # must not raise
+
+    # Confirm the lazy-load actually attempted to populate sources (each
+    # is None because every file was missing, NOT because _load_sources
+    # is a no-op).
+    assert enricher._loaded is True
+    assert enricher._mm_city is None
+    assert enricher._mm_asn is None
+    assert enricher._ip2p is None
+    assert enricher._firehol_l1 is None
+    assert enricher._firehol_l2 is None
+    assert enricher._cloud_tries == {}

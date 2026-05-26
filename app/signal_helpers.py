@@ -221,6 +221,33 @@ def netblock_24(ip: str) -> str:
 _EARTH_RADIUS_KM = 6371.0
 
 
+def composite_threat_score(
+    *,
+    fh_level1: bool,
+    fh_level2: bool,
+    ip2p_threat: str | None,
+) -> float:
+    """Compose [0, 1] threat score from FireHOL hits + IP2Proxy tags.
+
+    Used by build_context to populate the `ip_threat_score` Context
+    field. Pure function — caller passes the already-extracted
+    enrichment fields.
+    """
+    score = 0.0
+    if fh_level1:
+        score += 0.8
+    elif fh_level2:
+        score += 0.5
+    if ip2p_threat:
+        if "BOTNET" in ip2p_threat:
+            score += 0.4
+        if "SCANNER" in ip2p_threat:
+            score += 0.3
+        if "SPAM" in ip2p_threat:
+            score += 0.2
+    return min(1.0, score)
+
+
 def haversine_km(
     lat1: float | None,
     lon1: float | None,

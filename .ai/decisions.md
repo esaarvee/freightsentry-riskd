@@ -325,7 +325,7 @@ If a related improvement surfaces during execution, capture it in `MASTER_PLAN_A
 | Step | p95 |
 |---|---|
 | Validate + idempotency check | 5ms |
-| Load context (baseline, enrichment, customer/enterprise, velocity counts via SQL, all via `asyncio.gather`) | 30-50ms |
+| Load context (baseline FOR UPDATE, enrichment, 5 velocity counts — sequential awaits on the txn connection; see Phase 1 amendment below) | 30-50ms |
 | Compute trust score | <1ms |
 | Run signal modules in parallel | 20-40ms |
 | Score (3-layer noisy-OR + decide) | 5ms |
@@ -333,6 +333,14 @@ If a related improvement surfaces during execution, capture it in `MASTER_PLAN_A
 | **Total** | **<100ms typical, <200ms p95** |
 
 Per operator amendment 2026-05-25: persistence is on the hot path; the budget accommodates it. Original Design Context allocated 0ms in-line persistence; this row captures the corrected allocation.
+
+Phase 1 amendment 2026-05-26: build_context loads sequentially on the
+transaction connection rather than via `asyncio.gather`. asyncpg does
+not multiplex operations on a single connection; gather over the txn
+connection raises `InterfaceError`. The baseline FOR UPDATE lock must
+hold across the read-modify-write window, so the lock-holding
+connection cannot be split. Phase 5 load test revisits if parallel
+reads on separate pool connections are needed.
 
 Phase 5 load test enforces the budget end-to-end against staging Docker Compose.
 

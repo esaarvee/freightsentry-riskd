@@ -48,6 +48,27 @@ IP_TYPE_DC = "dc"
 IP_TYPE_RESIDENTIAL = "residential"
 
 
+def classify_ip_type(enrichment: object) -> str | None:
+    """Map an EnrichmentRow to the baseline ip_type tag.
+
+    Priority: cloud (CIDR / cloud-provider ASN) → datacenter (ASN keyword
+    match) → residential (default for non-cloud IPs with ASN data) →
+    None (no ASN data at all — per-IP-type decay falls back to the
+    180-day unknown half-life).
+
+    The argument is duck-typed as `object` to avoid an import cycle
+    with app.enrich (which already imports signal_helpers); callers
+    pass an EnrichmentRow.
+    """
+    if getattr(enrichment, "is_cloud", False):
+        return IP_TYPE_CLOUD
+    if getattr(enrichment, "is_datacenter", False):
+        return IP_TYPE_DC
+    if getattr(enrichment, "asn_org", None):
+        return IP_TYPE_RESIDENTIAL
+    return None
+
+
 def _half_life_for_ip_type(ip_type: str | None) -> float:
     return {
         IP_TYPE_CLOUD: HALF_LIFE_IP_CLOUD,
@@ -149,8 +170,16 @@ class CustomerBaseline:
         *,
         for_update: bool = False,
     ) -> CustomerBaseline:
-        """Read or return-empty. With `for_update=True`, acquires a row-
-        lock that holds until the enclosing transaction commits/rollbacks.
+        """Read or return-empty. With `for_update=True`, guarantees a
+        row exists and a row-lock is held.
+
+        First-write race fix: if the row doesn't exist and `for_update`
+        is True, reserve an empty row via INSERT ... ON CONFLICT DO
+        NOTHING (atomic), then SELECT FOR UPDATE the now-existing row.
+        Without this, two concurrent first-bookings for the same
+        customer would both `load → empty → save` and the second save
+        would overwrite the first via ON CONFLICT DO UPDATE — lost
+        update on the first-write-from-empty path.
         """
         suffix = " FOR UPDATE" if for_update else ""
         row = await conn.fetchrow(
@@ -160,7 +189,32 @@ class CustomerBaseline:
             customer_id,
         )
         if row is None:
-            return cls.empty(tenant_id, customer_id)
+            if not for_update:
+                return cls.empty(tenant_id, customer_id)
+            # Reserve the row atomically; either our INSERT wins or a
+            # concurrent INSERT already created it. Either way the
+            # subsequent SELECT FOR UPDATE finds + locks a row.
+            await conn.execute(
+                """
+                INSERT INTO customer_baselines (tenant_id, customer_id)
+                VALUES ($1, $2)
+                ON CONFLICT (tenant_id, customer_id) DO NOTHING
+                """,
+                tenant_id,
+                customer_id,
+            )
+            row = await conn.fetchrow(
+                "SELECT * FROM customer_baselines "
+                "WHERE tenant_id = $1 AND customer_id = $2 FOR UPDATE",
+                tenant_id,
+                customer_id,
+            )
+            if row is None:
+                msg = (
+                    "customer_baselines row not found after reserve-insert — "
+                    "concurrency anomaly"
+                )
+                raise RuntimeError(msg)
         return cls._from_row(row)
 
     @classmethod

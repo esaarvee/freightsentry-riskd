@@ -110,8 +110,9 @@ def _decide(
             "LOW" if score_value < 0.30 else "MEDIUM"
         )
         return "ALLOW", "GREEN", risk_level
-    # REVIEW band: (allow_max, block_min)
-    review_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = (
-        "MEDIUM" if score_value < 0.60 else "HIGH"
-    )
-    return "REVIEW", "YELLOW", review_level
+    # REVIEW band: strictly `(allow_max, block_min)`. All scores in this
+    # band are HIGH risk (the MEDIUM tier maps to ALLOW with elevated
+    # risk; the previous formulation included an unreachable MEDIUM
+    # branch that compared score_value to a literal 0.60 instead of to
+    # the threshold).
+    return "REVIEW", "YELLOW", "HIGH"

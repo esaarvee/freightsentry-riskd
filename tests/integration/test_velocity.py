@@ -171,9 +171,7 @@ async def test_velocity_scoped_to_tenant(
         count = await count_ip_hourly(db_conn, seeded_tenant, IPv4Address("192.0.2.80"))
         assert count == 1  # only the in-scope one
     finally:
-        # Manual cleanup of the other-tenant scope (the seeded_tenant
-        # fixture only cascade-cleans its own tenant).
-        await db_conn.execute("DELETE FROM shipments WHERE tenant_id = $1", other_tenant)
-        await db_conn.execute("DELETE FROM users WHERE tenant_id = $1", other_tenant)
-        await db_conn.execute("DELETE FROM customers WHERE tenant_id = $1", other_tenant)
-        await db_conn.execute("DELETE FROM tenants WHERE id = $1", other_tenant)
+        # Reuse the canonical cleanup helper rather than maintaining a
+        # parallel inline DELETE list.
+        from tests.conftest import _cleanup_tenant
+        await _cleanup_tenant(db_conn, other_tenant)

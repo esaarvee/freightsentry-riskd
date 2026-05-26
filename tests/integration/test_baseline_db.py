@@ -89,6 +89,43 @@ async def test_save_upserts_on_repeat(
     assert loaded.value_n == pytest.approx(6.0)
 
 
+async def test_first_write_concurrency_no_lost_update_via_unique_constraint(
+    _pool: asyncpg.Pool, seeded_tenant: int, seeded_customer: int
+) -> None:
+    """Two concurrent transactions both load an EMPTY baseline (no row
+    exists yet), increment value_n, and save. The UNIQUE(tenant_id,
+    customer_id) constraint serializes the first-write race: one
+    transaction's INSERT succeeds, the other's hits ON CONFLICT and
+    becomes an UPDATE. Final value_n must be 2.0 (no lost update).
+
+    Complements test_select_for_update_blocks_concurrent_writers, which
+    exercises the lock-on-existing-row path. This test covers the
+    no-row-to-lock-yet path."""
+
+    async def _increment_from_empty() -> None:
+        async with _pool.acquire() as conn, conn.transaction():
+            bl = await CustomerBaseline.load(
+                conn, seeded_tenant, seeded_customer, for_update=True
+            )
+            # `load(for_update=True)` reserve-inserts an empty row if none
+            # existed, so `bl.id` is always populated. The first-write
+            # racing TX still sees `value_n == 0`; the second sees the
+            # post-first-write value_n == 1 (lock-serialised).
+            bl.value_n += 1.0
+            bl.decay_anchor_date = date(2026, 5, 26)
+            await asyncio.sleep(0.05)  # maximise overlap
+            await bl.save(conn)
+
+    await asyncio.gather(_increment_from_empty(), _increment_from_empty())
+
+    async with _pool.acquire() as conn:
+        final = await CustomerBaseline.load(conn, seeded_tenant, seeded_customer)
+    assert final.value_n == pytest.approx(2.0), (
+        "Lost-update on first-write path — UNIQUE constraint should have "
+        "serialised the INSERTs into one INSERT + one ON CONFLICT UPDATE"
+    )
+
+
 async def test_select_for_update_blocks_concurrent_writers(
     _pool: asyncpg.Pool, seeded_tenant: int, seeded_customer: int
 ) -> None:

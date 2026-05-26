@@ -66,21 +66,16 @@ def test_no_builtins_accessible_via_name_token() -> None:
         fn({})
 
 
-def test_builtins_dict_is_empty_in_eval() -> None:
-    """Confirm at a low level that builtins are walled off. If
-    `__builtins__` had been left as the default Python dict (which
-    happens when you pass an empty dict but Python silently inserts
-    builtins), then `eval('len([])')` would succeed. We explicitly
-    pass `{"__builtins__": {}}` so the dict-already-empty insertion
-    doesn't happen."""
-    # The fact that all the escape tests above pass is the integration
-    # check; this is a structural check on the source.
-    import app.dsl
-    src = app.dsl.parse_condition.__code__
-    # Just verifying the function references {"__builtins__": {}} in
-    # its bytecode — a stronger check than text grep.
-    consts = src.co_consts
-    # `eval` is called with frozen builtins; the empty-dict constant
-    # appears among the constants the function code uses. This is a
-    # structural sentinel; the real proof is the lockdown matrix above.
-    assert {} in [c for c in consts if isinstance(c, dict)] or True
+def test_builtins_walled_off_behaviourally() -> None:
+    """End-to-end proof that builtins are not accessible from the
+    evaluator. If `__builtins__` were the default Python dict (which
+    happens when you pass an empty dict as globals — Python silently
+    inserts builtins) then `len` would resolve to the builtin and
+    `parse_condition("len")(env)` would return the function object
+    coerced via bool() to True. Production passes
+    `{"__builtins__": {}}` (explicit empty dict), which defeats the
+    silent-insertion behavior and forces a NameError → DSLError."""
+    from app.dsl import DSLError, parse_condition
+    fn = parse_condition("len")
+    with pytest.raises(DSLError, match="unknown field"):
+        fn({})  # env has no `len`; builtins are walled off, so this raises

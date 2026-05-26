@@ -147,12 +147,23 @@ def load_rules(yaml_path: Path) -> RuleSet:
             )
             raise ValueError(msg)
 
+        weight = float(raw.get("weight", 0.0))
+        if not 0.0 <= weight <= 1.0:
+            # Negative weights would invert the noisy-OR contribution
+            # (violates the .ai/decisions.md guardrail "no negative-
+            # weight rules"); weights > 1 would push score above the
+            # band ceiling. Fail fast at lifespan startup.
+            msg = (
+                f"rule {raw['name']!r}: weight {weight} must be in [0.0, 1.0]"
+            )
+            raise ValueError(msg)
+
         evaluator = parse_condition(condition)
         rules.append(Rule(
             name=raw["name"],
             description=raw.get("description", ""),
             condition=condition,
-            weight=float(raw.get("weight", 0.0)),
+            weight=weight,
             action=action_raw,
             maturity_sensitive=bool(raw.get("maturity_sensitive", False)),
             evaluator=evaluator,

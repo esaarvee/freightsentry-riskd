@@ -170,13 +170,15 @@ def test_truthy_values_coerce_to_bool() -> None:
     assert fn({"x": "anything"}) is True
 
 
-def test_env_is_immutable_during_eval() -> None:
-    """The evaluator wraps env in a MappingProxyType so a malicious rule
-    cannot mutate the Context. (Defensive — no rule construct can
-    actually mutate, but the wrapper enforces it at the language level.)"""
+def test_evaluator_does_not_mutate_caller_env() -> None:
+    """The evaluator copies env into a frozen view, so even if the
+    rule's compiled code somehow attempted mutation, the caller's dict
+    would be unaffected. We can't construct an assignment under the
+    whitelist (Store is not in the allowed AST node set), so the test
+    verifies the contract by structural invariant: env passed in is
+    bit-identical to env after the call."""
     fn = parse_condition("x > 5")
     env: dict[str, int] = {"x": 10}
+    snapshot = dict(env)
     fn(env)
-    # env still mutable (we copied it), but the evaluator's view was
-    # immutable for the duration of eval. No assertion needed — this
-    # test just documents the design.
+    assert env == snapshot

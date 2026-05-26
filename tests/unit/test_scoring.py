@@ -127,6 +127,7 @@ def test_two_rules_below_threshold_compose_under_block_min() -> None:
     assert result.score == pytest.approx(0.64)
     assert result.decision == "REVIEW"
     assert result.classification == "YELLOW"
+    assert result.risk_level == "HIGH"
 
 
 def test_three_rules_compose_to_block() -> None:
