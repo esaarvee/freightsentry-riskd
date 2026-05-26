@@ -13,10 +13,9 @@ INSERTs (per operator amendment 2026-05-25).
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date
 from ipaddress import IPv4Address
-from typing import Any, cast
+from typing import Any
 
 import asyncpg
 
@@ -60,20 +59,22 @@ async def build_context(
     today = as_of or date.today()
     source_ip = IPv4Address(str(payload.source_ip))
 
-    # asyncio.gather typing tops out around 5 args; cast to the known
-    # tuple shape so mypy stays strict on every subsequent use.
-    baseline, enrichment, vel_uh, vel_ud, vel_u30, vel_ih, vel_id = cast(
-        tuple[CustomerBaseline, EnrichmentRow, int, int, int, int, int],
-        await asyncio.gather(
-            CustomerBaseline.load(conn, tenant_id, customer_id, for_update=True),
-            enricher.enrich(conn, source_ip),
-            count_user_hourly(conn, tenant_id, customer_id),
-            count_user_daily(conn, tenant_id, customer_id),
-            count_user_30d(conn, tenant_id, customer_id),
-            count_ip_hourly(conn, tenant_id, source_ip),
-            count_ip_daily(conn, tenant_id, source_ip),
-        ),
+    # Sequential awaits on the txn connection — asyncpg does not
+    # multiplex operations on a single connection. Parallelism via
+    # acquiring multiple pool connections is possible but would require
+    # the velocity counts to run on a different connection than the
+    # baseline-FOR-UPDATE lock holds; the simpler sequential pattern
+    # fits inside the 30-50ms context-load budget for Phase 1
+    # cardinality. Phase 5 load test revisits if needed.
+    baseline = await CustomerBaseline.load(
+        conn, tenant_id, customer_id, for_update=True
     )
+    enrichment = await enricher.enrich(conn, source_ip)
+    vel_uh = await count_user_hourly(conn, tenant_id, customer_id)
+    vel_ud = await count_user_daily(conn, tenant_id, customer_id)
+    vel_u30 = await count_user_30d(conn, tenant_id, customer_id)
+    vel_ih = await count_ip_hourly(conn, tenant_id, source_ip)
+    vel_id = await count_ip_daily(conn, tenant_id, source_ip)
 
     baseline.decay_to(today)
 

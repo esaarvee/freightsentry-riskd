@@ -1,26 +1,32 @@
-"""POST /api/v1/shipments/booking/evaluate — stub.
+"""POST /api/v1/shipments/booking/evaluate — Phase 1 full pipeline.
 
-Phase 1 returns ALLOW 0.0 for every well-formed payload. Real scoring
-wires in 1D.7-1D.8 (Layer 1 hard-block + Layer 3 signal noisy-OR).
-
-Persistence is synchronous within a single transaction (operator
-amendment 2026-05-25): SELECT FOR UPDATE on customer_baselines (lands
-1D.3 — Phase 1 stub does INSERT shipments + INSERT decisions + UPDATE
-customers without the baseline lock yet), then commit. Failures return
-500; retries are safe via UNIQUE(tenant_id, request_id) idempotency on
-both shipments and decisions.
+Wires build_context → score → single-transaction persist. Real scoring
+via Layer 1 + Layer 3 (Layer 2 lands Phase 2). Booking ts drives the
+baseline observation timestamp; HMAC at ingress lands here for contact
+PII via signal_helpers.hmac_hex.
 """
 
+from __future__ import annotations
+
 import json
+from dataclasses import asdict
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends
 
 from app.auth import AuthContext, require_api_token
+from app.baseline import IP_TYPE_CLOUD, IP_TYPE_DC, IP_TYPE_RESIDENTIAL
+from app.config import Settings, get_settings
+from app.context import build_context
 from app.db import get_conn, set_tenant_id
+from app.enrich import Enricher, EnrichmentRow
 from app.models import BookingRequest, BookingResponse, RiskFactor
+from app.rules import RuleSet
+from app.runtime import get_enricher, get_ruleset
+from app.scoring import score
 from app.services.entity_upsert import upsert_customer, upsert_user
+from app.signal_helpers import hmac_hex, netblock_24
 
 _log = structlog.get_logger(__name__)
 
@@ -31,13 +37,16 @@ router = APIRouter()
 async def evaluate_booking(
     payload: BookingRequest,
     auth: Annotated[AuthContext, Depends(require_api_token)],
+    ruleset: Annotated[RuleSet, Depends(get_ruleset)],
+    enricher: Annotated[Enricher, Depends(get_enricher)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> BookingResponse:
-    # Transaction MUST be open before set_tenant_id; SET LOCAL / set_config(...,
-    # is_local=true) is transaction-scoped and silently no-ops outside one.
+    # Transaction MUST open before set_tenant_id; set_config(..., is_local=true)
+    # is transaction-scoped and silently no-ops outside one.
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
 
-        # Idempotency: return prior decision if (tenant_id, request_id) exists.
+        # Idempotency: replay returns prior decision without re-running scoring.
         existing = await conn.fetchrow(
             """
             SELECT decision, score, classification, risk_level,
@@ -77,6 +86,68 @@ async def evaluate_booking(
             payload.user.first_seen_at,
         )
 
+        # Reload customer row post-upsert so build_context sees current
+        # first_seen / total_shipments / flag counts.
+        customer_row = await conn.fetchrow(
+            "SELECT * FROM customers WHERE id = $1", customer_id
+        )
+        if customer_row is None:
+            msg = "customer row vanished after upsert — should not happen"
+            raise RuntimeError(msg)
+
+        # Build Context (parallel reads + decay + derived flags). Baseline
+        # is loaded FOR UPDATE inside this transaction.
+        context_env, baseline, enrichment = await build_context(
+            conn,
+            tenant_id=auth.tenant_id,
+            customer_id=customer_id,
+            customer_row=customer_row,
+            enricher=enricher,
+            payload=payload,
+        )
+
+        # Score.
+        result = score(ruleset, context_env)
+
+        # HMAC PII at ingress (real hmac_hex now that signal_helpers ships).
+        # Plaintext does not propagate past this point.
+        secret = settings.hmac_secret.encode("utf-8")
+        email_hmac = (
+            hmac_hex(payload.contact.origin_email, secret)
+            if payload.contact and payload.contact.origin_email
+            else None
+        )
+        phone_hmac = (
+            hmac_hex(payload.contact.origin_phone, secret)
+            if payload.contact and payload.contact.origin_phone
+            else None
+        )
+        email_domain_val = (
+            payload.contact.origin_email.split("@", 1)[-1].lower()
+            if payload.contact and payload.contact.origin_email and "@" in payload.contact.origin_email
+            else None
+        )
+
+        # Fold THIS booking into the baseline (positive observation).
+        baseline.add_observation(
+            ts=payload.booking_ts,
+            ip=str(payload.source_ip),
+            ip_type=_classify_ip_type(enrichment),
+            ip_netblock=netblock_24(str(payload.source_ip)),
+            ip_asn=enrichment.asn_org,
+            ip_country=enrichment.country,
+            ip_lat=enrichment.lat,
+            ip_lon=enrichment.lon,
+            origin=payload.shipment.origin.address,
+            destination=payload.shipment.destination.address,
+            channel=payload.shipment.channel,
+            value=float(payload.shipment.value),
+            email_hmac=email_hmac,
+            phone_hmac=phone_hmac,
+            email_domain=email_domain_val,
+        )
+        await baseline.save(conn)
+
         # Persist shipment.
         shipment_id = await conn.fetchval(
             """
@@ -102,21 +173,25 @@ async def evaluate_booking(
             payload.booking_ts,
         )
 
-        # Phase 1 stub decision — ALLOW 0.0. Real scoring lands 1D.7-1D.8.
+        # Persist decision.
+        risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])
         await conn.execute(
             """
             INSERT INTO decisions (
                 tenant_id, shipment_id, request_id, score, decision,
                 classification, risk_level, triggered_rules, risk_factors
             )
-            VALUES (
-                $1, $2, $3, 0.0, 'ALLOW', 'GREEN', 'LOW',
-                '{}'::text[], '[]'::jsonb
-            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
             """,
             auth.tenant_id,
             shipment_id,
             payload.request_id,
+            result.score,
+            result.decision,
+            result.classification,
+            result.risk_level,
+            list(result.triggered_rules),
+            risk_factor_json,
         )
 
         # Update customer counters.
@@ -134,16 +209,36 @@ async def evaluate_booking(
         "booking.evaluated",
         request_id=payload.request_id,
         tenant_id=auth.tenant_id,
-        decision="ALLOW",
-        score=0.0,
+        decision=result.decision,
+        score=result.score,
+        rule_count=len(result.triggered_rules),
         metric=True,
     )
     return BookingResponse(
         request_id=payload.request_id,
-        decision="ALLOW",
-        score=0.0,
-        classification="GREEN",
-        risk_level="LOW",
-        triggered_rules=[],
-        risk_factors=[],
+        decision=result.decision,
+        score=result.score,
+        classification=result.classification,
+        risk_level=result.risk_level,
+        triggered_rules=list(result.triggered_rules),
+        risk_factors=[
+            RiskFactor(name=rf.name, description=rf.description, weight=rf.weight)
+            for rf in result.risk_factors
+        ],
     )
+
+
+def _classify_ip_type(e: EnrichmentRow) -> str | None:
+    """Map enrichment fields to baseline ip_type tag for per-IP-type decay.
+
+    Priority: cloud (CIDR / cloud-provider ASN) → datacenter (ASN keyword
+    match) → residential (default for known-but-not-cloud IPs) → None
+    (no enrichment data at all).
+    """
+    if e.is_cloud:
+        return IP_TYPE_CLOUD
+    if e.is_datacenter:
+        return IP_TYPE_DC
+    if e.asn_org:
+        return IP_TYPE_RESIDENTIAL
+    return None

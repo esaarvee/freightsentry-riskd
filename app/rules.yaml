@@ -1,0 +1,106 @@
+# Phase 1 rule catalogue — 14 rules.
+#
+# Source-of-truth thresholds (allow_max / block_min) live here; .env /
+# pyproject must NOT shadow them. Every Name token in a `condition` MUST
+# appear in app.rules.ALLOWED_CONTEXT_FIELDS — the loader fails fast at
+# app lifespan startup if any field is unknown.
+#
+# Phase 1 does not implement Layer 2 (account-prior) per
+# .ai/decisions.md § Scoring architecture — `maturity_sensitive` is
+# preserved as a YAML field for forward compatibility but does NOT
+# downweight rule contributions yet. Phase 2 wires the downweight.
+#
+# Phase 2+ expansion: ~80 additional rules per
+# .ai/decisions.md § Rule catalogue target.
+
+thresholds:
+  allow_max: 0.60
+  block_min: 0.80
+
+rules:
+  # =====================================================================
+  # Layer 1 — hard-block short-circuit
+  # =====================================================================
+
+  - name: blacklisted_ip
+    description: "IP in FireHOL Level 1 threat feed — confirmed attacker"
+    condition: "ip_in_level1"
+    weight: 1.0
+    action: BLOCK
+
+  - name: ip2p_threat_botnet_block
+    description: "IP2Proxy PX11 flags this IP as a known botnet member"
+    condition: "ip2p_threat_botnet"
+    weight: 1.0
+    action: BLOCK
+
+  # =====================================================================
+  # Layer 3 — signal noisy-OR contributions
+  # =====================================================================
+
+  - name: threat_intel_level2
+    description: "IP in FireHOL Level 2 threat feed — moderate confidence"
+    condition: "ip_in_level2"
+    weight: 0.4
+
+  - name: tor_exit
+    description: "Booking from a Tor exit node"
+    condition: "is_tor"
+    weight: 0.5
+
+  - name: vpn_high_value
+    description: "VPN + high-value shipment"
+    condition: "is_vpn AND shipment_value > 1000"
+    weight: 0.3
+
+  - name: customer_daily_volume_spike
+    description: "Customer daily volume above threshold"
+    condition: "velocity_user_daily > 20"
+    weight: 0.4
+    maturity_sensitive: true
+
+  - name: ip_velocity_high_ui
+    description: "Web-channel booking burst from one IP (>10/hour)"
+    condition: "is_platform_booking AND velocity_ip_hourly > 10"
+    weight: 0.3
+    maturity_sensitive: true
+
+  - name: ip_velocity_high_api
+    description: "API-channel booking burst from one IP (>100/hour)"
+    condition: "is_api_booking AND velocity_ip_hourly > 100"
+    weight: 0.3
+    maturity_sensitive: true
+
+  - name: dummy_email_disposable_domain
+    description: "Contact email uses a disposable / throwaway domain"
+    condition: "is_email_disposable"
+    weight: 0.3
+
+  - name: dummy_phone_pattern
+    description: "Contact phone matches a dummy pattern (1111111111, 1234567890, etc.)"
+    condition: "is_phone_dummy_pattern"
+    weight: 0.2
+
+  - name: unknown_origin_address
+    description: "Origin address not seen before for this established customer"
+    condition: "NOT origin_address_familiar AND customer_observations >= 10"
+    weight: 0.25
+    maturity_sensitive: true
+
+  - name: unknown_destination_address
+    description: "Destination address not seen before for this established customer"
+    condition: "NOT destination_address_familiar AND customer_observations >= 10"
+    weight: 0.2
+    maturity_sensitive: true
+
+  - name: ip_fully_new_for_customer
+    description: "IP, /24, and ASN all unfamiliar to this established customer"
+    condition: "ip_fully_new AND customer_observations >= 10"
+    weight: 0.35
+    maturity_sensitive: true
+
+  - name: unfamiliar_ip_country_for_origin
+    description: "Origin paired with an unseen IP country for this established customer"
+    condition: "NOT origin_ip_country_familiar AND customer_observations >= 10"
+    weight: 0.3
+    maturity_sensitive: true

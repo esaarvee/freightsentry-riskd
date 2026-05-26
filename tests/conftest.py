@@ -24,6 +24,7 @@ from app.auth import AuthContext, _hash_token, require_api_token
 from app.config import get_settings
 from app.db import close_pool, init_pool
 from app.main import app
+from app.runtime import init_runtime
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -74,6 +75,11 @@ async def _pool() -> AsyncIterator[asyncpg.Pool]:
     """
     settings = get_settings()
     pool = await init_pool(settings)
+    # Tests use httpx ASGITransport which does NOT trigger app lifespan,
+    # so we replicate the lifespan's app.state setup here.
+    ruleset, enricher = init_runtime(settings)
+    app.state.ruleset = ruleset
+    app.state.enricher = enricher
     yield pool
     await close_pool()
 
