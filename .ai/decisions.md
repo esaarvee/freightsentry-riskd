@@ -76,6 +76,22 @@ Constants (tenant-overridable via `tenants.config` from Phase 4):
 
 Verification doc §3.3 notes FreightSentry production uses `MaturityK=0.70` and 2-tier `flag_weights`; this project intentionally diverges to the foundation values pending Phase 6 staging-replay measurement. The Phase 6 report calibrates these against measured FPR.
 
+#### Amendment 2026-05-26 (Phase 2A planning) — formula divergences from FreightSentry `scorer.go:300-415`
+
+The Layer 2 formula above is **Design-Context-authoritative**. Reading FreightSentry's reference implementation at `services/rules-engine/internal/scoring/scorer.go:300-415` surfaces four substantive divergences. We follow the Design Context (above), not the reference. Each divergence is intentional; Phase 6 staging replay measures FPR/recall at the resulting operating point.
+
+1. **Maturity is multiplicative, not `min` of fractions.** The Design Context says `maturity = clamp(age_frac, 0, 1) * clamp(ship_frac, 0, 1)`. FreightSentry's `accountMaturity()` returns `min(clamped_age_frac, clamped_ship_frac)`. The multiplicative product is more conservative when both factors are moderate: `(0.5, 0.5)` → 0.25 here vs 0.5 in FreightSentry. The conservative form means brand-new and moderate-tenure customers retain higher account_prior contribution; maturity-downweight kicks in slower.
+
+2. **Shipments fraction is linear, not log-scaled.** Design Context: `total_shipments / maturity_shipments` clamped to [0, 1]. FreightSentry: `log1p(shipments) / log1p(maturity_shipments)`. Linear means a customer with 25 of 50 needed shipments reaches `ship_frac = 0.5`; log-scaled would reach `log1p(25)/log1p(50) ≈ 0.83`. The linear form penalizes new customers harder for the first ~50 shipments — appropriate for our scale (per-tenant ~45K shipments/day target; the first 50 are a small fraction).
+
+3. **Flag prior is a 4-tier direct lookup, not 2-tier noisy-OR.** Design Context: `flag_prior = FLAG_WEIGHTS[flagged_count_tier]` over four tiers (0/1-2/3-5/6+) mapping to `(0.00, 0.15, 0.25, 0.35)`. FreightSentry's `flagContribution()` evaluates two thresholds (`flagged_count > 2` and `> 5`) and noisy-ORs them. The 4-tier table gives finer-grained behavior at the low-flag boundary (1-2 flags contribute 0.15 instead of nothing), and the direct-lookup table is simpler than a noisy-OR composition over independent tier activations.
+
+4. **No customer-inheritance term.** FreightSentry's `accountMaturity()` optionally folds in an enterprise-level "customer maturity" via `CustomerMaturityAgeDays / CustomerMaturityShipments / CustomerInheritanceFactor` (default 730 / 500 / 0.50). The Design Context formula uses single-customer maturity only. We have no Phase 2 enterprise-aggregate to inherit from; the new project's `customers.enterprise_id` FK provides the grouping, but rolling maturity across an enterprise is post-launch tuning. Phase 2 ships single-customer maturity.
+
+#### Constants live in `app/scoring_constants.py`, not `rules.yaml`
+
+The Layer 2 + maturity constants are scoring-formula machinery, not rule parameters. They land as Python module constants in `app/scoring_constants.py` (Phase 2A). `app/rules.yaml` continues to own only `allow_max` and `block_min`. Pydantic-settings does NOT carry them. Single source of truth; rebinding requires a code change reviewed under the never-skip rule (CLAUDE.md). Per-tenant overrides land in Phase 4 via `tenants.config`.
+
 ### Layer 3: Signal noisy-OR with maturity downweighting
 
 For each fired non-BLOCK rule:
