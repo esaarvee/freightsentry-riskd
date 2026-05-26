@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -105,6 +105,10 @@ async def _seed_baseline(
     last_booking_lat: float | None = None,
     last_booking_lon: float | None = None,
 ) -> None:
+    # Anchor decay to Python's date.today() so it matches what
+    # build_context computes (default as_of = date.today()). Using PG's
+    # current_date here can drift one day from Python's date in
+    # cross-TZ runs and silently apply 1-day decay to value_n etc.
     await db_conn.execute(
         """
         INSERT INTO customer_baselines (
@@ -125,7 +129,7 @@ async def _seed_baseline(
             $3::jsonb, '{}'::jsonb, '{}'::jsonb, $4::jsonb,
             $5, 250, 0,
             $6, $7, $8,
-            NULL, current_date
+            NULL, $10
         )
         """,
         tenant_id,
@@ -137,6 +141,7 @@ async def _seed_baseline(
         last_booking_lat,
         last_booking_lon,
         json.dumps(ip_asn_stats or {}),
+        date.today(),
     )
 
 

@@ -183,3 +183,41 @@ rules:
     description: "Established cloud+API customer arriving from a fully-new IP"
     condition: "customer_locked_cloud_api AND is_api_booking AND ip_fully_new AND customer_observations >= 20"
     weight: 0.45
+
+  # =====================================================================
+  # Phase 2C.3 — Residential ASN + IP-class diversity rules
+  # Rules around residential-ASN abuse (proxy farms, distributed
+  # bookings) and IP-class mismatches between the customer's typical
+  # infrastructure and the current booking.
+  # =====================================================================
+
+  - name: residential_asn_high_velocity
+    description: "Residential-ASN IP booking burst (>15 in an hour, tuned per verification §2.2)"
+    condition: "is_residential_asn AND velocity_ip_hourly > 15"
+    weight: 0.40
+    maturity_sensitive: true
+
+  - name: api_non_cloud_ip
+    description: "API booking arriving from a non-cloud, non-datacenter IP"
+    condition: "is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip"
+    weight: 0.40
+
+  - name: new_user_api_non_cloud
+    description: "New user booking via API from a non-cloud, non-datacenter IP"
+    condition: "is_new_user AND is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip"
+    weight: 0.40
+
+  - name: non_cloud_established_account
+    description: "Established API account booking from non-cloud, non-datacenter IP"
+    condition: "NOT is_cloud_ip AND NOT is_datacenter_ip AND NOT is_new_user AND is_api_booking"
+    weight: 0.20
+
+  - name: web_booking_from_cloud_ip
+    description: "Web booking (UI channel) arriving from cloud or datacenter IP"
+    condition: "is_platform_booking AND (is_cloud_ip OR is_datacenter_ip)"
+    weight: 0.45
+
+  - name: web_only_customer_using_api
+    description: "Established web-only customer suddenly using the API channel"
+    condition: "customer_locked_web_only AND is_api_booking AND customer_observations >= 20"
+    weight: 0.50
