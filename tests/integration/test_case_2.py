@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
+import pytest
 from httpx import AsyncClient
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
@@ -114,9 +115,7 @@ async def test_unfamiliar_ip_against_established_customer_triggers_signals(
     token, tenant_id = seeded_api_token
     await _seed_established_customer(db_conn, tenant_id)
 
-    payload = _seed_payload(
-        request_id="case2-first-residential", source_ip="198.51.100.42"
-    )
+    payload = _seed_payload(request_id="case2-first-residential", source_ip="198.51.100.42")
     response = await unauth_client.post(
         _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
     )
@@ -126,14 +125,11 @@ async def test_unfamiliar_ip_against_established_customer_triggers_signals(
     # ip_fully_new fires because the new IP / /24 / ASN are all absent
     # from baseline.{ip_stats, ip_netblock_stats, ip_asn_stats}.
     assert "ip_fully_new_for_customer" in body["triggered_rules"], (
-        f"Expected ip_fully_new_for_customer in triggered_rules; got "
-        f"{body['triggered_rules']}"
+        f"Expected ip_fully_new_for_customer in triggered_rules; got " f"{body['triggered_rules']}"
     )
 
     # Real scoring ran — the 1C.1 stub ALLOW 0.0 is gone.
-    assert body["score"] > 0.0, (
-        "Phase 1 stub ALLOW 0.0 should be replaced by real scoring"
-    )
+    assert body["score"] > 0.0, "Phase 1 stub ALLOW 0.0 should be replaced by real scoring"
 
 
 async def test_velocity_burst_from_one_ip_trips_ip_velocity_high_ui(
@@ -162,12 +158,8 @@ async def test_velocity_burst_from_one_ip_trips_ip_velocity_high_ui(
         assert r.status_code == 200
 
     # 12th booking — now sees > 10 prior from this IP in the last hour.
-    payload12 = _seed_payload(
-        request_id="vel-burst-12", source_ip=burst_ip, customer_id="vel-cust"
-    )
-    response = await unauth_client.post(
-        _BOOKING_PATH, json=payload12, headers=headers
-    )
+    payload12 = _seed_payload(request_id="vel-burst-12", source_ip=burst_ip, customer_id="vel-cust")
+    response = await unauth_client.post(_BOOKING_PATH, json=payload12, headers=headers)
     assert response.status_code == 200
     assert "ip_velocity_high_ui" in response.json()["triggered_rules"], (
         f"Expected ip_velocity_high_ui in triggered rules after 11-burst "
@@ -194,5 +186,8 @@ async def test_clean_baseline_no_rules_fire(
     assert response.status_code == 200
     body = response.json()
     assert body["decision"] == "ALLOW"
-    assert body["score"] == 0.0
+    # Phase 2: brand-new customer + no Layer 3 rules firing → score equals
+    # the base account_prior of 0.10 (MAX_NEW_ACCOUNT). Pipeline doesn't
+    # false-positive: triggered_rules empty, decision ALLOW.
+    assert body["score"] == pytest.approx(0.10)
     assert body["triggered_rules"] == []

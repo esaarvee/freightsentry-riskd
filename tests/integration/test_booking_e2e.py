@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 import asyncpg
+import pytest
 from httpx import AsyncClient
 
 from tests.conftest import create_tenant_with_token
@@ -40,7 +41,9 @@ async def test_minimal_payload_persists_required_rows(
     assert response.status_code == 200
     body = response.json()
     assert body["decision"] == "ALLOW"
-    assert body["score"] == 0.0
+    # Phase 2: brand-new customer account_prior = 0.10 (base_prior) with
+    # no Layer 3 signals firing on the minimal payload.
+    assert body["score"] == pytest.approx(0.10)
 
     # Customer + user + shipment + decision rows all persisted.
     customer = await db_conn.fetchrow(

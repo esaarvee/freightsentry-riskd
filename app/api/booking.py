@@ -24,7 +24,7 @@ from app.enrich import Enricher
 from app.models import BookingRequest, BookingResponse, RiskFactor
 from app.rules import RuleSet
 from app.runtime import get_enricher, get_ruleset
-from app.scoring import score
+from app.scoring import CustomerState, score
 from app.services.entity_upsert import upsert_customer, upsert_user
 from app.signal_helpers import email_domain, hmac_hex, netblock_24
 
@@ -71,9 +71,7 @@ async def evaluate_booking(
                 classification=existing["classification"],
                 risk_level=existing["risk_level"],
                 triggered_rules=existing["triggered_rules"],
-                risk_factors=[
-                    RiskFactor(**rf) for rf in json.loads(existing["risk_factors"])
-                ],
+                risk_factors=[RiskFactor(**rf) for rf in json.loads(existing["risk_factors"])],
             )
 
         # Implicit registration.
@@ -110,8 +108,15 @@ async def evaluate_booking(
             payload=payload,
         )
 
-        # Score.
-        result = score(ruleset, context_env)
+        # Score. CustomerState carries the Layer 2 inputs (trust + maturity
+        # + flags) typed; build_context() populated these into ctx already.
+        customer_state = CustomerState(
+            trust_score=context_env["trust_score"],
+            account_age_days=context_env["account_age_days"],
+            total_shipments=context_env["total_shipments"],
+            flagged_count=context_env["flagged_count"],
+        )
+        result = score(ruleset, context_env, customer_state=customer_state)
 
         # HMAC PII at ingress (real hmac_hex now that signal_helpers ships).
         # Plaintext does not propagate past this point.
@@ -231,5 +236,3 @@ async def evaluate_booking(
             for rf in result.risk_factors
         ],
     )
-
-

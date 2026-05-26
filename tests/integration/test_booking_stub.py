@@ -10,6 +10,7 @@ Phase 1 returns ALLOW 0.0 for every well-formed payload. These tests cover:
 from typing import Any
 
 import asyncpg
+import pytest
 from httpx import AsyncClient
 
 
@@ -42,7 +43,10 @@ async def test_valid_booking_returns_allow_0_0(
     assert response.status_code == 200
     body = response.json()
     assert body["decision"] == "ALLOW"
-    assert body["score"] == 0.0
+    # Phase 2: brand-new customer's first booking gets account_prior = 0.10
+    # (base_prior = MAX_NEW_ACCOUNT * (1 - maturity=0) = 0.10) with no
+    # Layer 3 rules firing. Pre-Phase-2 this asserted 0.0.
+    assert body["score"] == pytest.approx(0.10)
     assert body["classification"] == "GREEN"
     assert body["risk_level"] == "LOW"
     assert body["triggered_rules"] == []
@@ -130,7 +134,17 @@ async def test_duplicate_request_id_returns_idempotent(
         "/api/v1/shipments/booking/evaluate", json=payload, headers=headers
     )
     assert r2.status_code == 200
-    assert r1.json() == r2.json()
+    # Decision content matches; score may differ by float-precision after
+    # the DB round-trip (NUMERIC column rounds `0.09999999999999998` to
+    # `0.1`). Phase 2's account_prior of 0.10 surfaces the precision
+    # boundary the Phase 1 clean-baseline 0.0 case never reached.
+    r1_body, r2_body = r1.json(), r2.json()
+    assert r1_body["decision"] == r2_body["decision"]
+    assert r1_body["classification"] == r2_body["classification"]
+    assert r1_body["risk_level"] == r2_body["risk_level"]
+    assert r1_body["triggered_rules"] == r2_body["triggered_rules"]
+    assert r1_body["risk_factors"] == r2_body["risk_factors"]
+    assert r1_body["score"] == pytest.approx(r2_body["score"], abs=1e-9)
 
     # Exactly one shipment row persisted.
     count = await db_conn.fetchval(
@@ -183,8 +197,7 @@ async def test_booking_with_enterprise_links_customer(
     assert response.status_code == 200
 
     customer_row = await db_conn.fetchrow(
-        "SELECT id, enterprise_id FROM customers "
-        "WHERE tenant_id = $1 AND external_id = $2",
+        "SELECT id, enterprise_id FROM customers " "WHERE tenant_id = $1 AND external_id = $2",
         tenant_id,
         "ent-cust",
     )
@@ -201,7 +214,5 @@ async def test_booking_with_enterprise_links_customer(
 
 async def test_missing_auth_returns_401(unauth_client: AsyncClient) -> None:
     """Booking endpoint requires Bearer token."""
-    response = await unauth_client.post(
-        "/api/v1/shipments/booking/evaluate", json=_payload()
-    )
+    response = await unauth_client.post("/api/v1/shipments/booking/evaluate", json=_payload())
     assert response.status_code == 401

@@ -1,20 +1,33 @@
-"""3-layer noisy-OR scorer — Phase 1 ships Layer 1 + Layer 3.
+"""3-layer noisy-OR scorer — Phase 2 ships Layer 1 + Layer 2 + Layer 3.
 
 Layer 1 (hard-block short-circuit): the first rule with `action: BLOCK`
 that fires returns immediately with `score = 1.0, decision = BLOCK`.
-File-order in app/rules.yaml determines precedence.
+File-order in `app/rules.yaml` determines precedence. Layer 1 BYPASSES
+Layer 2 — hard-blocks never compose with the account prior.
 
-Layer 2 (account prior + trust contribution + flag prior) — lands
-Phase 2 alongside trust-score consumption.
+Layer 2 (account prior + trust contribution + flag prior): for each
+non-blocked evaluation, compute `account_prior` from customer state.
 
-Layer 3 (signal noisy-OR): collect every fired non-BLOCK rule's weight
-and compose via `1 - prod(1 - w_i)`. Maturity downweighting on rules
-marked `maturity_sensitive: true` lands Phase 2 (depends on customer
-maturity arithmetic which depends on Layer 2's `effective_observations`
-read).
+```
+maturity           = clamp(age / MATURITY_AGE_DAYS) * clamp(shipments / MATURITY_SHIPMENTS)
+base_prior         = MAX_NEW_ACCOUNT * (1 - maturity)
+trust_risk         = max(0, (0.5 - trust_score) / 0.5)
+trust_contribution = trust_risk * TRUST_FACTOR
+flag_prior         = FLAG_WEIGHTS[flagged_count_tier(flagged_count)]
+account_prior      = noisyOR(base_prior, trust_contribution, flag_prior)
+```
 
-Score → decision banding from `app/rules.yaml` thresholds (0.60 / 0.80
-per `.ai/decisions.md`).
+Layer 3 (signal noisy-OR): for each fired non-BLOCK rule, compute
+`effective_weight = weight * (1 - MATURITY_K * (1 - maturity))` when
+the rule carries `maturity_sensitive: true`, else `effective_weight =
+weight`. `signal_score = noisyOR(effective_weights)`.
+
+Final score: `score = noisyOR(account_prior, signal_score)`.
+
+Score-to-decision banding from `app/rules.yaml` thresholds
+(0.60 / 0.80 per `.ai/decisions.md`). See the Layer 2 amendment in
+`.ai/decisions.md` for documented divergences from FreightSentry's
+`scorer.go:300-415`.
 """
 
 from __future__ import annotations
@@ -24,6 +37,32 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.rules import Rule, RuleSet, Thresholds
+from app.scoring_constants import (
+    FLAG_WEIGHTS,
+    MATURITY_K,
+    MAX_NEW_ACCOUNT,
+    TRUST_FACTOR,
+    flagged_count_tier,
+    maturity,
+)
+
+
+@dataclass(frozen=True)
+class CustomerState:
+    """Subset of Context needed for Layer 2 + maturity downweight on Layer 3.
+
+    Passed explicitly to `score()` rather than re-derived from the DSL
+    Context so the scoring path has typed access without the
+    `Mapping[str, Any]` shape. Callers (booking endpoint, integration
+    tests) build this from the same fields they put into ctx.
+
+    Carries no PII — all integers + one float.
+    """
+
+    trust_score: float
+    account_age_days: int
+    total_shipments: int
+    flagged_count: int
 
 
 @dataclass(frozen=True)
@@ -36,6 +75,9 @@ class RiskFactor:
 @dataclass(frozen=True)
 class ScoringResult:
     score: float
+    account_prior: float
+    signal_score: float
+    maturity: float
     decision: Literal["ALLOW", "REVIEW", "BLOCK"]
     classification: Literal["GREEN", "YELLOW", "RED"]
     risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
@@ -43,14 +85,22 @@ class ScoringResult:
     risk_factors: tuple[RiskFactor, ...]
 
 
-def score(ruleset: RuleSet, ctx: Mapping[str, Any]) -> ScoringResult:
-    # Layer 1 — hard-block short-circuit.
+def score(
+    ruleset: RuleSet,
+    ctx: Mapping[str, Any],
+    *,
+    customer_state: CustomerState,
+) -> ScoringResult:
+    # Layer 1 — hard-block short-circuit. Bypasses Layer 2 entirely.
     for rule in ruleset.rules:
         if rule.action != "BLOCK":
             continue
         if rule.evaluate(ctx):
             return ScoringResult(
                 score=1.0,
+                account_prior=0.0,
+                signal_score=0.0,
+                maturity=0.0,
                 decision="BLOCK",
                 classification="RED",
                 risk_level="CRITICAL",
@@ -58,26 +108,44 @@ def score(ruleset: RuleSet, ctx: Mapping[str, Any]) -> ScoringResult:
                 risk_factors=(_to_factor(rule),),
             )
 
-    # Layer 3 — signal noisy-OR.
+    # Layer 2 — account prior.
+    m = maturity(customer_state.account_age_days, customer_state.total_shipments)
+    base_prior = MAX_NEW_ACCOUNT * (1.0 - m)
+    trust_risk = max(0.0, (0.5 - customer_state.trust_score) / 0.5)
+    trust_contribution = trust_risk * TRUST_FACTOR
+    flag_prior = FLAG_WEIGHTS[flagged_count_tier(customer_state.flagged_count)]
+    account_prior = _noisy_or([base_prior, trust_contribution, flag_prior])
+
+    # Layer 3 — signal noisy-OR with maturity downweight.
     triggered: list[Rule] = []
-    weights: list[float] = []
+    effective_weights: list[float] = []
+    factors: list[RiskFactor] = []
     for rule in ruleset.rules:
         if rule.action == "BLOCK":
             continue
         if rule.evaluate(ctx):
+            if rule.maturity_sensitive:
+                w = rule.weight * (1.0 - MATURITY_K * (1.0 - m))
+            else:
+                w = rule.weight
             triggered.append(rule)
-            weights.append(rule.weight)
+            effective_weights.append(w)
+            factors.append(RiskFactor(name=rule.name, description=rule.description, weight=w))
 
-    signal_score = _noisy_or(weights)
-    decision, classification, risk_level = _decide(signal_score, ruleset.thresholds)
+    signal_score = _noisy_or(effective_weights)
+    final_score = _noisy_or([account_prior, signal_score])
+    decision, classification, risk_level = _decide(final_score, ruleset.thresholds)
 
     return ScoringResult(
-        score=signal_score,
+        score=final_score,
+        account_prior=account_prior,
+        signal_score=signal_score,
+        maturity=m,
         decision=decision,
         classification=classification,
         risk_level=risk_level,
         triggered_rules=tuple(r.name for r in triggered),
-        risk_factors=tuple(_to_factor(r) for r in triggered),
+        risk_factors=tuple(factors),
     )
 
 
@@ -111,8 +179,5 @@ def _decide(
         )
         return "ALLOW", "GREEN", risk_level
     # REVIEW band: strictly `(allow_max, block_min)`. All scores in this
-    # band are HIGH risk (the MEDIUM tier maps to ALLOW with elevated
-    # risk; the previous formulation included an unreachable MEDIUM
-    # branch that compared score_value to a literal 0.60 instead of to
-    # the threshold).
+    # band are HIGH risk.
     return "REVIEW", "YELLOW", "HIGH"
