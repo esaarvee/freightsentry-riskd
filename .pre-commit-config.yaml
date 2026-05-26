@@ -1,5 +1,5 @@
 default_language_version:
-  python: python3.13
+  python: python3
 
 # Hooks run on `git commit` as non-bypassable enforcement.
 # Subagents MUST NOT mark a task done until `pre-commit run --all-files` passes locally.
