@@ -14,6 +14,8 @@ from app.velocity import (
     count_user_daily,
     count_user_distinct_ips_30d,
     count_user_hourly,
+    count_user_modifications_1h,
+    count_user_modifications_24h,
 )
 from tests.conftest import create_tenant_with_token
 
@@ -526,4 +528,249 @@ async def test_count_recipient_distinct_customers_30d_excludes_window(
         )
 
     count = await count_recipient_distinct_customers_30d(db_conn, seeded_tenant, shared_hmac)
+    assert count == 0
+
+
+# ============================================================================
+# Modification velocity (Phase 3A.5) — counts decisions, not shipments
+# ============================================================================
+
+
+async def _seed_modification_decision(
+    conn: asyncpg.Connection,
+    tenant_id: int,
+    shipment_id: int,
+    request_id: str,
+    created_at: datetime,
+) -> None:
+    """Seed a decisions row with request_type='modification' at a given
+    created_at. Forces the created_at via an explicit SET to override
+    the now() DEFAULT — modification-velocity tests need control over
+    timestamps for window-boundary verification."""
+    await conn.execute(
+        """
+        INSERT INTO decisions (
+            tenant_id, shipment_id, request_id, request_type,
+            score, decision, classification, risk_level,
+            triggered_rules, risk_factors, created_at
+        ) VALUES ($1, $2, $3, 'modification',
+                  0.5, 'REVIEW', 'YELLOW', 'MEDIUM',
+                  '{}'::text[], '[]'::jsonb, $4)
+        """,
+        tenant_id,
+        shipment_id,
+        request_id,
+        created_at,
+    )
+
+
+@pytest.fixture
+async def seeded_shipment_id(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_user: int,
+) -> int:
+    """A single shipment to anchor modification decisions via FK."""
+    now = datetime.now(tz=UTC)
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        seeded_customer,
+        seeded_user,
+        "mod-vel-anchor",
+        "203.0.113.100",
+        now,
+    )
+    return await db_conn.fetchval(
+        "SELECT id FROM shipments WHERE tenant_id = $1 AND request_id = $2",
+        seeded_tenant,
+        "mod-vel-anchor",
+    )
+
+
+async def test_modifications_1h_empty_returns_zero(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+) -> None:
+    count = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+    assert count == 0
+
+
+async def test_modifications_1h_counts_recent_only(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_shipment_id: int,
+) -> None:
+    now = datetime.now(tz=UTC)
+    # 3 modifications within the last 30 minutes
+    for i in range(3):
+        await _seed_modification_decision(
+            db_conn,
+            seeded_tenant,
+            seeded_shipment_id,
+            f"mod-recent-{i}",
+            now - timedelta(minutes=10 + i),
+        )
+    # 1 modification 2 hours ago (outside window)
+    await _seed_modification_decision(
+        db_conn,
+        seeded_tenant,
+        seeded_shipment_id,
+        "mod-stale",
+        now - timedelta(hours=2),
+    )
+
+    count = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+    assert count == 3
+
+
+async def test_modifications_1h_ignores_other_customers(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_user: int,
+    seeded_shipment_id: int,
+) -> None:
+    """A modification for a DIFFERENT customer in the same tenant must
+    not count toward this customer's velocity."""
+    other_customer = await db_conn.fetchval(
+        "INSERT INTO customers (tenant_id, external_id) VALUES ($1, 'vel-other-cust') RETURNING id",
+        seeded_tenant,
+    )
+    other_user = await db_conn.fetchval(
+        "INSERT INTO users (tenant_id, customer_id, external_id) VALUES ($1, $2, 'vel-other-user') RETURNING id",
+        seeded_tenant,
+        other_customer,
+    )
+    now = datetime.now(tz=UTC)
+    await _seed_shipment(
+        db_conn,
+        seeded_tenant,
+        other_customer,
+        other_user,
+        "other-shipment",
+        "203.0.113.101",
+        now,
+    )
+    other_shipment_id: int = await db_conn.fetchval(
+        "SELECT id FROM shipments WHERE tenant_id = $1 AND request_id = $2",
+        seeded_tenant,
+        "other-shipment",
+    )
+    await _seed_modification_decision(
+        db_conn,
+        seeded_tenant,
+        other_shipment_id,
+        "mod-other-customer",
+        now - timedelta(minutes=10),
+    )
+
+    count = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+    assert count == 0
+
+
+async def test_modifications_1h_ignores_other_tenants(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+) -> None:
+    """A modification for this customer's external_id in a DIFFERENT
+    tenant must not count — explicit WHERE tenant_id filter at
+    app/velocity.py."""
+    async with create_tenant_with_token(db_conn) as (_token_b, tenant_b):
+        # Seed a customer in tenant_b with the same external_id
+        cust_b: int = await db_conn.fetchval(
+            "INSERT INTO customers (tenant_id, external_id) VALUES ($1, 'vel-cust') RETURNING id",
+            tenant_b,
+        )
+        user_b: int = await db_conn.fetchval(
+            "INSERT INTO users (tenant_id, customer_id, external_id) VALUES ($1, $2, 'vel-user') RETURNING id",
+            tenant_b,
+            cust_b,
+        )
+        now = datetime.now(tz=UTC)
+        await _seed_shipment(
+            db_conn, tenant_b, cust_b, user_b, "mod-cross-tenant", "203.0.113.102", now
+        )
+        ship_b: int = await db_conn.fetchval(
+            "SELECT id FROM shipments WHERE tenant_id = $1 AND request_id = $2",
+            tenant_b,
+            "mod-cross-tenant",
+        )
+        await _seed_modification_decision(
+            db_conn,
+            tenant_b,
+            ship_b,
+            "mod-cross-tenant-decision",
+            now - timedelta(minutes=10),
+        )
+
+        # Querying tenant_a's count must NOT see tenant_b's modification
+        count_a = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+        assert count_a == 0
+
+
+async def test_modifications_24h_wider_window(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_shipment_id: int,
+) -> None:
+    """1h shows none; 24h shows all recent within the wider window."""
+    now = datetime.now(tz=UTC)
+    # 5 modifications between 2h and 23h ago (outside 1h, inside 24h)
+    for i in range(5):
+        await _seed_modification_decision(
+            db_conn,
+            seeded_tenant,
+            seeded_shipment_id,
+            f"mod-mid-{i}",
+            now - timedelta(hours=2 + i * 4),
+        )
+    # 1 modification 25 hours ago (outside 24h)
+    await _seed_modification_decision(
+        db_conn,
+        seeded_tenant,
+        seeded_shipment_id,
+        "mod-too-old",
+        now - timedelta(hours=25),
+    )
+
+    count_1h = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+    assert count_1h == 0
+    count_24h = await count_user_modifications_24h(db_conn, seeded_tenant, seeded_customer)
+    assert count_24h == 5
+
+
+async def test_modifications_ignores_booking_decisions(
+    db_conn: asyncpg.Connection,
+    seeded_tenant: int,
+    seeded_customer: int,
+    seeded_shipment_id: int,
+) -> None:
+    """request_type='booking' decisions must not count toward modification
+    velocity. _seed_shipment inserts only a shipment row (no decision),
+    so we insert a booking decision explicitly to verify the
+    discriminator filter."""
+    now = datetime.now(tz=UTC)
+    await db_conn.execute(
+        """
+        INSERT INTO decisions (
+            tenant_id, shipment_id, request_id, request_type,
+            score, decision, classification, risk_level,
+            triggered_rules, risk_factors, created_at
+        ) VALUES ($1, $2, $3, 'booking',
+                  0.5, 'REVIEW', 'YELLOW', 'MEDIUM',
+                  '{}'::text[], '[]'::jsonb, $4)
+        """,
+        seeded_tenant,
+        seeded_shipment_id,
+        "booking-not-modification",
+        now - timedelta(minutes=5),
+    )
+
+    count = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
     assert count == 0

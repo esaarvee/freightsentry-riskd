@@ -101,6 +101,67 @@ async def count_user_distinct_ips_30d(
     return result
 
 
+async def count_user_modifications_1h(
+    conn: asyncpg.Connection, tenant_id: int, customer_id: int
+) -> int:
+    """Count of modification decisions for this customer in the last 1h.
+
+    Filters decisions WHERE request_type='modification' (added in 0003)
+    and joins via shipments FK to scope by customer_id. Both legs of
+    the join carry an explicit tenant_id = $1 in WHERE (per
+    .ai/conventions.md tenant-scoping guidance: defense-in-depth +
+    deterministic planner hint under the Phase 5 non-superuser RLS
+    transition; the s.tenant_id = d.tenant_id join predicate is
+    complementary, not redundant).
+
+    Uses ix_decisions_tenant_request_type_created (0003) — the planner
+    seeks into the (tenant, 'modification') slice and range-scans
+    created_at at the index leaf. The shipments inner loop probes
+    shipments_pkey via decisions.shipment_id (PK lookup; no separate
+    ix_decisions_shipment_id needed).
+    """
+    result: int = await conn.fetchval(
+        """
+        SELECT count(*)::int
+          FROM decisions d
+          JOIN shipments s ON s.id = d.shipment_id AND s.tenant_id = d.tenant_id
+         WHERE d.tenant_id = $1
+           AND s.tenant_id = $1
+           AND s.customer_id = $2
+           AND d.request_type = 'modification'
+           AND d.created_at > now() - interval '1 hour'
+        """,
+        tenant_id,
+        customer_id,
+    )
+    return result
+
+
+async def count_user_modifications_24h(
+    conn: asyncpg.Connection, tenant_id: int, customer_id: int
+) -> int:
+    """Count of modification decisions for this customer in the last 24h.
+
+    Same query shape as count_user_modifications_1h with a wider window;
+    same explicit-tenant-on-both-legs discipline.
+    """
+    result: int = await conn.fetchval(
+        """
+        SELECT count(*)::int
+          FROM decisions d
+          JOIN shipments s ON s.id = d.shipment_id AND s.tenant_id = d.tenant_id
+         WHERE d.tenant_id = $1
+           AND s.tenant_id = $1
+           AND s.customer_id = $2
+           AND d.request_type = 'modification'
+           AND d.created_at > now() - interval '24 hours'
+        """,
+        tenant_id,
+        customer_id,
+    )
+    return result
+
+
 async def count_recipient_distinct_customers_30d(
     conn: asyncpg.Connection, tenant_id: int, destination_hmac: str
 ) -> int:

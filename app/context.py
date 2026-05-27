@@ -59,6 +59,8 @@ from app.velocity import (
     count_user_daily,
     count_user_distinct_ips_30d,
     count_user_hourly,
+    count_user_modifications_1h,
+    count_user_modifications_24h,
 )
 
 
@@ -440,9 +442,15 @@ async def build_modification_context(
         baseline=baseline,
     )
     ctx["modification_type"] = payload.modification_type
-    # Velocity placeholders — 3A.5 wires count_user_modifications_1h/_24h
-    ctx["modification_velocity_1h"] = 0
-    ctx["modification_velocity_24h"] = 0
+    # Modification path: 9 sequential awaits inherited from build_context +
+    # these 2 = 11 total on the same txn connection. Phase 5 load-test
+    # revisits separate-pool parallelism if the latency budget tightens.
+    ctx["modification_velocity_1h"] = await count_user_modifications_1h(
+        conn, tenant_id, customer_id
+    )
+    ctx["modification_velocity_24h"] = await count_user_modifications_24h(
+        conn, tenant_id, customer_id
+    )
 
     return ctx, baseline, enrichment
 
