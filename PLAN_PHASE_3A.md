@@ -523,12 +523,12 @@ async def count_user_modifications_24h(
 4. With 1 modification decision for this customer in a DIFFERENT tenant, returns 0 (tenant scope — explicit `WHERE tenant_id`).
 5. With 5 modification decisions for this customer in last 25h, count_user_modifications_24h returns 5; count_user_modifications_1h returns 0.
 6. Cross-TZ: as_of in UTC, decisions.created_at stored in UTC, cutoff arithmetic in UTC. **Watch point applied.**
-7. INDEX HINT: query uses `ix_decisions_tenant_request_type` (introduced in 3A.1) — EXPLAIN ANALYZE in a separate manual-verify step (not asserted in unit test, but noted in commit message).
+7. INDEX HINT: query uses `ix_decisions_tenant_request_type_created` (introduced in 3A.1 per db-reviewer suggestion; 3-column index `(tenant_id, request_type, created_at)` for range scan on the recency cutoff) — EXPLAIN ANALYZE in a separate manual-verify step (not asserted in unit test, but noted in commit message).
 
 **Validation**:
 - `pytest tests/unit/test_velocity_modifications.py -v` — 6 tests pass.
 - `mypy app/` strict clean.
-- `EXPLAIN ANALYZE` on the modification velocity queries — manual verify uses `ix_decisions_tenant_request_type` (logged in commit message).
+- `EXPLAIN ANALYZE` on the modification velocity queries — manual verify uses `ix_decisions_tenant_request_type_created` (logged in commit message).
 
 **Risk**: **Medium**. New SQL joining 2 tables. Performance depends on the index added in 3A.1. If integration tests flag latency, the index strategy may need revision.
 
