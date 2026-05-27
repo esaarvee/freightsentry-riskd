@@ -168,6 +168,83 @@ async def unauth_client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
         yield c
 
 
+@asynccontextmanager
+async def seeded_ip_enrichment(
+    conn: asyncpg.Connection,
+    ip: str,
+    *,
+    country: str = "US",
+    asn_org: str = "Comcast",
+    is_cloud: bool = False,
+    is_datacenter: bool = False,
+    is_vpn: bool = False,
+    is_proxy: bool = False,
+    is_tor: bool = False,
+    fh_level1: bool = False,
+    fh_level2: bool = False,
+    threat: str | None = None,
+    lat: float | None = 38.0,
+    lon: float | None = -77.0,
+) -> AsyncIterator[str]:
+    """Async context-manager that seeds an `ip_enrichment` row with the
+    given flags and DELETEs it on exit.
+
+    `ip_enrichment` is intentionally global (no RLS) per the schema
+    comment in 0001_initial.py, so cleanup is the caller's
+    responsibility — using this helper removes the per-test try/finally
+    boilerplate and the cross-test pollution risk.
+
+    Defaults match a clean residential US IP (Comcast, non-cloud,
+    non-datacenter, no threat flags). Override only the flags relevant
+    to the test scenario.
+    """
+    await conn.execute(
+        """
+        INSERT INTO ip_enrichment (
+            ip, country, asn_org, is_cloud, is_datacenter,
+            is_vpn, is_proxy, is_tor, fh_level1, fh_level2,
+            threat, lat, lon
+        )
+        VALUES (
+            $1::inet, $2, $3, $4, $5,
+            $6, $7, $8, $9, $10,
+            $11, $12, $13
+        )
+        ON CONFLICT (ip) DO UPDATE SET
+            country = EXCLUDED.country,
+            asn_org = EXCLUDED.asn_org,
+            is_cloud = EXCLUDED.is_cloud,
+            is_datacenter = EXCLUDED.is_datacenter,
+            is_vpn = EXCLUDED.is_vpn,
+            is_proxy = EXCLUDED.is_proxy,
+            is_tor = EXCLUDED.is_tor,
+            fh_level1 = EXCLUDED.fh_level1,
+            fh_level2 = EXCLUDED.fh_level2,
+            threat = EXCLUDED.threat,
+            lat = EXCLUDED.lat,
+            lon = EXCLUDED.lon,
+            updated_at = now()
+        """,
+        ip,
+        country,
+        asn_org,
+        is_cloud,
+        is_datacenter,
+        is_vpn,
+        is_proxy,
+        is_tor,
+        fh_level1,
+        fh_level2,
+        threat,
+        lat,
+        lon,
+    )
+    try:
+        yield ip
+    finally:
+        await conn.execute("DELETE FROM ip_enrichment WHERE ip = $1::inet", ip)
+
+
 async def seed_customer_with_baseline(
     conn: asyncpg.Connection,
     tenant_id: int,
