@@ -93,6 +93,13 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "is_email_blocklisted",
         "is_email_suspicious_pattern",
         "is_phone_dummy_pattern",
+        # Modification (3A) — populated by build_modification_context
+        "modification_time_since_booking",  # Literal: within_30_min | within_1_hour | within_24_hours | 1_to_7_days | over_7_days
+        "modification_magnitude",  # float in [0.0, +inf); fraction for value-type, 0/1 for categorical
+        "modification_direction",  # Literal: familiar | unfamiliar | blocked | unknown
+        "modification_velocity_1h",  # int — count of this customer's modifications in last 1h
+        "modification_velocity_24h",  # int — count of this customer's modifications in last 24h
+        "modification_type",  # Literal: destination | value | recipient | service_level | pickup_time
     }
 )
 

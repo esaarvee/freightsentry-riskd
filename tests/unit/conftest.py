@@ -100,6 +100,14 @@ def base_ctx() -> dict[str, Any]:
         "is_email_blocklisted": False,
         "is_email_suspicious_pattern": False,
         "is_phone_dummy_pattern": False,
+        # Modification (3A) — neutral defaults; tests targeting
+        # modification rules override these explicitly.
+        "modification_time_since_booking": "over_7_days",
+        "modification_magnitude": 0.0,
+        "modification_direction": "unknown",
+        "modification_velocity_1h": 0,
+        "modification_velocity_24h": 0,
+        "modification_type": "value",
     }
     missing = ALLOWED_CONTEXT_FIELDS - set(ctx.keys())
     assert not missing, f"base_ctx missing fields: {missing}"
