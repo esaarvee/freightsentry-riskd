@@ -139,3 +139,45 @@ class ModificationResponse(BaseModel):
     risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
     triggered_rules: list[str]
     risk_factors: list[RiskFactor]
+
+
+# =============================================================================
+# Feedback endpoint (Phase 3B)
+# =============================================================================
+
+FeedbackLabel = Literal["approved", "rejected", "fraud_confirmed"]
+
+
+class FeedbackRequest(BaseModel):
+    """POST /api/v1/shipments/feedback payload.
+
+    Two-tier idempotency: hard UNIQUE on (tenant_id, request_id) prevents
+    POST-replay double-apply; label-monotonicity on target_request_id
+    governs upgrades (approved < rejected < fraud_confirmed). Both tiers
+    are enforced by the endpoint, not the model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(..., min_length=1, max_length=128)
+    target_request_id: str = Field(..., min_length=1, max_length=128)
+    label: FeedbackLabel
+    feedback_ts: datetime
+    note: str | None = Field(None, max_length=2048)
+    operator_id: str | None = Field(None, max_length=128)
+
+
+class FeedbackResponse(BaseModel):
+    """POST /api/v1/shipments/feedback response.
+
+    `applied=True` indicates the feedback contributed to baseline writes
+    AND/OR customer counter updates. `applied=False` indicates either a
+    POST replay (request_id already present) OR a no-op label assertion
+    (the new label is not stronger than the prior label per
+    monotonicity). `previous_label` is None on first-ever feedback for
+    the target.
+    """
+
+    applied: bool
+    previous_label: FeedbackLabel | None
+    target_request_id: str
