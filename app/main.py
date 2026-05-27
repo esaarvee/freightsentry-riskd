@@ -12,6 +12,7 @@ import structlog
 from fastapi import FastAPI
 
 from app.api.booking import router as booking_router
+from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.modification import router as modification_router
 from app.config import get_settings
@@ -48,3 +49,4 @@ app = FastAPI(title="freightsentry-riskd", lifespan=lifespan)
 app.include_router(health_router, prefix="/health", tags=["health"])
 app.include_router(booking_router, prefix="/api/v1/shipments", tags=["shipments"])
 app.include_router(modification_router, prefix="/api/v1/shipments", tags=["shipments"])
+app.include_router(feedback_router, prefix="/api/v1/shipments", tags=["shipments"])

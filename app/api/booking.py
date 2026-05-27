@@ -172,18 +172,22 @@ async def evaluate_booking(
         )
         await baseline.save(conn)
 
-        # Persist shipment.
+        # Persist shipment. email_hmac and phone_hmac (added in 3B.1)
+        # land on the shipments row so the 3B.3 feedback endpoint can
+        # populate baseline.rejected_email_hmacs / rejected_phone_hmacs
+        # per-shipment. NULL when the booking payload supplies no
+        # contact email/phone.
         shipment_id = await conn.fetchval(
             """
             INSERT INTO shipments (
                 tenant_id, customer_id, user_id, request_id, source_ip,
                 origin, destination, value, channel, booking_ts,
-                destination_hmac
+                destination_hmac, email_hmac, phone_hmac
             )
             VALUES (
                 $1, $2, $3, $4, $5,
                 $6::jsonb, $7::jsonb, $8, $9, $10,
-                $11
+                $11, $12, $13
             )
             RETURNING id
             """,
@@ -198,6 +202,8 @@ async def evaluate_booking(
             payload.shipment.channel,
             payload.booking_ts,
             destination_hmac,
+            email_hmac,
+            phone_hmac,
         )
 
         # Persist decision with explicit request_type='booking' (3A.6
