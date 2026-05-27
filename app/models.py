@@ -10,7 +10,7 @@ value alone).
 from datetime import datetime
 from decimal import Decimal
 from ipaddress import IPv4Address
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -88,6 +88,50 @@ class RiskFactor(BaseModel):
 
 
 class BookingResponse(BaseModel):
+    request_id: str
+    decision: Literal["ALLOW", "REVIEW", "BLOCK"]
+    score: float = Field(..., ge=0.0, le=1.0)
+    classification: Literal["GREEN", "YELLOW", "RED"]
+    risk_level: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    triggered_rules: list[str]
+    risk_factors: list[RiskFactor]
+
+
+# =============================================================================
+# Modification endpoint (Phase 3A)
+# =============================================================================
+
+ModificationType = Literal["destination", "value", "recipient", "service_level", "pickup_time"]
+
+
+class ModificationUser(BaseModel):
+    """Modification-time user — may differ from original booking's user."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    external_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ModificationRequest(BaseModel):
+    """POST /api/v1/shipments/modification/evaluate payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(..., min_length=1, max_length=128)
+    original_request_id: str = Field(..., min_length=1, max_length=128)
+    modification_ts: datetime
+    modification_type: ModificationType
+    # shape varies by modification_type; validated by build_modification_context (3A.4)
+    new_value: dict[str, Any]
+
+    source_ip: IPv4Address | None = None
+    user: ModificationUser | None = None
+    reason: str | None = Field(None, max_length=512)
+
+
+class ModificationResponse(BaseModel):
+    """Same shape as BookingResponse — scoring infrastructure shared."""
+
     request_id: str
     decision: Literal["ALLOW", "REVIEW", "BLOCK"]
     score: float = Field(..., ge=0.0, le=1.0)
