@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from app.context import BOOKING_PATH_MODIFICATION_DEFAULTS
 from app.rules import ALLOWED_CONTEXT_FIELDS, Rule, RuleSet, load_rules
 
 _RULES_YAML = Path(__file__).resolve().parents[2] / "app" / "rules.yaml"
@@ -100,14 +101,13 @@ def base_ctx() -> dict[str, Any]:
         "is_email_blocklisted": False,
         "is_email_suspicious_pattern": False,
         "is_phone_dummy_pattern": False,
-        # Modification (3A) — neutral defaults; tests targeting
-        # modification rules override these explicitly.
-        "modification_time_since_booking": "over_7_days",
-        "modification_magnitude": 0.0,
-        "modification_direction": "unknown",
-        "modification_velocity_1h": 0,
-        "modification_velocity_24h": 0,
-        "modification_type": "value",
+        # Modification (3A) — neutral defaults imported from
+        # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
+        # tests cannot drift. modification_type "none" matches no enum
+        # value, so the 3A.7 modification rules don't trip in
+        # non-modification tests. Tests targeting modification rules
+        # override these explicitly.
+        **BOOKING_PATH_MODIFICATION_DEFAULTS,
     }
     missing = ALLOWED_CONTEXT_FIELDS - set(ctx.keys())
     assert not missing, f"base_ctx missing fields: {missing}"

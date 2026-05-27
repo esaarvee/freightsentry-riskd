@@ -215,6 +215,10 @@ async def build_context(
             payload.contact, is_email_suspicious_pattern
         ),
         "is_phone_dummy_pattern": _any_phone_match(payload.contact, is_phone_dummy_pattern),
+        # Modification fields — neutral defaults from the module constant
+        # so build_context (booking path) and base_ctx (tests) cannot
+        # drift. See BOOKING_PATH_MODIFICATION_DEFAULTS for the rationale.
+        **BOOKING_PATH_MODIFICATION_DEFAULTS,
     }
 
     return ctx, baseline, enrichment
@@ -230,6 +234,28 @@ MODIFICATION_TIME_BUCKETS: Final[tuple[tuple[timedelta, str], ...]] = (
     (timedelta(hours=24), "within_24_hours"),
     (timedelta(days=7), "1_to_7_days"),
 )
+
+
+# Booking-path defaults for the 6 modification Context fields. The DSL
+# evaluator requires every referenced field to be populated at
+# evaluation time (NameError otherwise), so build_context must supply
+# these on the booking path even though no modification rule should
+# fire. The "none" sentinel for modification_type matches none of the
+# enum literals the modification rules condition on
+# (destination | value | recipient | service_level | pickup_time), so
+# the rules are structurally dormant on bookings.
+#
+# Single source of truth: tests/unit/conftest.py base_ctx imports this
+# constant so test fixtures cannot drift from production defaults
+# (per Phase 2 false-pass-test lesson).
+BOOKING_PATH_MODIFICATION_DEFAULTS: Final[dict[str, Any]] = {
+    "modification_time_since_booking": "over_7_days",
+    "modification_magnitude": 0.0,
+    "modification_direction": "unknown",
+    "modification_velocity_1h": 0,
+    "modification_velocity_24h": 0,
+    "modification_type": "none",
+}
 
 
 def _modification_time_bucket(*, booking_ts: datetime, modification_ts: datetime) -> str:

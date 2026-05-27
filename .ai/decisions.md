@@ -284,6 +284,25 @@ Modification-specific signals (Phase 3 — fresh design):
 - Direction of change (residential→commercial benign; legitimate→freight-forwarder suspicious)
 - Modification velocity per customer
 
+### Modification rule weight rationale (Phase 3A — 2026-05-27)
+
+Phase 3A.7 added 8 modification rules to `app/rules.yaml` (rule count: 67 → 75). No reference codebase contains modification-specific rules (verification §7, §8 of Phase 3A planning confirmed both `freight_risk` and `freightcom-risk` lack the surface). Weights are operator-judgment-based, anchored to Phase 2 weight bands for similar-severity rules. **No tuning of these weights in Phase 3** — calibration deferred to Phase 6 staging replay (per `feedback_no_weight_tuning_phase2` memory entry).
+
+| Rule | Weight | Maturity-sensitive | Rationale band |
+|---|---|---|---|
+| `modification_within_30_min_value_increase` | 0.65 | no | hard signal — value-jacking immediately after booking; band: `vpn_high_value` (0.55-0.65) |
+| `modification_destination_change_pre_pickup` | 0.55 | yes | re-routing pre-pickup is classic re-shipping fraud; maturity-sensitive because dormant-but-legit customers may correct addresses |
+| `modification_high_velocity_1h` | 0.70 | no | sustained-rate signal regardless of customer age |
+| `modification_high_velocity_24h` | 0.45 | yes | softer band; maturity-sensitive — some operators batch-edit |
+| `modification_low_trust_customer` | 0.55 | no | compound: low trust × destination change |
+| `modification_dormant_customer` | 0.60 | yes | case-1 ATO pattern applied to modification |
+| `modification_recipient_change_to_unfamiliar` | 0.40 | yes | soft signal; recipient changes are normal at low rate |
+| `modification_destination_change_residential_asn` | 0.35 | yes | compound destination + ASN signal |
+
+Booking-path safety: `build_context` populates the 6 modification fields with neutral defaults (`modification_type='none'`, magnitudes/velocities zero, time bucket widest, direction unknown) so the DSL evaluator can resolve every Name reference at evaluation time. The `'none'` literal matches no enum value the modification rules condition on, so the rules are structurally dormant on the booking path. `test_modification_rules_dormant_under_booking_path_defaults` pins this invariant.
+
+Calibration commitments: in Phase 6 staging replay, every weight in this table is candidate for adjustment based on observed precision/recall against labelled fraud cases. The weights here are starting points, not final values.
+
 ---
 
 ## DSL evaluator

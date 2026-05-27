@@ -458,3 +458,66 @@ rules:
     description: "Locked cloud+API customer arriving from a known-ASN but new IP — narrower than locked_customer_unfamiliar_ip"
     condition: "customer_locked_cloud_api AND is_api_booking AND ip_new_known_asn AND customer_observations >= 20"
     weight: 0.30
+
+  # =====================================================================
+  # Modification rules (Phase 3A.7) — 8 rules for the
+  # POST /api/v1/shipments/modification/evaluate endpoint. Weights chosen
+  # by operator judgment per .ai/decisions.md "Modification rule weight
+  # rationale (Phase 3A)" subsection — calibration deferred to Phase 6
+  # staging replay.
+  #
+  # Booking-path dormancy: build_context populates modification_type as
+  # the "none" sentinel (see app/context.py BOOKING_PATH_MODIFICATION_
+  # DEFAULTS and tests/unit/conftest.py base_ctx). "none" matches none
+  # of the enum literals these rules condition on, so the rules evaluate
+  # to False on every booking. The DSL evaluator requires every
+  # referenced field to be populated at evaluation time (raises
+  # NameError otherwise), so the booking-path defaults are structural —
+  # NOT optional. test_modification_rules_dormant_under_booking_path_
+  # defaults pins this invariant.
+  # =====================================================================
+
+  - name: modification_within_30_min_value_increase
+    description: "Value modification within 30 minutes of booking with >20% magnitude — value-jacking pattern"
+    condition: 'modification_type == "value" AND modification_time_since_booking == "within_30_min" AND modification_magnitude > 0.2'
+    weight: 0.65
+
+  - name: modification_destination_change_pre_pickup
+    description: "Destination change to an unfamiliar address within 24h of booking — re-routing fraud"
+    condition: 'modification_type == "destination" AND modification_time_since_booking == "within_24_hours" AND modification_direction == "unfamiliar"'
+    weight: 0.55
+    maturity_sensitive: true
+
+  - name: modification_high_velocity_1h
+    description: "More than 3 modifications by this customer in the last hour — campaign signal"
+    condition: "modification_velocity_1h > 3"
+    weight: 0.70
+
+  - name: modification_high_velocity_24h
+    description: "More than 10 modifications by this customer in the last 24 hours — sustained volume"
+    condition: "modification_velocity_24h > 10"
+    weight: 0.45
+    maturity_sensitive: true
+
+  - name: modification_low_trust_customer
+    description: "Low-trust customer changing destination compounds risk"
+    condition: 'trust_score < 0.3 AND modification_type == "destination"'
+    weight: 0.55
+
+  - name: modification_dormant_customer
+    description: "Modification on destination from an abnormally dormant customer — ATO pattern"
+    condition: 'is_abnormally_dormant AND modification_type == "destination"'
+    weight: 0.60
+    maturity_sensitive: true
+
+  - name: modification_recipient_change_to_unfamiliar
+    description: "Recipient change to a destination not previously shipped to by this customer"
+    condition: 'modification_type == "recipient" AND modification_direction == "unfamiliar"'
+    weight: 0.40
+    maturity_sensitive: true
+
+  - name: modification_destination_change_residential_asn
+    description: "Destination change combined with residential ASN signal"
+    condition: 'modification_type == "destination" AND is_residential_asn'
+    weight: 0.35
+    maturity_sensitive: true

@@ -99,7 +99,7 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "modification_direction",  # Literal: familiar | unfamiliar | blocked | unknown
         "modification_velocity_1h",  # int — count of this customer's modifications in last 1h
         "modification_velocity_24h",  # int — count of this customer's modifications in last 24h
-        "modification_type",  # Literal: destination | value | recipient | service_level | pickup_time
+        "modification_type",  # Literal: destination | value | recipient | service_level | pickup_time. Booking-path default is the "none" sentinel (matches no enum value), keeping modification rules structurally dormant on bookings — see app/context.py BOOKING_PATH_MODIFICATION_DEFAULTS.
     }
 )
 

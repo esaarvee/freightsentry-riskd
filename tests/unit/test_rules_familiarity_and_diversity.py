@@ -152,9 +152,9 @@ def test_familiarity_diversity_rules_load(ruleset: RuleSet) -> None:
 
 
 def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
-    """Canonical Phase 2 end-of-2C rule-count audit. This is the single
-    source of truth that the cumulative 2C additions match the per-batch
-    set-membership tests.
+    """Canonical rule-count audit. Updated each phase to reflect cumulative
+    additions; drift fails this test as the single source of truth that
+    per-batch set-membership tests match the production catalogue.
 
     Phase 1 baseline:  14 rules
     2C.1 trust-conditioned:                       +7 =  21
@@ -164,8 +164,9 @@ def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
     2C.5 velocity + identity-novelty:            +11 =  45
     2C.6 value-anomaly + geographic + threat:    +17 =  62
     2C.7 familiarity-tier + closing pieces:       +5 =  67
+    3A.7 modification rules:                      +8 =  75
     """
-    assert len(ruleset.rules) == 67
+    assert len(ruleset.rules) == 75
 
 
 def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:
@@ -173,6 +174,6 @@ def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:
     copy-paste duplication that the set-membership tests would silently
     miss."""
     names = [r.name for r in ruleset.rules]
-    assert len(names) == len(set(names)), (
-        f"duplicate rule names found: " f"{[n for n in names if names.count(n) > 1]}"
-    )
+    assert len(names) == len(
+        set(names)
+    ), f"duplicate rule names found: {[n for n in names if names.count(n) > 1]}"
