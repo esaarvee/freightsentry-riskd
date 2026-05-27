@@ -1,20 +1,24 @@
-"""Case-2 ATO fixture — Phase 1 pipeline replay.
+"""Case-2 ATO integration tests.
 
-The full case-2 scenario (cloud customer → residential proxy burst over
-1 hour) requires Phase 6 staging replay against real enrichment data
-(MaxMind GeoLite2 + IP2Proxy LITE PX11) to evaluate cumulative behavior
-over time. Phase 1's job here is narrower:
+Three tests covering progressively stronger Phase 2 assertions:
 
-1. Verify the pipeline wires correctly: a booking from an unfamiliar IP
-   against a customer with established baseline triggers the
-   ip_fully_new_for_customer + unfamiliar_ip_country_for_origin signals.
-2. Verify the booking endpoint returns a non-stub decision (the 1C.1
-   ALLOW 0.0 stub has been replaced by real scoring).
-3. Verify a velocity burst (12 bookings from one IP in an hour) trips
-   ip_velocity_high_ui on the web channel.
+1. test_unfamiliar_ip_against_established_customer_blocks_under_layer2
+   — Phase 2D.4 canonical success criterion. API booking from an
+   unfamiliar residential IP against a cloud-API-locked customer
+   crosses BLOCK end-to-end. Asserts the full 6-rule compound
+   (ip_fully_new + unfamiliar_country + lock-in pair + api-non-cloud
+   pair) fires — protects against a future regression where one
+   compound rule silently breaks but the remaining rules push score
+   past BLOCK anyway.
+2. test_velocity_burst_from_one_ip_trips_ip_velocity_high_ui —
+   Phase 1 velocity-burst smoke (12 bookings/hour/IP, web channel).
+3. test_clean_baseline_no_rules_fire — Phase 1 false-positive check
+   (brand-new customer + clean payload → no rules, ALLOW).
 
-Real-world calibration (FPR measurement, threshold tuning) lands in
-Phase 6.
+Real-world calibration (FPR measurement, threshold tuning) is Phase 6
+work. Per .ai/decisions.md and the bootstrap "no weight tuning in
+Phase 2" rule, BLOCK failures on case-2 escalate to operator via
+.claude/STATUS.md — not to a weight tune.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -58,8 +62,14 @@ async def _seed_established_customer(
     external_id: str = "case2-cust",
 ) -> int:
     """Seed a customer with first_seen 90 days ago + baseline with 20
-    cloud-IP observations from a single /24 (typical case-2 victim
-    profile)."""
+    cloud-IP API-channel observations from a single /24 (typical case-2
+    victim profile: an established API-integrating customer that posts
+    exclusively from cloud infrastructure).
+
+    Phase 2D.4 extension: channel_hist seeded with 20 api observations
+    so api_share=1.0 (was missing in Phase 1 — broke the
+    customer_locked_cloud_api gate on a customer who SHOULD be locked).
+    """
     customer_id = await db_conn.fetchval(
         """
         INSERT INTO customers (tenant_id, external_id, first_seen, total_shipments)
@@ -76,7 +86,7 @@ async def _seed_established_customer(
             ip_stats, ip_netblock_stats, ip_asn_stats,
             country_stats, origin_ip_country_stats,
             origin_stats, dest_stats, lane_stats,
-            ip_type_hist,
+            ip_type_hist, channel_hist,
             value_n, value_mean, value_m2,
             last_booking_ts, last_booking_country,
             decay_anchor_date
@@ -92,6 +102,7 @@ async def _seed_established_customer(
             '{"500 5th Avenue": {"n": 20, "r_n": 0, "last": "2026-05-20"}}'::jsonb,
             '{"100 Bay Street||500 5th Avenue": {"n": 20, "r_n": 0, "last": "2026-05-20"}}'::jsonb,
             '{"cloud": 20}'::jsonb,
+            '{"api": 20}'::jsonb,
             20, 250, 2000,
             now() - interval '6 days',
             'US',
@@ -104,19 +115,37 @@ async def _seed_established_customer(
     return customer_id
 
 
-async def test_unfamiliar_ip_against_established_customer_triggers_signals(
+async def test_unfamiliar_ip_against_established_customer_blocks_under_layer2(
     unauth_client: AsyncClient,
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """A booking from a brand-new residential /24 against a customer
-    with established cloud-only baseline triggers the ip_fully_new
-    signal. The customer_observations >= 10 guard is satisfied
-    (value_n = 20 from the seed)."""
+    """Phase 2D.4 — the canonical case-2 ATO detection test. An API
+    booking from an unfamiliar residential /24 against a customer with
+    an established cloud-API baseline crosses BLOCK end-to-end under
+    Layer 2 + Phase 2C rules. The strengthened assertion (was: score>0)
+    is the canonical Phase 2 success criterion.
+
+    The seeded baseline (20 cloud + 20 API observations, value_n=20)
+    satisfies the customer_locked_cloud_api gate (cloud_share=1.0 +
+    api_share=1.0 + value_n>=20). The booking uses channel=api from
+    a residential IP, so the 6-rule compound below all fires. The
+    test asserts each one explicitly — protects against a future
+    regression where one rule silently breaks but the remaining rules
+    push score past BLOCK anyway.
+
+    Per .ai/decisions.md "no weight tuning in Phase 2", if this test
+    fails the response is operator escalation via .claude/STATUS.md —
+    NOT a weight tune to force the pass.
+    """
     token, tenant_id = seeded_api_token
     await _seed_established_customer(db_conn, tenant_id)
 
-    payload = _seed_payload(request_id="case2-first-residential", source_ip="198.51.100.42")
+    payload = _seed_payload(
+        request_id="case2-block-residential",
+        source_ip="198.51.100.42",
+        channel="api",
+    )
     with structlog.testing.capture_logs() as captured:
         response = await unauth_client.post(
             _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
@@ -124,32 +153,49 @@ async def test_unfamiliar_ip_against_established_customer_triggers_signals(
     assert response.status_code == 200
     body = response.json()
 
-    # ip_fully_new fires because the new IP / /24 / ASN are all absent
-    # from baseline.{ip_stats, ip_netblock_stats, ip_asn_stats}.
-    assert "ip_fully_new_for_customer" in body["triggered_rules"], (
-        f"Expected ip_fully_new_for_customer in triggered_rules; got " f"{body['triggered_rules']}"
+    # The canonical Phase 2 success criterion: case-2 reaches BLOCK.
+    assert body["decision"] == "BLOCK", (
+        f"case-2 expected BLOCK with Layer 2 + Phase 2C rules active; "
+        f"got {body['decision']} at score {body['score']:.3f}. "
+        f"triggered_rules={body['triggered_rules']}"
+    )
+    assert body["score"] >= 0.80, (
+        f"case-2 score {body['score']:.3f} below the BLOCK band (>= 0.80). "
+        f"This is a calibration signal, not a code bug — surface to operator "
+        f"per the bootstrap 'no weight tuning in Phase 2' rule."
     )
 
-    # Real scoring ran — the 1C.1 stub ALLOW 0.0 is gone.
-    assert body["score"] > 0.0, "Phase 1 stub ALLOW 0.0 should be replaced by real scoring"
+    # 6-rule compound check — each rule pins a specific failure mode.
+    # If any of these silently stops firing, the remaining rules can
+    # still push score past BLOCK; this assertion locks the compound
+    # itself, not just the outcome.
+    expected_rules = {
+        # Phase 1 maturity-gated familiarity rules (obs >= 10).
+        "ip_fully_new_for_customer",  # new IP/netblock/ASN, m_s
+        "unfamiliar_ip_country_for_origin",  # origin paired with new country
+        # Phase 2C.2 lock-in rules — pin the customer_locked_cloud_api gate.
+        "cloud_api_customer_deviation_iptype",  # 5-clause locked detector
+        "locked_customer_unfamiliar_ip",  # 4-clause locked + new IP
+        # Phase 2C.3 channel/IP-class rules.
+        "api_non_cloud_ip",  # api + non-cloud + non-dc
+        "non_cloud_established_account",  # +NOT new user
+    }
+    actual_rules = set(body["triggered_rules"])
+    missing = expected_rules - actual_rules
+    assert not missing, (
+        f"case-2 6-rule compound is incomplete; missing: {missing}. "
+        f"Each missing rule indicates a regression in a specific Phase 2C "
+        f"derivation. triggered_rules={body['triggered_rules']}"
+    )
 
-    # Observability sanity: risk.evaluation log emitted with the full
-    # Layer 2 + Layer 3 component set tagged metric=True for the Phase 5
-    # CloudWatch sink. Locate by event name; the booking endpoint emits
-    # exactly one per request.
+    # Observability sanity preserved from 2A.4.
     risk_events = [e for e in captured if e.get("event") == "risk.evaluation"]
-    assert (
-        len(risk_events) == 1
-    ), f"Expected exactly one risk.evaluation event; got {len(risk_events)}"
+    assert len(risk_events) == 1
     event = risk_events[0]
     assert event["metric"] is True
-    assert event["request_id"] == "case2-first-residential"
-    # Case-2 customer: age=90d (age_frac=0.5), shipments=20 (ship_frac=0.4)
-    # → maturity = 0.20. base_prior = 0.10 * (1 - 0.20) = 0.08 — strict
-    # `> 0` catches the Layer 2 short-circuit regression class. The 0.0
-    # lower bound on the others is structural (noisy-OR cannot go negative).
+    assert event["request_id"] == "case2-block-residential"
     assert event["account_prior"] > 0.0
-    assert event["signal_score"] >= 0.0
+    assert event["signal_score"] >= 0.80  # Layer 3 alone reaches BLOCK
     assert 0.0 < event["maturity"] < 1.0
     assert event["score"] == pytest.approx(body["score"])
 
