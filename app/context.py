@@ -73,6 +73,8 @@ async def build_context(
     enricher: Enricher,
     payload: BookingRequest,
     destination_hmac: str,
+    email_hmac: str | None = None,
+    phone_hmac: str | None = None,
     as_of: date | None = None,
 ) -> tuple[dict[str, Any], CustomerBaseline, EnrichmentRow]:
     """Returns (context_env, baseline, enrichment).
@@ -215,6 +217,24 @@ async def build_context(
             payload.contact, is_email_suspicious_pattern
         ),
         "is_phone_dummy_pattern": _any_phone_match(payload.contact, is_phone_dummy_pattern),
+        # Previously rejected (3B) — pure dict lookups against the
+        # already-loaded baseline; no additional SQL. Rules in 3B.5
+        # consume these. email/phone fire only when the CURRENT request
+        # supplies an email/phone whose HMAC matches a prior rejection
+        # for this customer; origin/ip fire when r_n > 0 for the
+        # current request's plaintext-keyed dimension.
+        "email_previously_rejected": (
+            email_hmac is not None and email_hmac in baseline.rejected_email_hmacs
+        ),
+        "phone_previously_rejected": (
+            phone_hmac is not None and phone_hmac in baseline.rejected_phone_hmacs
+        ),
+        "origin_previously_rejected": (
+            float(baseline.origin_stats.get(origin, {}).get("r_n", 0.0)) > 0.0
+        ),
+        "ip_previously_rejected": (
+            float(baseline.ip_stats.get(str(source_ip), {}).get("r_n", 0.0)) > 0.0
+        ),
         # Modification fields — neutral defaults from the module constant
         # so build_context (booking path) and base_ctx (tests) cannot
         # drift. See BOOKING_PATH_MODIFICATION_DEFAULTS for the rationale.

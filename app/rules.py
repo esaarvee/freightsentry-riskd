@@ -100,6 +100,11 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "modification_velocity_1h",  # int — count of this customer's modifications in last 1h
         "modification_velocity_24h",  # int — count of this customer's modifications in last 24h
         "modification_type",  # Literal: destination | value | recipient | service_level | pickup_time. Booking-path default is the "none" sentinel (matches no enum value), keeping modification rules structurally dormant on bookings — see app/context.py BOOKING_PATH_MODIFICATION_DEFAULTS.
+        # Previously rejected (3B) — populated by build_context from baseline state
+        "email_previously_rejected",  # bool — email_hmac present in baseline.rejected_email_hmacs
+        "phone_previously_rejected",  # bool — phone_hmac present in baseline.rejected_phone_hmacs
+        "origin_previously_rejected",  # bool — baseline.origin_stats[origin_key].r_n > 0
+        "ip_previously_rejected",  # bool — baseline.ip_stats[ip].r_n > 0
     }
 )
 

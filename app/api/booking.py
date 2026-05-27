@@ -140,6 +140,8 @@ async def evaluate_booking(
             enricher=enricher,
             payload=payload,
             destination_hmac=destination_hmac,
+            email_hmac=email_hmac,
+            phone_hmac=phone_hmac,
         )
 
         # Score. CustomerState carries the Layer 2 inputs (trust + maturity

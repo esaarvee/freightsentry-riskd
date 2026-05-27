@@ -101,6 +101,12 @@ def base_ctx() -> dict[str, Any]:
         "is_email_blocklisted": False,
         "is_email_suspicious_pattern": False,
         "is_phone_dummy_pattern": False,
+        # Previously-rejected (3B) — neutral defaults; tests targeting
+        # the 3B.5 previously-rejected rules override explicitly.
+        "email_previously_rejected": False,
+        "phone_previously_rejected": False,
+        "origin_previously_rejected": False,
+        "ip_previously_rejected": False,
         # Modification (3A) — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum
