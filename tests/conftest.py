@@ -151,13 +151,9 @@ async def seeded_admin_token(
 async def client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
     """HTTP client with auth dependency overridden to a synthetic AuthContext.
     Route tests don't need to think about auth."""
-    app.dependency_overrides[require_api_token] = lambda: AuthContext(
-        tenant_id=1, role="tenant"
-    )
+    app.dependency_overrides[require_api_token] = lambda: AuthContext(tenant_id=1, role="tenant")
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as c:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
             yield c
     finally:
         # Scoped removal (not clear()) so sibling fixtures that layer their
@@ -168,10 +164,105 @@ async def client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
 @pytest_asyncio.fixture
 async def unauth_client(_pool: asyncpg.Pool) -> AsyncIterator[AsyncClient]:
     """HTTP client without dependency overrides — exercises real auth."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+async def seed_customer_with_baseline(
+    conn: asyncpg.Connection,
+    tenant_id: int,
+    *,
+    external_id: str,
+    first_seen_days_ago: int = 90,
+    total_shipments: int = 0,
+    flagged_count: int = 0,
+    fraud_confirmed_count: int = 0,
+    baseline_kwargs: dict[str, Any] | None = None,
+) -> int:
+    """Seed a customer row plus its customer_baselines row.
+
+    Shared across integration tests that need a customer with a
+    pre-existing baseline state (case-1, case-2, Layer 2 integration
+    tests). `baseline_kwargs` accepts every customer_baselines column
+    as a Python value; JSONB columns accept dict; date/timestamp accept
+    None and default to today / NULL. `decay_anchor_date` defaults to
+    Python's `date.today()` so it matches `build_context`'s default
+    `as_of` (avoids the cross-TZ decay drift surfaced in 2C.3).
+    """
+    from datetime import date
+
+    customer_id: int = await conn.fetchval(
+        """
+        INSERT INTO customers (
+            tenant_id, external_id, first_seen, total_shipments,
+            flagged_count, fraud_confirmed_count
+        )
+        VALUES (
+            $1, $2, now() - make_interval(days => $3), $4, $5, $6
+        )
+        RETURNING id
+        """,
+        tenant_id,
+        external_id,
+        first_seen_days_ago,
+        total_shipments,
+        flagged_count,
+        fraud_confirmed_count,
+    )
+
+    bk = baseline_kwargs or {}
+    await conn.execute(
+        """
+        INSERT INTO customer_baselines (
+            tenant_id, customer_id,
+            ip_stats, ip_netblock_stats, ip_asn_stats,
+            country_stats, origin_ip_country_stats,
+            origin_stats, dest_stats, lane_stats,
+            ip_type_hist, hour_hist, weekday_hist, channel_hist,
+            value_n, value_mean, value_m2,
+            cadence_n, cadence_mean_h, cadence_m2_h,
+            last_booking_ts, last_booking_lat, last_booking_lon,
+            last_booking_country, decay_anchor_date
+        )
+        VALUES (
+            $1, $2,
+            $3::jsonb, $4::jsonb, $5::jsonb,
+            $6::jsonb, $7::jsonb,
+            $8::jsonb, $9::jsonb, $10::jsonb,
+            $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
+            $15, $16, $17,
+            $18, $19, $20,
+            $21, $22, $23,
+            $24, $25
+        )
+        """,
+        tenant_id,
+        customer_id,
+        json.dumps(bk.get("ip_stats", {})),
+        json.dumps(bk.get("ip_netblock_stats", {})),
+        json.dumps(bk.get("ip_asn_stats", {})),
+        json.dumps(bk.get("country_stats", {})),
+        json.dumps(bk.get("origin_ip_country_stats", {})),
+        json.dumps(bk.get("origin_stats", {})),
+        json.dumps(bk.get("dest_stats", {})),
+        json.dumps(bk.get("lane_stats", {})),
+        json.dumps(bk.get("ip_type_hist", {})),
+        json.dumps(bk.get("hour_hist", {})),
+        json.dumps(bk.get("weekday_hist", {})),
+        json.dumps(bk.get("channel_hist", {})),
+        float(bk.get("value_n", 0.0)),
+        float(bk.get("value_mean", 0.0)),
+        float(bk.get("value_m2", 0.0)),
+        float(bk.get("cadence_n", 0.0)),
+        float(bk.get("cadence_mean_h", 0.0)),
+        float(bk.get("cadence_m2_h", 0.0)),
+        bk.get("last_booking_ts"),
+        bk.get("last_booking_lat"),
+        bk.get("last_booking_lon"),
+        bk.get("last_booking_country"),
+        bk.get("decay_anchor_date") or date.today(),
+    )
+    return customer_id
 
 
 @asynccontextmanager

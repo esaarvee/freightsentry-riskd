@@ -1,0 +1,53 @@
+{
+  "description": "Case-1: Dashboard ATO. Established cloud-IP + web-channel customer (38 prior bookings, all Cloudflare cloud IPs) has their account taken over. Attacker bursts 30 web-channel bookings from VPN IPs in the 185.220.101.0/24 NordVPN/Tor range within 60 minutes.",
+  "customer": {
+    "external_id": "case1-cust-ato",
+    "first_seen_days_ago": 268,
+    "total_shipments": 38
+  },
+  "seed_baseline": {
+    "value_n": 38.0,
+    "value_mean": 425.50,
+    "value_m2": 12000.0,
+    "cadence_n": 37.0,
+    "cadence_mean_h": 49.5,
+    "cadence_m2_h": 380.0,
+    "ip_stats": {
+      "104.19.142.10": {"n": 18.0, "r_n": 0, "last": "2026-05-25", "type": "cloud"},
+      "172.67.45.20":  {"n": 12.0, "r_n": 0, "last": "2026-05-24", "type": "cloud"},
+      "104.19.142.50": {"n":  8.0, "r_n": 0, "last": "2026-05-22", "type": "cloud"}
+    },
+    "ip_netblock_stats": {
+      "104.19.142.0": {"n": 26.0, "r_n": 0, "last": "2026-05-25"},
+      "172.67.45.0":  {"n": 12.0, "r_n": 0, "last": "2026-05-24"}
+    },
+    "ip_asn_stats": {
+      "Cloudflare, Inc.": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}
+    },
+    "ip_type_hist": {"cloud": 38.0},
+    "channel_hist": {"web": 38.0},
+    "country_stats": {"CA": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}},
+    "origin_ip_country_stats": {
+      "100 Bay Street||CA": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}
+    },
+    "origin_stats": {"100 Bay Street": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}},
+    "dest_stats": {"500 5th Avenue": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}},
+    "lane_stats": {
+      "100 Bay Street||500 5th Avenue": {"n": 38.0, "r_n": 0, "last": "2026-05-25"}
+    },
+    "last_booking_country": "CA",
+    "last_booking_ts_hours_ago": 24,
+    "last_booking_lat": 43.65,
+    "last_booking_lon": -79.38
+  },
+  "burst_ips": [
+    "185.220.101.5"
+  ],
+  "burst_size": 30,
+  "burst_interval_seconds": 120,
+  "burst_values_progression": [
+    425.0, 475.0, 510.0, 540.0, 580.0, 600.0, 625.0, 650.0, 700.0, 720.0,
+    750.0, 800.0, 825.0, 850.0, 875.0, 900.0, 925.0, 950.0, 975.0, 1000.0,
+    1050.0, 1100.0, 1150.0, 1200.0, 1250.0, 1300.0, 1350.0, 1400.0, 1450.0, 1500.0
+  ]
+}
