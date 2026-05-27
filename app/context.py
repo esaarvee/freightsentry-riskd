@@ -21,18 +21,29 @@ INSERTs (per operator amendment 2026-05-25).
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from ipaddress import IPv4Address
-from typing import Any
+from typing import Any, Final
 
 import asyncpg
 
 from app.baseline import CustomerBaseline
 from app.enrich import Enricher, EnrichmentRow
-from app.models import BookingRequest, ContactData
+from app.models import (
+    Address,
+    BookingRequest,
+    ContactData,
+    CustomerData,
+    ModificationRequest,
+    ShipmentData,
+    UserData,
+)
 from app.signal_helpers import (
     composite_threat_score,
     haversine_km,
+    hmac_hex,
     is_email_blocklisted,
     is_email_disposable,
     is_email_suspicious_pattern,
@@ -203,6 +214,235 @@ async def build_context(
         ),
         "is_phone_dummy_pattern": _any_phone_match(payload.contact, is_phone_dummy_pattern),
     }
+
+    return ctx, baseline, enrichment
+
+
+# =============================================================================
+# Modification endpoint context (Phase 3A)
+# =============================================================================
+
+MODIFICATION_TIME_BUCKETS: Final[tuple[tuple[timedelta, str], ...]] = (
+    (timedelta(minutes=30), "within_30_min"),
+    (timedelta(hours=1), "within_1_hour"),
+    (timedelta(hours=24), "within_24_hours"),
+    (timedelta(days=7), "1_to_7_days"),
+)
+
+
+def _modification_time_bucket(*, booking_ts: datetime, modification_ts: datetime) -> str:
+    """Bucket the delta between original booking and modification timestamps.
+
+    Negative delta (modification_ts earlier than booking_ts) is anomalous
+    and treated as the most suspicious bucket (within_30_min) so rules
+    that condition on a tight window catch it. Same-side TZ convention as
+    the production code path (both timestamps come from the DB / payload
+    as timezone-aware datetimes).
+    """
+    delta = modification_ts - booking_ts
+    if delta < timedelta(0):
+        return "within_30_min"
+    for threshold, label in MODIFICATION_TIME_BUCKETS:
+        if delta <= threshold:
+            return label
+    return "over_7_days"
+
+
+def _modification_magnitude(
+    *,
+    modification_type: str,
+    new_value: dict[str, Any],
+    prior_shipment: asyncpg.Record,
+    hmac_secret: bytes,
+) -> float:
+    """Per-type magnitude:
+
+    - value: fractional change |new - old| / old; 0.0 if old <= 0
+    - destination: 1.0 if destination HMAC changes, 0.0 otherwise
+    - other types (recipient / service_level / pickup_time): 1.0 if the
+      payload supplies any value (semantically "a change was requested"),
+      0.0 only on an empty new_value dict.
+    """
+    if modification_type == "value":
+        try:
+            old = float(prior_shipment["value"])
+        except (TypeError, ValueError):
+            return 0.0
+        if old <= 0:
+            return 0.0
+        try:
+            new_raw = float(new_value.get("value", old))
+        except (TypeError, ValueError):
+            # Malformed payload — surface as "no signal" rather than crash.
+            # Rules can't condition on a magnitude that wasn't computable.
+            return 0.0
+        return abs(new_raw - old) / old
+    if modification_type == "destination":
+        new_addr = new_value.get("destination") or {}
+        new_address_str = new_addr.get("address") if isinstance(new_addr, dict) else None
+        if not new_address_str:
+            return 0.0
+        old_hmac = prior_shipment["destination_hmac"]
+        new_hmac = hmac_hex(new_address_str, hmac_secret)
+        return 1.0 if new_hmac != old_hmac else 0.0
+    return 1.0 if new_value else 0.0
+
+
+def _modification_direction(
+    *,
+    modification_type: str,
+    new_value: dict[str, Any],
+    baseline: CustomerBaseline,
+) -> str:
+    """Categorical direction for destination modifications.
+
+    Returns "familiar" if the new destination address is present in the
+    customer's baseline.dest_stats (plaintext keys per
+    app/baseline.py::_bump), "unfamiliar" otherwise. For non-destination
+    modifications, returns "unknown" — direction is only semantically
+    defined for routing-target changes today.
+
+    "blocked" (global blocked vectors) is Phase 6+ and is not produced
+    by this commit; the field's Literal type reserves the value for
+    future expansion alongside the global_blocked_vectors lookup.
+    """
+    if modification_type != "destination":
+        return "unknown"
+    new_addr = new_value.get("destination") or {}
+    new_address_str = new_addr.get("address") if isinstance(new_addr, dict) else None
+    if not new_address_str:
+        return "unknown"
+    if new_address_str in baseline.dest_stats:
+        return "familiar"
+    return "unfamiliar"
+
+
+def _address_from_jsonb(value: Any) -> Address:
+    """Reconstruct an Address Pydantic model from a JSONB column value.
+
+    Mirrors `app/baseline.py::_decode_jsonb` defensive str-or-dict
+    handling — asyncpg may or may not decode JSONB depending on codec
+    configuration. Keeping the precedent consistent across modules.
+    """
+    if isinstance(value, str):
+        value = json.loads(value)
+    return Address.model_validate(value)
+
+
+def _booking_from_prior_shipment(
+    *,
+    request_id: str,
+    booking_ts: datetime,
+    prior_shipment: asyncpg.Record,
+    customer_external_id: str,
+    user_external_id: str,
+    source_ip_override: IPv4Address | None,
+    contact: ContactData | None,
+) -> BookingRequest:
+    """Synthesize a BookingRequest from a stored shipments row + caller-
+    resolved customer/user external_ids. Used only as the input to
+    build_context for the modification path; not persisted.
+
+    The synthesized booking represents the ORIGINAL booking's context
+    (so baseline familiarity / IP enrichment / velocity all reflect the
+    customer's actual history), with two overrides allowed:
+
+    - source_ip: if the modification arrived from a different IP, the
+      modification's IP is the operational signal (newly observed IP
+      can trip rules). When omitted, prior IP is used.
+    - contact: not stored on the shipment row, so the caller passes
+      None unless it can recover it from elsewhere.
+    """
+    source_ip = source_ip_override
+    if source_ip is None:
+        prior_ip = prior_shipment["source_ip"]
+        source_ip = IPv4Address(str(prior_ip))
+
+    shipment = ShipmentData(
+        origin=_address_from_jsonb(prior_shipment["origin"]),
+        destination=_address_from_jsonb(prior_shipment["destination"]),
+        value=Decimal(str(prior_shipment["value"])),
+        channel=prior_shipment["channel"],
+    )
+    return BookingRequest(
+        request_id=request_id,
+        customer=CustomerData(external_id=customer_external_id),
+        user=UserData(external_id=user_external_id),
+        source_ip=source_ip,
+        shipment=shipment,
+        booking_ts=booking_ts,
+        contact=contact,
+    )
+
+
+async def build_modification_context(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: int,
+    customer_id: int,
+    customer_row: asyncpg.Record,
+    enricher: Enricher,
+    payload: ModificationRequest,
+    prior_shipment_row: asyncpg.Record,
+    customer_external_id: str,
+    user_external_id: str,
+    hmac_secret: bytes,
+    contact: ContactData | None = None,
+    as_of: date | None = None,
+) -> tuple[dict[str, Any], CustomerBaseline, EnrichmentRow]:
+    """Build the Context dict for a modification evaluation.
+
+    Calls build_context with a synthesized BookingRequest reconstructed
+    from the prior shipment row, then layers on the 4 non-SQL
+    modification fields (time bucket, magnitude, direction, type).
+    Velocity fields (modification_velocity_1h / _24h) are populated with
+    placeholder zeroes in this commit — 3A.5 wires the real SQL.
+
+    The caller is responsible for resolving the prior shipment row and
+    customer / user external_ids before invocation, and for holding the
+    transaction inside which build_context's baseline FOR UPDATE lock
+    is acquired.
+    """
+    synthetic_booking = _booking_from_prior_shipment(
+        request_id=payload.request_id,
+        booking_ts=prior_shipment_row["booking_ts"],
+        prior_shipment=prior_shipment_row,
+        customer_external_id=customer_external_id,
+        user_external_id=user_external_id,
+        source_ip_override=(IPv4Address(str(payload.source_ip)) if payload.source_ip else None),
+        contact=contact,
+    )
+    destination_hmac = prior_shipment_row["destination_hmac"]
+    ctx, baseline, enrichment = await build_context(
+        conn,
+        tenant_id=tenant_id,
+        customer_id=customer_id,
+        customer_row=customer_row,
+        enricher=enricher,
+        payload=synthetic_booking,
+        destination_hmac=destination_hmac,
+        as_of=as_of,
+    )
+
+    ctx["modification_time_since_booking"] = _modification_time_bucket(
+        booking_ts=prior_shipment_row["booking_ts"],
+        modification_ts=payload.modification_ts,
+    )
+    ctx["modification_magnitude"] = _modification_magnitude(
+        modification_type=payload.modification_type,
+        new_value=payload.new_value,
+        prior_shipment=prior_shipment_row,
+        hmac_secret=hmac_secret,
+    )
+    ctx["modification_direction"] = _modification_direction(
+        modification_type=payload.modification_type,
+        new_value=payload.new_value,
+        baseline=baseline,
+    )
+    ctx["modification_type"] = payload.modification_type
+    # Velocity placeholders — 3A.5 wires count_user_modifications_1h/_24h
+    ctx["modification_velocity_1h"] = 0
+    ctx["modification_velocity_24h"] = 0
 
     return ctx, baseline, enrichment
 
