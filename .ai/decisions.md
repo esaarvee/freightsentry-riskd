@@ -303,6 +303,27 @@ Booking-path safety: `build_context` populates the 6 modification fields with ne
 
 Calibration commitments: in Phase 6 staging replay, every weight in this table is candidate for adjustment based on observed precision/recall against labelled fraud cases. The weights here are starting points, not final values.
 
+### Previously-rejected rule weight rationale (Phase 3B — 2026-05-27)
+
+Phase 3B.5 added 4 previously-rejected rules to `app/rules.yaml` (rule count: 75 → 79). Weights ported from `freight_risk`'s catalogue per Phase 3B verification §6 — these rules existed in the reference codebase and the operator decision is to mirror their proven values rather than re-derive.
+
+| Rule | Weight | Maturity-sensitive | freight_risk source |
+|---|---|---|---|
+| `email_previously_rejected_for_customer` | 0.60 | yes | freight_risk catalogue |
+| `phone_previously_rejected_for_customer` | 0.60 | yes | freight_risk catalogue |
+| `origin_previously_rejected_for_customer` | 0.70 | yes | freight_risk catalogue |
+| `ip_previously_rejected_for_customer` | 0.70 | yes | freight_risk catalogue |
+
+Origin and IP carry higher weight than email/phone — physical-address and source-IP re-use after a prior rejection is a stronger fraud signal than contact-info reuse (the latter can be a legitimate operator typo or a new use of the same person's email).
+
+All 4 are maturity-sensitive: a brand-new customer's single rejection should not dominate the score; Layer 2 downweights appropriately. A mature customer with one rejection contributes the full weight.
+
+Booking-path dormancy: build_context populates the 4 fields as `False` for any customer whose baseline has no prior rejections — pure dict lookups via 3B.4 (no SQL). The rules are structurally dormant for clean baselines. `test_previously_rejected_rules_dormant_under_clean_baseline` pins this invariant.
+
+Feedback path: the feedback endpoint (3B.3) writes `add_rejected_observation` to `rejected_email_hmacs`, `rejected_phone_hmacs`, `origin_stats.r_n`, and `ip_stats.r_n` for `rejected`/`fraud_confirmed` labels. The next booking by the same customer with matching dimensions trips the corresponding rule via the 3B.4 derivation. Integration verified in 3B.6 (booking → feedback → next-booking-triggers-rule chain).
+
+Calibration commitments: same as modification rules — Phase 6 staging replay candidate for adjustment based on observed precision/recall.
+
 ---
 
 ## DSL evaluator

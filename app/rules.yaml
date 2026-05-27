@@ -521,3 +521,36 @@ rules:
     condition: 'modification_type == "destination" AND is_residential_asn'
     weight: 0.35
     maturity_sensitive: true
+
+  # =====================================================================
+  # Previously-rejected rules (Phase 3B.5) — 4 rules consuming the
+  # email/phone/origin/ip_previously_rejected Context fields populated
+  # in 3B.4. Weights ported from freight_risk's catalogue (verified
+  # during 3B planning, §6 of verification). All maturity-sensitive:
+  # a young / thin-baseline customer with one prior rejection still
+  # contributes to score under Layer 2 with appropriate downweighting.
+  # =====================================================================
+
+  - name: email_previously_rejected_for_customer
+    description: "Email matches a previously-rejected contact for this customer"
+    condition: "email_previously_rejected"
+    weight: 0.60
+    maturity_sensitive: true
+
+  - name: phone_previously_rejected_for_customer
+    description: "Phone matches a previously-rejected contact for this customer"
+    condition: "phone_previously_rejected"
+    weight: 0.60
+    maturity_sensitive: true
+
+  - name: origin_previously_rejected_for_customer
+    description: "Origin address was previously rejected by a reviewer for this customer"
+    condition: "origin_previously_rejected"
+    weight: 0.70
+    maturity_sensitive: true
+
+  - name: ip_previously_rejected_for_customer
+    description: "Source IP was previously rejected by a reviewer for this customer"
+    condition: "ip_previously_rejected"
+    weight: 0.70
+    maturity_sensitive: true
