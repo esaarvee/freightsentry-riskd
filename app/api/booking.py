@@ -12,8 +12,9 @@ import json
 from dataclasses import asdict
 from typing import Annotated
 
+import asyncpg
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import AuthContext, require_api_token
 from app.baseline import classify_ip_type
@@ -46,13 +47,23 @@ async def evaluate_booking(
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
 
-        # Idempotency: replay returns prior decision without re-running scoring.
+        # Idempotency: replay returns prior decision without re-running
+        # scoring. Scoped by request_type='booking' to keep the booking
+        # and modification idempotency lookups symmetric — both
+        # endpoints filter by their own discriminator (parallel intent,
+        # easier to read side-by-side). The ux_decisions_tenant_request
+        # constraint enforces that request_id is unique within
+        # (tenant_id, request_id) regardless of type, so the filter
+        # narrows correctly even when both types theoretically share a
+        # namespace.
         existing = await conn.fetchrow(
             """
             SELECT decision, score, classification, risk_level,
                    triggered_rules, risk_factors
             FROM decisions
-            WHERE tenant_id = $1 AND request_id = $2
+            WHERE tenant_id = $1
+              AND request_id = $2
+              AND request_type = 'booking'
             """,
             auth.tenant_id,
             payload.request_id,
@@ -189,26 +200,47 @@ async def evaluate_booking(
             destination_hmac,
         )
 
-        # Persist decision.
+        # Persist decision with explicit request_type='booking' (3A.6
+        # makes the discriminator visible at the call site; the 0003
+        # migration's DEFAULT 'booking' would cover us if omitted, but
+        # explicit literal mirrors the modification endpoint's
+        # 'modification' literal and makes intent unambiguous).
+        #
+        # UniqueViolation handling: see app/api/modification.py for the
+        # parallel case. The current flat UNIQUE on
+        # (tenant_id, request_id) means a request_id colliding across
+        # booking + modification namespaces would 500 without this
+        # catch. Phase 5 BUGS.md follow-up widens the UNIQUE to include
+        # request_type.
         risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])
-        await conn.execute(
-            """
-            INSERT INTO decisions (
-                tenant_id, shipment_id, request_id, score, decision,
-                classification, risk_level, triggered_rules, risk_factors
+        try:
+            await conn.execute(
+                """
+                INSERT INTO decisions (
+                    tenant_id, shipment_id, request_id, request_type,
+                    score, decision,
+                    classification, risk_level, triggered_rules, risk_factors
+                )
+                VALUES ($1, $2, $3, 'booking', $4, $5, $6, $7, $8, $9::jsonb)
+                """,
+                auth.tenant_id,
+                shipment_id,
+                payload.request_id,
+                result.score,
+                result.decision,
+                result.classification,
+                result.risk_level,
+                list(result.triggered_rules),
+                risk_factor_json,
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
-            """,
-            auth.tenant_id,
-            shipment_id,
-            payload.request_id,
-            result.score,
-            result.decision,
-            result.classification,
-            result.risk_level,
-            list(result.triggered_rules),
-            risk_factor_json,
-        )
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "request_id already used by another decision in this tenant "
+                    "(booking-modification namespace collision)"
+                ),
+            ) from exc
 
         # Update customer counters — tenant_id filter as defense-in-depth.
         await conn.execute(

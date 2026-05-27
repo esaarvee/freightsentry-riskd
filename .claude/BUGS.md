@@ -18,3 +18,30 @@ Suggested action: when 2C closes, refresh the rule-count summary in
 PLAN_PHASE_2C.md to reflect actual 17 (and update the batch-summary
 "~63" total downstream — actual is 62 at the end of 2C.6, will be
 greater at end of 2C.7).
+
+## 2026-05-27 — decisions.ux_decisions_tenant_request UNIQUE is flat across request_type
+
+Discovered by: reviewer panel during 3A.6 execution (senior-engineer,
+security-auditor, code-flow concurred)
+Location: alembic/versions/0001_initial.py:141 +
+app/api/booking.py + app/api/modification.py
+Severity: medium
+Observation: The `decisions` table's UNIQUE constraint
+`(tenant_id, request_id)` predates the Phase 3A `request_type`
+discriminator. Both the booking and modification endpoint idempotency
+checks scope their SELECT by their own request_type (so a booking
+replay won't return a modification's envelope and vice versa), but the
+DB constraint does not include `request_type`. Consequence: a tenant
+who submits a booking with `request_id='X'` and later a modification
+with `request_id='X'` (or vice versa) hits an INSERT-time
+UniqueViolation. 3A.6 added try/except handlers on both endpoints to
+translate the violation into a clean 409 — but the underlying
+mismatch between the public idempotency semantics
+("(tenant_id, request_id, request_type)") and the DB enforcement
+("(tenant_id, request_id)") remains.
+Suggested action: Phase 5 hardening (or earlier opportunity) widens
+the UNIQUE constraint to
+`(tenant_id, request_type, request_id)` via an alembic migration. Once
+in place, the try/except 409 catches in booking.py + modification.py
+become defense-in-depth; the comments referencing this BUGS entry
+should be updated to mark RESOLVED.
