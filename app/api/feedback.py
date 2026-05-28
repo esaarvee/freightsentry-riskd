@@ -206,9 +206,57 @@ async def submit_feedback(
         # customer counter delta + audit-trail INSERT, all in one
         # transaction.
         if payload.label in _REJECTED_SET:
+            # FOR UPDATE on customer_baselines serialises concurrent
+            # feedback POSTs for the same customer.
             baseline = await CustomerBaseline.load(
                 conn, auth.tenant_id, prior["customer_id"], for_update=True
             )
+            # Re-run the tier-2 monotonicity SELECT AFTER acquiring the
+            # FOR UPDATE lock. Mirrors the pre-lock SELECT above (~30
+            # lines earlier); rerun under lock for race correctness.
+            # The earlier (pre-lock) read may have missed a concurrent
+            # commit; without this re-read two parallel
+            # rejected/fraud_confirmed POSTs for the same target could
+            # both see prior=None and both apply, double-incrementing
+            # the counter. The lock guarantees the second transaction
+            # blocks until the first commits, at which point this
+            # re-read returns the now-committed label.
+            prior_label_row = await conn.fetchrow(
+                """
+                SELECT label
+                  FROM feedback
+                 WHERE tenant_id = $1 AND target_request_id = $2
+                 ORDER BY feedback_ts DESC, created_at DESC
+                 LIMIT 1
+                """,
+                auth.tenant_id,
+                payload.target_request_id,
+            )
+            prior_label = prior_label_row["label"] if prior_label_row is not None else None
+            if not _label_stronger(new=payload.label, prior=prior_label):
+                # Concurrent winner committed a stronger-or-equal label;
+                # our application is now a no-op. Still INSERT the audit
+                # row (operator-action visibility).
+                try:
+                    await _insert_feedback_row(conn, auth.tenant_id, payload)
+                except asyncpg.UniqueViolationError as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="request_id already used for another feedback in this tenant",
+                    ) from exc
+                _log.info(
+                    "feedback.monotonicity_skip_post_lock",
+                    metric=True,
+                    tenant_id=auth.tenant_id,
+                    request_id=payload.request_id,
+                    new_label=payload.label,
+                    prior_label=prior_label,
+                )
+                return FeedbackResponse(
+                    applied=False,
+                    previous_label=cast(FeedbackLabel | None, prior_label),
+                    target_request_id=payload.target_request_id,
+                )
             dimensions_written = _apply_baseline_writes(
                 baseline=baseline,
                 prior=prior,
