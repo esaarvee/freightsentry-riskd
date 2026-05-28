@@ -101,6 +101,9 @@ addopts = [
     "--strict-markers",
     "--strict-config",
 ]
+markers = [
+    "serial: test mutates global state (e.g. role privileges); not xdist-safe",
+]
 
 [build-system]
 requires = ["hatchling"]
