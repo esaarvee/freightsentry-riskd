@@ -230,6 +230,59 @@ Phase 4 ships the schema validation + onboarding script. Phase 1 reads `tenants.
 
 ---
 
+## Currency normalization (Phase 3D — deferred to Phase 4)
+
+**Decision (2026-05-28)**: All absolute-value thresholds in `app/rules.yaml` carry an implicit-USD assumption. Per-currency normalization is deferred to Phase 4 via `TenantConfig.value_caps: dict[str, float]`.
+
+### Scope of the implicit-USD assumption
+
+The following Phase 2 rules in `app/rules.yaml` compare `shipment_value` against absolute literal thresholds. All assume USD:
+
+| Rule | Threshold | Currency assumption |
+|---|---|---|
+| `vpn_high_value` | `shipment_value > 1000` | USD |
+| `low_trust_high_value` | `shipment_value > 1000` | USD |
+| `flags_with_value` | `shipment_value > 2000` | USD |
+| `threat_intel_high_value` | `shipment_value > 2000` | USD |
+| `ip2p_threat_high_value` | `shipment_value > 2000` | USD |
+| `high_value_new_user` | `shipment_value > 5000` | USD |
+| `absolute_high_value` | `shipment_value > 10000` | USD |
+
+The `shipment_value` Context field is set directly from `BookingRequest.shipment.value` (a `Decimal` per `app/models.py`) with no transformation. `BookingRequest.shipment` has no `currency` field today — USD is presumed at the application boundary.
+
+Tenants whose business operates in CAD / EUR / GBP cannot use these rules accurately without per-tenant calibration.
+
+### Modification-specific note (Phase 3A scope)
+
+The Phase 3A modification rule `modification_within_30_min_value_increase` (3A.7) uses `modification_magnitude > 0.2` — a currency-independent fraction computed as `abs(new_value - old_value) / old_value`. This rule does **not** inherit the implicit-USD assumption.
+
+The other 7 modification rules (3A.7) condition on categorical fields (type, time bucket, direction, velocity) and do not introduce currency complexity.
+
+### Deferral to Phase 4
+
+Phase 4 will:
+
+1. Add `TenantConfig.value_caps: dict[str, float]` (e.g., `{"USD": 10000, "CAD": 12500, "EUR": 9000}`).
+2. Add an optional `currency: Literal["USD", "CAD", "EUR", ...]` field to `BookingRequest.shipment` and `ModificationRequest.new_value` where the value semantics apply.
+3. Rewrite the 7 absolute-value rule conditions to consult tenant config:
+   `shipment_value > tenant.value_caps.get(currency, tenant.value_caps['USD'])`.
+4. Provide a Phase 4 migration helper to populate the default `value_caps` for existing tenants (all `{"USD": <current threshold>}` — no behavior change for USD-implicit tenants).
+
+This deferral is intentional: Phase 3's scope is endpoint additions, not configuration model expansion. Mixing the two would conflate two different change axes.
+
+### What this means today
+
+- USD-implicit tenants are calibrated correctly out of the box.
+- Non-USD tenants will see rule thresholds that don't match their currency. Options:
+  1. **Wait for Phase 4** (recommended for production launch).
+  2. **Provide values pre-converted to USD** at the integration boundary (operator-side conversion). Adequate for staging; not a long-term solution.
+
+### Auditing
+
+The 7-rule corpus is enumerated above. If Phase 4+ adds another absolute-value rule, this section must be updated. If Phase 4+ rewrites these rules to use `TenantConfig.value_caps`, this section should be marked `## Currency normalization (RESOLVED in Phase 4)` with the resolving migration referenced.
+
+---
+
 ## Cold start
 
 For the first `cold_start_days` (per-tenant config, default 30):
