@@ -32,6 +32,31 @@ _log = structlog.get_logger(__name__)
 DEFAULT_ALLOWED_CURRENCIES: list[str] = ["USD"]
 DEFAULT_COLD_START_GRACE_DAYS: int = 0
 
+# Project-default per-currency value caps (Phase 4B).
+#
+# Tier values match the absolute literals in the 7 currency-implicit rules
+# pre-Phase-4B (see app/rules.yaml):
+#   - high     = 10000   (absolute_high_value)
+#   - new_user = 5000    (high_value_new_user)
+#   - medium   = 2000    (flags_with_value, threat_intel_high_value,
+#                         ip2p_threat_high_value)
+#   - low      = 1000    (low_trust_high_value, vpn_high_value)
+#
+# USD-implicit. Tenants that need non-USD pricing populate
+# tenant_config.value_caps with per-currency overrides. Empty/None
+# value_caps means "use these defaults". If a tenant adds a non-USD
+# currency to allowed_currencies but doesn't provide a matching
+# value_caps[currency], resolve_value_caps falls back to USD-default and
+# emits a warning log.
+DEFAULT_VALUE_CAPS: dict[str, dict[str, float]] = {
+    "USD": {
+        "high": 10000.0,
+        "new_user": 5000.0,
+        "medium": 2000.0,
+        "low": 1000.0,
+    }
+}
+
 
 class TenantConfig(BaseModel):
     """Pydantic v2 validation boundary for per-tenant overrides.
@@ -237,3 +262,33 @@ async def load_tenant_config(
         metric=True,
     )
     return config
+
+
+def resolve_value_caps(
+    tenant_config: TenantConfig,
+    currency: str,
+) -> dict[str, float]:
+    """Return the 4-tier threshold dict for the given currency.
+
+    Resolution priority:
+      1. tenant_config.value_caps[currency] if both the dict and the
+         currency key are present.
+      2. DEFAULT_VALUE_CAPS["USD"] as a safety fallback. Logs a
+         `tenant_config.value_caps.fallback` warning with the tenant_id
+         and currency so operators can spot the misconfiguration.
+
+    Currency is validated at request time before this helper runs (4B.3)
+    — so a currency reaching this helper is always in
+    tenant_config.allowed_currencies. The fallback covers the
+    operator-misconfiguration case where a currency is allowed but no
+    tier dict exists for it.
+    """
+    if tenant_config.value_caps and currency in tenant_config.value_caps:
+        return tenant_config.value_caps[currency]
+    _log.warning(
+        "tenant_config.value_caps.fallback",
+        tenant_id=tenant_config.tenant_id,
+        currency=currency,
+        metric=True,
+    )
+    return DEFAULT_VALUE_CAPS["USD"]
