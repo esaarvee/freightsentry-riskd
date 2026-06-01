@@ -59,6 +59,19 @@ async def evaluate_modification(
         # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
         tenant_config = await load_tenant_config(conn, auth.tenant_id)
 
+        # 4B.3 request-time currency check. Modification carries its own
+        # `currency` (defaults to USD); the modification's currency may differ
+        # from the prior shipment's, which is fine — value-tier rules at the
+        # modification evaluation use the modification's currency.
+        if payload.currency not in tenant_config.allowed_currencies:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"currency {payload.currency!r} is not in tenant's "
+                    f"allowed list {tenant_config.allowed_currencies}"
+                ),
+            )
+
         # First-tier idempotency: replay of this modification's request_id
         # returns the prior decision without re-scoring. Scoped to
         # request_type='modification' so a booking that happens to share

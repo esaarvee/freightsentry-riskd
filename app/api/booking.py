@@ -53,6 +53,19 @@ async def evaluate_booking(
         # validation, 4C cold-start) are downstream.
         tenant_config = await load_tenant_config(conn, auth.tenant_id)
 
+        # 4B.3 request-time currency check. ISO 4217 shape is enforced at the
+        # Pydantic layer (4B.1); this is the allowed-list enforcement. 400 is
+        # the right code — the request is well-formed but the chosen currency
+        # is not in this tenant's allowed list.
+        if payload.shipment.currency not in tenant_config.allowed_currencies:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"currency {payload.shipment.currency!r} is not in tenant's "
+                    f"allowed list {tenant_config.allowed_currencies}"
+                ),
+            )
+
         # Idempotency: replay returns prior decision without re-running
         # scoring. Scoped by request_type='booking' to keep the booking
         # and modification idempotency lookups symmetric — both
