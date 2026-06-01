@@ -365,6 +365,46 @@ For the first `cold_start_days` (per-tenant config, default 30):
 - Mid-band scores route to REVIEW more aggressively (compress the ALLOW band via the `cold_start_days` window in tenant config)
 - Per-customer cold-start within a tenant handled naturally by Layer 2 — `base_prior = MaxNewAccount * (1 - maturity)` elevates new-customer scores; maturity-sensitive rules fire softer.
 
+### Per-tenant maturity overrides (Phase 4C — 2026-06-01)
+
+`app/scoring.py::score` consults `tenant_config` for the three Layer 2 + Layer 3 maturity constants:
+
+| Constant | Override field | Project default |
+|---|---|---|
+| `maturity_age_days` | `tenant_config.maturity_age_days` | 180 (`MATURITY_AGE_DAYS`) |
+| `maturity_shipments` | `tenant_config.maturity_shipments` | 50 (`MATURITY_SHIPMENTS`) |
+| `maturity_k` | `tenant_config.maturity_k` | 0.30 (`MATURITY_K`) |
+
+`None` on a TenantConfig override means "use project default from `app/scoring_constants.py`". The constants module REMAINS source of truth; TenantConfig is overrides on top.
+
+The Phase 2A scoring formula is unchanged (multiplicative maturity, linear shipments fraction, 4-tier flag prior, no customer-inheritance). Only the thresholds consulted change.
+
+### Cold-start grace period (Phase 4C — 2026-06-01)
+
+`tenant_config.cold_start_grace_days` (default 0; disabled) — during the grace window after tenant onboarding (measured from `tenants.created_at`), the maturity formula multiplies its computed value by 0.5. After the window, no multiplier.
+
+Rationale: a newly-onboarded tenant has no accumulated baselines, so maturity-sensitive rules may fire too aggressively on legitimate first customers. The 0.5 multiplier softens scoring during the grace window, biasing toward REVIEW rather than BLOCK while the tenant builds baselines.
+
+The 0.5 multiplier is hardcoded — not tenant-configurable in Phase 4. Phase 6 staging replay measures FPR impact and may revise.
+
+Per-customer cold-start (a customer is new to a mature tenant) is NOT affected by this mechanism — that's handled by Layer 2 base_prior already. `cold_start_grace_days` is tenant-wide.
+
+### Composition
+
+Grace × maturity composition with a maturity-sensitive rule (weight 0.6):
+
+| Maturity state | m | K=0.30 effective weight |
+|---|---|---|
+| Mature (post-grace, ≥180 days, ≥50 shipments) | 1.0 | 0.60 |
+| Grace-active, mature customer (m_raw=1.0) | 0.5 | 0.51 |
+| Brand-new at default tenant (m_raw=0.0) | 0.0 | 0.42 |
+
+Grace creates an intermediate behavior path "softer than mature, harder than brand-new" — intentional. Phase 4C integration tests pin the formula behavior.
+
+### Layer 1 invariance
+
+Both per-tenant maturity overrides AND cold-start grace are bypassed when a Layer 1 BLOCK rule fires. Pinned by `test_layer_1_short_circuit_does_not_consult_tenant_config` (unit) and `test_overrides_do_not_affect_layer_1_block` + `test_grace_does_not_affect_layer_1_block` (integration). The fast-path BLOCK semantics are unchanged from Phase 2.
+
 ---
 
 ## IP enrichment sources
