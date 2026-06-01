@@ -39,12 +39,54 @@ from typing import Any, Literal
 from app.rules import Rule, RuleSet, Thresholds
 from app.scoring_constants import (
     FLAG_WEIGHTS,
+    MATURITY_AGE_DAYS,
     MATURITY_K,
+    MATURITY_SHIPMENTS,
     MAX_NEW_ACCOUNT,
     TRUST_FACTOR,
     flagged_count_tier,
-    maturity,
 )
+from app.tenant_config import TenantConfig
+
+
+def _resolved_maturity_constants(tenant_config: TenantConfig) -> tuple[int, int, float]:
+    """Return (age_days_threshold, shipments_threshold, k) with overrides applied.
+
+    None on a TenantConfig override means "use project default from
+    app/scoring_constants.py" — the constants module REMAINS the source of
+    truth for defaults; TenantConfig overrides on top.
+    """
+    age = (
+        tenant_config.maturity_age_days
+        if tenant_config.maturity_age_days is not None
+        else MATURITY_AGE_DAYS
+    )
+    ship = (
+        tenant_config.maturity_shipments
+        if tenant_config.maturity_shipments is not None
+        else MATURITY_SHIPMENTS
+    )
+    k = tenant_config.maturity_k if tenant_config.maturity_k is not None else MATURITY_K
+    return age, ship, k
+
+
+def _maturity_with_overrides(
+    *,
+    age_days: int,
+    total_shipments: int,
+    age_threshold: int,
+    ship_threshold: int,
+) -> float:
+    """Maturity formula consulting tenant-supplied thresholds.
+
+    Mirrors app/scoring_constants.py::maturity but with caller-supplied
+    thresholds instead of module-level constants. Phase 2A formula is
+    UNCHANGED: multiplicative age_frac * ship_frac (per decisions.md
+    Layer 2 amendment).
+    """
+    age_frac = min(max(age_days, 0) / age_threshold, 1.0)
+    ship_frac = min(max(total_shipments, 0) / ship_threshold, 1.0)
+    return age_frac * ship_frac
 
 
 @dataclass(frozen=True)
@@ -90,8 +132,11 @@ def score(
     ctx: Mapping[str, Any],
     *,
     customer_state: CustomerState,
+    tenant_config: TenantConfig,
 ) -> ScoringResult:
     # Layer 1 — hard-block short-circuit. Bypasses Layer 2 entirely.
+    # tenant_config is NOT consulted on the BLOCK fast-path — see
+    # test_layer_1_short_circuit_does_not_consult_tenant_config (4C.1).
     for rule in ruleset.rules:
         if rule.action != "BLOCK":
             continue
@@ -108,15 +153,22 @@ def score(
                 risk_factors=(_to_factor(rule),),
             )
 
-    # Layer 2 — account prior.
-    m = maturity(customer_state.account_age_days, customer_state.total_shipments)
+    # Layer 2 — account prior with per-tenant maturity overrides (4C.1).
+    age_threshold, ship_threshold, k = _resolved_maturity_constants(tenant_config)
+    m = _maturity_with_overrides(
+        age_days=customer_state.account_age_days,
+        total_shipments=customer_state.total_shipments,
+        age_threshold=age_threshold,
+        ship_threshold=ship_threshold,
+    )
+    # m = _apply_cold_start_grace(m, tenant_config)  # 4C.2 wires here
     base_prior = MAX_NEW_ACCOUNT * (1.0 - m)
     trust_risk = max(0.0, (0.5 - customer_state.trust_score) / 0.5)
     trust_contribution = trust_risk * TRUST_FACTOR
     flag_prior = FLAG_WEIGHTS[flagged_count_tier(customer_state.flagged_count)]
     account_prior = _noisy_or([base_prior, trust_contribution, flag_prior])
 
-    # Layer 3 — signal noisy-OR with maturity downweight.
+    # Layer 3 — signal noisy-OR with maturity downweight (k resolved per-tenant).
     triggered: list[Rule] = []
     effective_weights: list[float] = []
     factors: list[RiskFactor] = []
@@ -124,10 +176,7 @@ def score(
         if rule.action == "BLOCK":
             continue
         if rule.evaluate(ctx):
-            if rule.maturity_sensitive:
-                w = rule.weight * (1.0 - MATURITY_K * (1.0 - m))
-            else:
-                w = rule.weight
+            w = rule.weight * (1.0 - k * (1.0 - m)) if rule.maturity_sensitive else rule.weight
             triggered.append(rule)
             effective_weights.append(w)
             factors.append(RiskFactor(name=rule.name, description=rule.description, weight=w))
