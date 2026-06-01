@@ -49,8 +49,8 @@ rules:
     weight: 0.5
 
   - name: vpn_high_value
-    description: "VPN + high-value shipment"
-    condition: "is_vpn AND shipment_value > 1000"
+    description: "VPN + high-value shipment (above tenant's low tier threshold)"
+    condition: "is_vpn AND shipment_value > shipment_value_threshold_low"
     weight: 0.3
 
   - name: customer_daily_volume_spike
@@ -118,8 +118,8 @@ rules:
     maturity_sensitive: true
 
   - name: low_trust_high_value
-    description: "Low-trust customer attempting a high-value booking"
-    condition: "trust_score < 0.3 AND shipment_value > 1000"
+    description: "Low-trust customer attempting a booking above tenant's low tier threshold"
+    condition: "trust_score < 0.3 AND shipment_value > shipment_value_threshold_low"
     weight: 0.20
     maturity_sensitive: true
 
@@ -141,8 +141,8 @@ rules:
     weight: 0.25
 
   - name: flags_with_value
-    description: "Customer with >3 prior flags attempting a high-value booking"
-    condition: "flagged_count > 3 AND shipment_value > 2000"
+    description: "Customer with >3 prior flags attempting a booking above tenant's medium tier threshold"
+    condition: "flagged_count > 3 AND shipment_value > shipment_value_threshold_medium"
     weight: 0.40
 
   - name: vpn_known_user
@@ -302,8 +302,8 @@ rules:
     weight: 0.40
 
   - name: high_value_new_user
-    description: "Brand-new user attempting a high-value (>5000) shipment"
-    condition: "shipment_value > 5000 AND is_new_user"
+    description: "Brand-new user attempting a shipment above tenant's new-user tier threshold"
+    condition: "shipment_value > shipment_value_threshold_new_user AND is_new_user"
     weight: 0.35
 
   # =====================================================================
@@ -339,18 +339,18 @@ rules:
     weight: 0.25
 
   - name: absolute_high_value
-    description: "Absolute high-value shipment (>10000) regardless of customer baseline"
-    condition: "shipment_value > 10000"
+    description: "Absolute high-value shipment (above tenant's high tier) regardless of customer baseline"
+    condition: "shipment_value > shipment_value_threshold_high"
     weight: 0.20
 
   - name: threat_intel_high_value
-    description: "FireHOL-listed IP combined with high-value (>2000) shipment"
-    condition: "ip_in_threat_list AND shipment_value > 2000"
+    description: "FireHOL-listed IP combined with shipment above tenant's medium tier threshold"
+    condition: "ip_in_threat_list AND shipment_value > shipment_value_threshold_medium"
     weight: 0.30
 
   - name: ip2p_threat_high_value
-    description: "IP2Proxy threat tag combined with high-value (>2000) shipment"
-    condition: "ip2p_threat_any AND shipment_value > 2000"
+    description: "IP2Proxy threat tag combined with shipment above tenant's medium tier threshold"
+    condition: "ip2p_threat_any AND shipment_value > shipment_value_threshold_medium"
     weight: 0.40
 
   # Geographic (5 rules)
