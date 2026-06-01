@@ -30,6 +30,7 @@ from app.context import build_context
 from app.enrich import Enricher, EnrichmentRow
 from app.models import Address, BookingRequest, CustomerData, ShipmentData, UserData
 from app.signal_helpers import hmac_hex
+from tests.conftest import make_default_tenant_config
 
 _PHASE_2B_FIELDS = frozenset(
     {
@@ -183,6 +184,7 @@ async def test_build_context_returns_all_phase2_fields(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
 
     missing = _PHASE_2B_FIELDS - set(ctx.keys())
@@ -222,6 +224,7 @@ async def test_customer_locked_cloud_api_strict_threshold_via_build_context(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["customer_locked_cloud_api"] is False
 
@@ -252,6 +255,7 @@ async def test_customer_locked_cloud_api_just_above_threshold_via_build_context(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["customer_locked_cloud_api"] is True
 
@@ -283,6 +287,7 @@ async def test_customer_locked_cloud_api_fails_below_observations_threshold(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["customer_locked_cloud_api"] is False
 
@@ -324,6 +329,7 @@ async def test_impossible_travel_flips_when_same_day_500km(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["impossible_travel"] is True
     assert ctx["days_since_last_booking"] == 0
@@ -360,6 +366,7 @@ async def test_impossible_travel_false_when_distance_below_threshold(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["impossible_travel"] is False
     assert ctx["days_since_last_booking"] == 0
@@ -385,6 +392,7 @@ async def test_impossible_travel_false_for_first_booking(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["impossible_travel"] is False
     assert ctx["days_since_last_booking"] is None
@@ -414,6 +422,7 @@ async def test_ip_familiarity_tier_exposed_as_string(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["ip_familiarity_tier"] == "fully_new"
     assert ctx["ip_new_known_asn"] is False
@@ -507,6 +516,7 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
             enricher=enricher,
             payload=payload,
             destination_hmac=dest_hmac,
+            tenant_config=make_default_tenant_config(),
         )
         # Tenant_a sees 2 priors (NOT 5 — the 3 in other_tenant are excluded).
         assert ctx["recipient_cross_customer_count"] == 2
@@ -563,6 +573,7 @@ async def test_is_residential_asn_matrix_through_build_context(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["is_residential_asn"] is expected
 
@@ -596,6 +607,7 @@ async def test_is_new_user_strict_boundary_via_build_context(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["is_new_user"] is expected
 
@@ -633,6 +645,7 @@ async def test_ip_new_known_asn_positive_when_asn_in_baseline(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["ip_familiarity_tier"] == "new_known_asn"
     assert ctx["ip_new_known_asn"] is True
@@ -673,5 +686,6 @@ async def test_ip2p_threat_any_via_build_context(
         enricher=enricher,
         payload=payload,
         destination_hmac=dest_hmac,
+        tenant_config=make_default_tenant_config(),
     )
     assert ctx["ip2p_threat_any"] is expected

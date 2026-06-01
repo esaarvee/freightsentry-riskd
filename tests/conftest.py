@@ -12,6 +12,7 @@ import json
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,25 @@ from app.config import get_settings
 from app.db import close_pool, init_pool
 from app.main import app
 from app.runtime import init_runtime
+from app.tenant_config import TenantConfig
+
+
+def make_default_tenant_config(tenant_id: int = 1) -> TenantConfig:
+    """Synthetic TenantConfig for tests calling build_context / score directly.
+
+    All overrides None, defaults applied — matches a freshly-onboarded
+    tenant with empty `tenants.config` JSONB. Used by unit tests that
+    construct contexts without going through the endpoint (which would
+    load the config from DB).
+    """
+    now = datetime.now(UTC)
+    return TenantConfig(
+        tenant_id=tenant_id,
+        config_version=0,
+        created_at=now,
+        updated_at=now,
+    )
+
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

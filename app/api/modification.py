@@ -38,6 +38,7 @@ from app.models import ModificationRequest, ModificationResponse, RiskFactor
 from app.rules import RuleSet
 from app.runtime import get_enricher, get_ruleset
 from app.scoring import CustomerState, score
+from app.tenant_config import load_tenant_config
 
 _log = structlog.get_logger(__name__)
 
@@ -54,6 +55,9 @@ async def evaluate_modification(
 ) -> ModificationResponse:
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
+
+        # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
+        tenant_config = await load_tenant_config(conn, auth.tenant_id)
 
         # First-tier idempotency: replay of this modification's request_id
         # returns the prior decision without re-scoring. Scoped to
@@ -166,6 +170,7 @@ async def evaluate_modification(
             customer_external_id=prior["customer_external_id"],
             user_external_id=prior["user_external_id"],
             hmac_secret=secret,
+            tenant_config=tenant_config,
             contact=None,
         )
 

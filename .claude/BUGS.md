@@ -45,3 +45,26 @@ the UNIQUE constraint to
 in place, the try/except 409 catches in booking.py + modification.py
 become defense-in-depth; the comments referencing this BUGS entry
 should be updated to mark RESOLVED.
+
+## 2026-06-01 — ruff version drift between pre-commit pin and local install
+
+Discovered by: senior-engineer reviewer during 4A.4 cycle-1
+Location: `.pre-commit-config.yaml` (ruff hook version pin) vs locally
+installed ruff (`pip show ruff` reports 0.15.7; pre-commit pin appears
+to be 0.6.0)
+Severity: low (workflow / review-quality)
+Observation: `ruff format app/ tests/` on the local install produces
+formatting changes (frozenset member layout, parenthesized call
+expansion, implicit-string-concat merges, assert tuple-form) that the
+pre-commit hook (running an older ruff) does NOT make. Net effect: any
+commit that runs `ruff format` over the whole tree reformats ~22 files
+unrelated to the current task, inflating the review surface. Caught
+in 4A.4 cycle-1 review (NEEDS MINOR FIXES) and reverted via
+`git checkout HEAD -- <unrelated-files>`; in-scope 5-file diff
+restored.
+Suggested action: bump the ruff pin in `.pre-commit-config.yaml` to
+match the current ecosystem version (likely 0.15.x), run `ruff format`
+across the codebase once in a dedicated formatting-sync commit, and
+land that BEFORE the next phase to avoid re-running into the same
+scope-creep risk on every commit. Until then: only run `ruff format`
+on the files actually touched by the commit, not the whole tree.

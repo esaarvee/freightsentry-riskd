@@ -28,6 +28,7 @@ from app.runtime import get_enricher, get_ruleset
 from app.scoring import CustomerState, score
 from app.services.entity_upsert import upsert_customer, upsert_user
 from app.signal_helpers import email_domain, hmac_hex, netblock_24
+from app.tenant_config import load_tenant_config
 
 _log = structlog.get_logger(__name__)
 
@@ -46,6 +47,11 @@ async def evaluate_booking(
     # is transaction-scoped and silently no-ops outside one.
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
+
+        # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
+        # Sub-millisecond indexed PK lookup; consumers (4B currency
+        # validation, 4C cold-start) are downstream.
+        tenant_config = await load_tenant_config(conn, auth.tenant_id)
 
         # Idempotency: replay returns prior decision without re-running
         # scoring. Scoped by request_type='booking' to keep the booking
@@ -140,6 +146,7 @@ async def evaluate_booking(
             enricher=enricher,
             payload=payload,
             destination_hmac=destination_hmac,
+            tenant_config=tenant_config,
             email_hmac=email_hmac,
             phone_hmac=phone_hmac,
         )
