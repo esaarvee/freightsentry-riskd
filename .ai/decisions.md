@@ -228,6 +228,60 @@ class TenantConfig(BaseModel):
 
 Phase 4 ships the schema validation + onboarding script. Phase 1 reads `tenants.config` directly without validation (Pydantic round-trip lands in Phase 4). In-process cache for hot tenants from Phase 5.
 
+### TenantConfig design (Phase 4A — 2026-06-01)
+
+Phase 4A operationalizes the per-tenant configuration layer described above. The following choices were made during 4A planning + execution and are operator-approved.
+
+**Column reuse, not addition.** `tenants.config` (already in `alembic/versions/0001_initial.py:42` as `jsonb NOT NULL DEFAULT '{}'`) is the storage column. The Phase 4 prompt initially referenced `tenants.config_json` as a new column; that was a drafting inconsistency with the pre-existing schema. 4A reuses the existing column.
+
+**Module path.** `app/tenant_config.py` (Phase 4 prompt path; supersedes the earlier `app/config_tenant.py` reference at the top of this section).
+
+**Final field set** (as shipped in 4A.1):
+
+```python
+class TenantConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tenant_id: int                                       # gt=0; supplied by loader, not stored in JSONB
+    config_version: int = 0                              # ge=0; bumped on every config change
+
+    # Override fields — None means "use scoring_constants.py default"
+    maturity_age_days: int | None = None                 # gt=0; default 180
+    maturity_shipments: int | None = None                # gt=0; default 50
+    maturity_k: float | None = None                      # 0.0-1.0; default 0.30
+    value_caps: dict[str, dict[str, float]] | None = None  # {currency: {tier: threshold}}
+
+    # Non-None defaults
+    allowed_currencies: list[str] = ["USD"]              # ISO 4217 3-letter
+    cold_start_grace_days: int = 0                       # ge=0
+
+    # Metadata — supplied by the loader from row columns
+    created_at: datetime
+    updated_at: datetime
+```
+
+`app/scoring_constants.py` REMAINS the source of truth for project defaults; TenantConfig overrides on top. The `allow_max`/`block_min`/`country_blocklist`/`country_allowlist`/`is_api_partner_default` fields in the historical sketch above did NOT land in 4A — `allow_max`/`block_min` continue to live in `app/rules.yaml` per Phase 2A discipline, and country lists + api_partner_default are out of scope until a consumer exists.
+
+**`value_caps` shape: 4-tier per-currency.** `dict[currency: str, dict[tier: str, threshold: float]]` where `tier ∈ {high, new_user, medium, low}` — matches the 4 distinct thresholds in the 7 currency-implicit rules 4B rewrites. Adding a 5th tier is a model change reviewed under the standard panel. `value_caps == None` means "use DEFAULT_VALUE_CAPS at the 4B consumer" (USD-implicit, Phase 2 thresholds).
+
+**Loading semantics: per-request fresh load.** `load_tenant_config(conn, tenant_id)` runs inside every booking/modification/feedback endpoint's transaction, AFTER `set_tenant_id(conn, auth.tenant_id)` and BEFORE any other DB read. The `tenants` table is intentionally non-RLS (`0001_initial.py:36-37`); the loader uses explicit `WHERE id = $1` as defense-in-depth. No caching in Phase 4. Phase 5 wraps the loader with a 60s in-process TTL cache (carry-forward).
+
+**Validation timing.** Read path: `parse_config_jsonb` validates JSONB → Pydantic every load; stored-data corruption surfaces as `pydantic.ValidationError` propagating through the endpoint (no try/except in 4A — Phase 4D/5 may translate to 500 with structured log). Write path: `scripts/tenant_onboard.py::_validate_initial_config` validates before INSERT/UPDATE.
+
+**JSONB codec discipline.** asyncpg returns JSONB as `str` by default in this project (no `set_type_codec` registered). The loader's cast-at-boundary pattern handles BOTH codec paths (str via `json.loads`, dict via direct cast) so a future codec registration is non-breaking. Phase 3B lesson applied.
+
+**Migration 0005.** Added `tenants.updated_at timestamptz NOT NULL DEFAULT now()` for staleness tracking. The onboarding script and admin write endpoints (post-v1) bump it on every config change.
+
+**Onboarding script** (`scripts/tenant_onboard.py`): idempotent UPSERT-by-name with `pg_advisory_xact_lock(hashtext(external_id))` to serialize concurrent runs (since `tenants.name` has no UNIQUE constraint today). Sets `set_config('app.tenant_id', tenant_id, true)` before any `api_tokens` query so the script works under the production non-superuser `riskd_app` role. `--rotate-token` REVOKES prior tokens (in-transaction DELETE) before issuing a new one.
+
+**Phase 4A non-consumers.** No rule in 4A reads tenant_config — the parameter is threaded through `build_context` and `build_modification_context` as a passthrough. 4B (currency normalization) adds 5 ctx fields from `value_caps`. 4C (cold-start enforcement) adds tenant-config consultation inside `score()`.
+
+**Carry-forward items** (post-4A):
+- `UNIQUE (name)` on `tenants` would replace the advisory-lock pattern with `INSERT ... ON CONFLICT (name) DO UPDATE` (BUGS.md candidate).
+- Destructive `tenants.config` overwrite on re-run of the onboarding script is intentional per docstring; an `--overwrite-config` flag may be added later.
+- Private `_hash_token` import in the script suggests promoting to a public `hash_api_token` helper.
+- Phase 5 in-process TTL cache wrapping `load_tenant_config`.
+
 ---
 
 ## Currency normalization (Phase 3D — deferred to Phase 4)
