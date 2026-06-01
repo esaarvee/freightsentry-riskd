@@ -58,8 +58,8 @@ Audit point: the tenant_id passed to `load_tenant_config` ALWAYS comes from `aut
 - `app/api/booking.py:54` — `await load_tenant_config(conn, auth.tenant_id)`
 - `app/api/modification.py:60` — same
 - `app/api/feedback.py:115` — same
-- `app/api/admin.py:91` (get_admin_decision) — same
-- `app/api/admin.py:178` (get_admin_customer_baseline) — same
+- `app/api/admin.py:98` (get_admin_decision) — same
+- `app/api/admin.py:185` (get_admin_customer_baseline) — same
 
 No code path takes tenant_id from request input.
 
