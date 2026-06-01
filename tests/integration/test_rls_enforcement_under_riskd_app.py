@@ -267,9 +267,12 @@ async def test_rls_blocks_unset_tenant_context(
 
 # ---------------------------------------------------------------------------
 # Phase 4D admin endpoint extension — RLS enforces against the SQL patterns
-# the admin endpoints execute. This guards Phase 5's role transition: when
-# the runtime DB user switches to riskd_app_login, admin endpoints continue
-# to respect tenant isolation.
+# the admin endpoints execute. The canary role today is `riskd_app` (NOLOGIN,
+# granted LOGIN per test by the fixture); Phase 5 will create
+# `riskd_app_login` with the same membership, and these tests will pin
+# tenant-isolation invariants under that transition. The FastAPI-layer
+# enforcement matrix lives in tests/integration/test_admin_endpoints.py
+# (which uses dependency-override).
 # ---------------------------------------------------------------------------
 
 
@@ -341,22 +344,52 @@ async def test_rls_admin_customer_lookup_scoped_by_tenant(
 
 @pytest.mark.serial
 async def test_rls_admin_baseline_lookup_scoped_by_tenant(
+    db_conn: asyncpg.Connection,
     riskd_app_conn: asyncpg.Connection,
     two_tenants_with_shipments: tuple[int, int],
 ) -> None:
     """Admin customer-baseline endpoint runs `SELECT FROM customer_baselines
-    WHERE tenant_id = $1 AND customer_id = $2`. Under riskd_app session,
-    cross-tenant baseline lookups return nothing."""
+    WHERE tenant_id = $1 AND customer_id = $2` (admin.py:202-222). This test
+    exercises THAT EXACT pattern — both predicates — under the riskd_app
+    session for both cross-tenant (negative) and same-tenant (positive)
+    cases, distinguishing it from the parametrized table-level RLS canary
+    above (which only tests the single-predicate `tenant_id = $1`).
+    """
     tenant_a, tenant_b = two_tenants_with_shipments
-    # First, resolve tenant_b's customer_id under the superuser db_conn
-    # because the riskd_app session can't see it. We need the customer_id
-    # to ask "can riskd_app see this baseline?".
+    # Resolve both tenants' customer_id values under the superuser db_conn
+    # — the riskd_app session can't see tenant_b's customers (RLS hides
+    # them), so we need the actual customer_ids to pose the two-predicate
+    # lookup the admin endpoint runs.
+    tenant_b_customer_id: int = await db_conn.fetchval(
+        "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 LIMIT 1",
+        tenant_b,
+    )
+    assert tenant_b_customer_id is not None, "fixture seed failed for tenant_b"
+    tenant_a_customer_id: int = await db_conn.fetchval(
+        "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 LIMIT 1",
+        tenant_a,
+    )
+    assert tenant_a_customer_id is not None, "fixture seed failed for tenant_a"
+
     async with riskd_app_conn.transaction():
         await riskd_app_conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_a))
-        # As tenant_a, query for a baseline row with tenant_b's tenant_id.
-        # RLS hides tenant_b's rows, so the count is 0.
-        leaked = await riskd_app_conn.fetchval(
-            "SELECT count(*) FROM customer_baselines WHERE tenant_id = $1",
+        # Negative: as tenant_a, query tenant_b's (tenant_id, customer_id)
+        # pair — the EXACT shape admin.py runs. RLS hides tenant_b's
+        # baselines, so the lookup returns None.
+        row = await riskd_app_conn.fetchrow(
+            "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 AND customer_id = $2",
             tenant_b,
+            tenant_b_customer_id,
         )
-        assert leaked == 0, f"RLS leak: tenant_a saw {leaked} tenant_b customer_baselines rows"
+        assert row is None, "RLS leak: tenant_a saw tenant_b's baseline via dual-key lookup"
+        # Positive: tenant_a's own (tenant_id, customer_id) pair returns
+        # its own baseline. Guards against an over-restrictive RLS policy
+        # that would silently deny everything (all 3 admin-RLS tests'
+        # negative assertions would otherwise pass under such a policy).
+        row_a = await riskd_app_conn.fetchrow(
+            "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 AND customer_id = $2",
+            tenant_a,
+            tenant_a_customer_id,
+        )
+        assert row_a is not None
+        assert row_a["customer_id"] == tenant_a_customer_id
