@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 from app.context import build_context, build_modification_context
 
 
@@ -25,9 +23,9 @@ def test_build_context_signature_requires_tenant_config() -> None:
     assert "tenant_config" in sig.parameters
     param = sig.parameters["tenant_config"]
     assert param.kind == inspect.Parameter.KEYWORD_ONLY
-    assert param.default is inspect.Parameter.empty, (
-        "tenant_config must be a required keyword arg; 4B/4C consumers depend on it being present"
-    )
+    assert (
+        param.default is inspect.Parameter.empty
+    ), "tenant_config must be a required keyword arg; 4B/4C consumers depend on it being present"
 
 
 def test_build_modification_context_signature_requires_tenant_config() -> None:
@@ -38,12 +36,14 @@ def test_build_modification_context_signature_requires_tenant_config() -> None:
     assert param.default is inspect.Parameter.empty
 
 
-@pytest.mark.skip(
-    reason=(
-        "Phase 4A keeps the ctx shape unchanged (66 fields). 4B.4 adds 5 "
-        "currency-derived fields and grows the whitelist to 71. Re-enable "
-        "with the 71-field assertion at 4B.4."
-    )
-)
-def test_ctx_shape_unchanged_in_4a() -> None:
-    pass
+def test_allowed_context_fields_count_is_71_after_4b4() -> None:
+    """4A starts at 66; 4B.4 adds 5 currency-derived fields → 71."""
+    from app.rules import ALLOWED_CONTEXT_FIELDS
+
+    assert len(ALLOWED_CONTEXT_FIELDS) == 71
+    # The 5 new fields must be present in the whitelist.
+    assert "shipment_currency" in ALLOWED_CONTEXT_FIELDS
+    assert "shipment_value_threshold_high" in ALLOWED_CONTEXT_FIELDS
+    assert "shipment_value_threshold_new_user" in ALLOWED_CONTEXT_FIELDS
+    assert "shipment_value_threshold_medium" in ALLOWED_CONTEXT_FIELDS
+    assert "shipment_value_threshold_low" in ALLOWED_CONTEXT_FIELDS

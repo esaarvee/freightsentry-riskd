@@ -50,7 +50,7 @@ from app.signal_helpers import (
     is_phone_dummy_pattern,
     netblock_24,
 )
-from app.tenant_config import TenantConfig
+from app.tenant_config import TenantConfig, resolve_value_caps
 from app.trust import compute_trust_score
 from app.velocity import (
     count_ip_daily,
@@ -85,17 +85,10 @@ async def build_context(
     customer update) inside the same transaction as the baseline
     FOR UPDATE lock acquired here.
 
-    `tenant_config` is threaded through for downstream consumers
-    (4B currency normalization populates 5 ctx fields from it;
-    4C cold-start enforcement consults it in `score()`). 4A accepts
-    the parameter but populates nothing in ctx from it — keeping the
-    DSL evaluator's name-lookup environment unchanged in 4A.
+    `tenant_config` populates 5 currency-derived ctx fields in 4B.4
+    (shipment_currency + 4 tier thresholds). 4C cold-start enforcement
+    consults it inside `score()`.
     """
-    # Marker reference so mypy doesn't flag the parameter as unused while
-    # 4B/4C haven't landed their consumers yet. The reference is removed
-    # in 4B.4 once the 5 currency-derived ctx fields populate from
-    # tenant_config.value_caps.
-    _ = tenant_config
     today = as_of or date.today()
     source_ip = IPv4Address(str(payload.source_ip))
 
@@ -253,6 +246,20 @@ async def build_context(
         # drift. See BOOKING_PATH_MODIFICATION_DEFAULTS for the rationale.
         **BOOKING_PATH_MODIFICATION_DEFAULTS,
     }
+
+    # Phase 4B.4: 5 currency-normalized threshold fields. payload.shipment.
+    # currency defaults to "USD" per BookingRequest.ShipmentData (4B.1).
+    # resolve_value_caps returns the 4-tier dict, falling back to
+    # DEFAULT_VALUE_CAPS["USD"] (with warning) if the tenant hasn't
+    # configured the requested currency. Allowed-list check ran at the
+    # endpoint layer (4B.3) — currency reaching here is always permitted.
+    currency = payload.shipment.currency
+    caps = resolve_value_caps(tenant_config, currency)
+    ctx["shipment_currency"] = currency
+    ctx["shipment_value_threshold_high"] = caps["high"]
+    ctx["shipment_value_threshold_new_user"] = caps["new_user"]
+    ctx["shipment_value_threshold_medium"] = caps["medium"]
+    ctx["shipment_value_threshold_low"] = caps["low"]
 
     return ctx, baseline, enrichment
 
@@ -473,6 +480,19 @@ async def build_modification_context(
         user_external_id=user_external_id,
         source_ip_override=(IPv4Address(str(payload.source_ip)) if payload.source_ip else None),
         contact=contact,
+    )
+    # 4B.4: override the synthesized booking's currency to reflect the
+    # MODIFICATION's currency (not the prior shipment's). Currency-aware
+    # value-tier rules at modification time evaluate against the new
+    # currency. Pre-4B shipments rows carry no currency; the synthesized
+    # booking gets USD via Pydantic default, and this override upgrades
+    # it to the modification's chosen currency.
+    synthetic_booking = synthetic_booking.model_copy(
+        update={
+            "shipment": synthetic_booking.shipment.model_copy(
+                update={"currency": payload.currency},
+            ),
+        },
     )
     destination_hmac = prior_shipment_row["destination_hmac"]
     ctx, baseline, enrichment = await build_context(

@@ -107,6 +107,14 @@ def base_ctx() -> dict[str, Any]:
         "phone_previously_rejected": False,
         "origin_previously_rejected": False,
         "ip_previously_rejected": False,
+        # Currency-normalized thresholds (4B.4) — USD-default values matching
+        # DEFAULT_VALUE_CAPS. Tests for the 4B.5 rewritten rules override
+        # these to exercise per-currency behavior.
+        "shipment_currency": "USD",
+        "shipment_value_threshold_high": 10000.0,
+        "shipment_value_threshold_new_user": 5000.0,
+        "shipment_value_threshold_medium": 2000.0,
+        "shipment_value_threshold_low": 1000.0,
         # Modification (3A) — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum

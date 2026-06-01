@@ -105,6 +105,14 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "phone_previously_rejected",  # bool — phone_hmac present in baseline.rejected_phone_hmacs
         "origin_previously_rejected",  # bool — baseline.origin_stats[origin_key].r_n > 0
         "ip_previously_rejected",  # bool — baseline.ip_stats[ip].r_n > 0
+        # Currency-normalized thresholds (Phase 4B) — populated by build_context
+        # from tenant_config.value_caps via resolve_value_caps. 4B.5 rewrites
+        # the 7 currency-implicit rules to consult these instead of literals.
+        "shipment_currency",  # str — 3-letter ISO 4217 code from payload.shipment.currency
+        "shipment_value_threshold_high",  # float — caps[currency]["high"]
+        "shipment_value_threshold_new_user",  # float — caps[currency]["new_user"]
+        "shipment_value_threshold_medium",  # float — caps[currency]["medium"]
+        "shipment_value_threshold_low",  # float — caps[currency]["low"]
     }
 )
 

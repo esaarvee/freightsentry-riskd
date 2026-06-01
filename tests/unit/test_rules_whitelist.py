@@ -40,11 +40,12 @@ def test_whitelist_is_frozenset() -> None:
     assert isinstance(ALLOWED_CONTEXT_FIELDS, frozenset)
 
 
-def test_whitelist_size_matches_phase_3b_total() -> None:
+def test_whitelist_size_matches_phase_4b_total() -> None:
     """Phase 1 baseline = 45; Phase 2B adds 11 → 56; Phase 3A adds 6 → 62;
-    Phase 3B adds 4 → 66. A size drift catches both accidental removal
+    Phase 3B adds 4 → 66; Phase 4B.4 adds 5 (shipment_currency +
+    4 tier thresholds) → 71. A size drift catches both accidental removal
     AND silent addition that bypasses operator + reviewer scrutiny."""
-    assert len(ALLOWED_CONTEXT_FIELDS) == 66
+    assert len(ALLOWED_CONTEXT_FIELDS) == 71
 
 
 def test_whitelist_contains_every_phase_2b_addition() -> None:
