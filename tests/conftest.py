@@ -46,6 +46,37 @@ def make_default_tenant_config(tenant_id: int = 1) -> TenantConfig:
     )
 
 
+async def seed_tenant_created_days_ago(
+    db_conn: asyncpg.Connection,
+    *,
+    days_ago: int,
+    config: dict[str, Any] | None = None,
+) -> int:
+    """Insert a tenant whose created_at is exactly `days_ago` days ago.
+
+    Used by Phase 4C integration tests for the cold-start grace mechanism
+    which measures the grace window from `tenants.created_at`. Returns
+    the new tenant_id. Caller is responsible for cleanup (typically via
+    _cleanup_tenant).
+    """
+    tenant_id: int = await db_conn.fetchval(
+        """
+        INSERT INTO tenants (name, config, created_at, updated_at)
+        VALUES (
+            $1,
+            $2::jsonb,
+            now() - make_interval(days => $3),
+            now() - make_interval(days => $3)
+        )
+        RETURNING id
+        """,
+        f"test-tenant-grace-{secrets.token_hex(4)}",
+        json.dumps(config or {}),
+        days_ago,
+    )
+    return tenant_id
+
+
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Single source of truth for cascade-cleanup. Reverse-FK order so children
