@@ -284,9 +284,9 @@ class TenantConfig(BaseModel):
 
 ---
 
-## Currency normalization (Phase 3D — deferred to Phase 4)
+## Currency normalization (RESOLVED in Phase 4B, 2026-06-01)
 
-**Decision (2026-05-28)**: All absolute-value thresholds in `app/rules.yaml` carry an implicit-USD assumption. Per-currency normalization is deferred to Phase 4 via `TenantConfig.value_caps: dict[str, float]`.
+**Decision (2026-05-28)**: All absolute-value thresholds in `app/rules.yaml` carry an implicit-USD assumption. Per-currency normalization deferred to Phase 4. **Resolved in Phase 4B** — see "Phase 4B resolution" subsection below.
 
 ### Scope of the implicit-USD assumption
 
@@ -333,7 +333,27 @@ This deferral is intentional: Phase 3's scope is endpoint additions, not configu
 
 ### Auditing
 
-The 7-rule corpus is enumerated above. If Phase 4+ adds another absolute-value rule, this section must be updated. If Phase 4+ rewrites these rules to use `TenantConfig.value_caps`, this section should be marked `## Currency normalization (RESOLVED in Phase 4)` with the resolving migration referenced.
+The 7-rule corpus is enumerated above. If Phase 4+ adds another absolute-value rule, this section must be updated.
+
+### Phase 4B resolution (2026-06-01)
+
+Implemented per the deferral plan:
+
+1. `BookingRequest.shipment.currency` and `ModificationRequest.currency` added as optional `str` fields with `"USD"` default. Validation: 3-letter uppercase ISO 4217 shape at the Pydantic layer; allowed-list check at request time against `tenant_config.allowed_currencies` (400 if not in list).
+2. `TenantConfig.value_caps: dict[str, dict[str, float]] | None` carries per-currency-per-tier thresholds. 4-tier scheme: `high / new_user / medium / low` matches the 4 distinct thresholds in the 7 rewritten rules.
+3. `DEFAULT_VALUE_CAPS = {"USD": {"high": 10000, "new_user": 5000, "medium": 2000, "low": 1000}}` (`app/tenant_config.py`) matches Phase 2 hardcoded thresholds. USD-default tenants see zero behavioral change.
+4. `resolve_value_caps(tenant_config, currency)` resolves per-request, falling back to USD defaults with a `tenant_config.value_caps.fallback` structured warning (metric=True for Phase 5 EMF) if the tenant has an allowed currency without a matching value_caps entry.
+5. The 7 rules in `app/rules.yaml` were rewritten to consult `shipment_value_threshold_<tier>` Context fields populated in `build_context`. Weights and maturity-sensitive flags unchanged. Modification rule 1 (`modification_within_30_min_value_increase`) was NOT rewritten — its `modification_magnitude > 0.2` is a fraction, currency-independent.
+6. **Case-1 (dashboard ATO) and case-2 (API ATO) regression assertions pass unchanged with USD-default tenants** (the surgical invariance check for the rewrite).
+
+### Currency conversion via rates table — explicitly rejected
+
+Considered and rejected during Phase 4 planning. Reasons:
+- Requires maintained rates data with refresh cadence.
+- Float arithmetic against decay-weighted Welford accumulators introduces compounding precision drift.
+- Per-currency thresholds are operator-tunable per tenant via `value_caps` and require no daily upkeep.
+
+Currency conversion can be revisited if v2 demands cross-currency risk aggregation; it is out of scope for v1.
 
 ---
 
