@@ -18,6 +18,7 @@ from httpx import AsyncClient
 
 from app.auth import AuthContext, require_api_token
 from app.main import app
+from tests.conftest import _cleanup_tenant
 
 
 def _booking(
@@ -93,36 +94,22 @@ async def _post_booking(
     return r.json()
 
 
-async def _maturity_via_endpoint(
-    db_conn: asyncpg.Connection,
-    client: AsyncClient,
-    tenant_id: int,
-    request_id: str,
-) -> float:
-    """Post a booking, then fetch the persisted decision's maturity via DB."""
-    resp = await _post_booking(client, tenant_id, _booking(request_id=request_id))
-    # The endpoint response doesn't surface maturity; we read the structured
-    # log via... actually it doesn't persist maturity either. Instead, we
-    # observe the BEHAVIOR (e.g., account_prior changes). For these tests
-    # we use a mature-customer setup and compare decision/score across
-    # tenant configs since maturity is the only varied parameter.
-    return float(resp["score"])
-
-
 async def test_default_thresholds_score_is_baseline(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Customer at exactly mature thresholds (180 days, 50 shipments) under
-    default config produces ScoringResult.maturity=1.0 → base_prior=0."""
+    default config produces ScoringResult.maturity=1.0 → base_prior=0.
+    Tight upper bound on score so a regression making maturity=0.5
+    (yielding base_prior=0.05) would fail this test."""
     await _seed_customer_at_age(
         db_conn, seeded_tenant, external_id="cust-mat", age_days=180, total_shipments=50
     )
     resp = await _post_booking(
         unauth_client, seeded_tenant, _booking(request_id="REQ-mat-base", customer="cust-mat")
     )
-    # Mature customer + neutral trust + no flags → ALLOW with low score.
+    # Mature customer + neutral trust + no flags → ALLOW with score ≈ 0.
     assert resp["decision"] == "ALLOW"
-    assert resp["score"] < 0.3
+    assert resp["score"] < 0.05
 
 
 async def test_maturity_age_days_override_makes_younger_customer_mature(
@@ -131,8 +118,6 @@ async def test_maturity_age_days_override_makes_younger_customer_mature(
     """Tenant_b sets maturity_age_days=90. A 90-day customer reaches m=1.0
     under tenant_b but m≈0.5 under default tenant_a (assuming shipments
     threshold also satisfied). Compare via score for same-shape input."""
-    from tests.conftest import _cleanup_tenant
-
     # Tenant A: default
     tenant_a: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
@@ -171,8 +156,6 @@ async def test_maturity_shipments_override_reduces_threshold(
 ) -> None:
     """Tenant_b sets maturity_shipments=10. A customer with 10 shipments
     reaches m=1.0 under tenant_b but 0.2 under default."""
-    from tests.conftest import _cleanup_tenant
-
     tenant_a: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
         f"matsh-a-{secrets.token_hex(3)}",
@@ -208,8 +191,6 @@ async def test_combined_overrides_score_matches_expected(
     """All three overrides composed: maturity_age_days=90,
     maturity_shipments=20, maturity_k=0.10. Customer at age=60,
     shipments=20 → m = (60/90) * (20/20) = 0.667."""
-    from tests.conftest import _cleanup_tenant
-
     tenant_id: int = await db_conn.fetchval(
         "INSERT INTO tenants (name, config) VALUES ($1, $2::jsonb) RETURNING id",
         f"mat-compose-{secrets.token_hex(3)}",
@@ -239,11 +220,10 @@ async def test_combined_overrides_score_matches_expected(
 async def test_overrides_do_not_affect_layer_1_block(
     db_conn: asyncpg.Connection, unauth_client: AsyncClient
 ) -> None:
-    """A BLOCK rule (Tor exit IP) short-circuits Layer 1; tenant_config
-    overrides should not be consulted. Compare a default tenant and an
-    extreme-override tenant — both BLOCK with score=1.0."""
-    from tests.conftest import _cleanup_tenant
-
+    """A BLOCK rule (`blacklisted_ip`, conditioned on FireHOL Level 1 IP)
+    short-circuits Layer 1; tenant_config overrides should not be
+    consulted. Compare a default tenant and an extreme-override tenant —
+    both BLOCK with score=1.0."""
     tenant_default: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
         f"mat-l1-default-{secrets.token_hex(3)}",

@@ -159,8 +159,11 @@ async def test_grace_expired_no_effect(
             default_tid,
             _booking(request_id="REQ-cs-expired-ctrl", customer="cust-cs-expired-ctrl"),
         )
-        # Past grace → identical decision/score (both ALLOW, both low).
+        # Past grace → identical score (NOT just identical decision —
+        # asserting only on decision would pass even if grace still applied
+        # because both scores stay below the REVIEW threshold).
         assert post["decision"] == control["decision"]
+        assert abs(post["score"] - control["score"]) < 1e-9
     finally:
         await _cleanup_tenant(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, default_tid)
@@ -171,35 +174,50 @@ async def test_grace_composed_with_maturity_overrides(
 ) -> None:
     """maturity_age_days=90 AND cold_start_grace_days=14, created 5 days ago.
     Customer age=180 (mature under 90-day threshold) → m_raw=1.0; grace
-    halves → final m=0.5 → base_prior=0.05."""
-    tenant_id = await seed_tenant_created_days_ago(
+    halves → final m=0.5 → base_prior = 0.10 * (1 - 0.5) = 0.05.
+
+    Compares against a control tenant with same overrides but NO grace
+    (grace=0) — the grace tenant's score must be strictly greater. A
+    `> 0.0` assertion alone would pass even if grace did nothing because
+    new-customer base_prior is non-zero by default."""
+    grace_tid = await seed_tenant_created_days_ago(
         db_conn,
         days_ago=5,
         config={"maturity_age_days": 90, "cold_start_grace_days": 14},
     )
+    # Control: same maturity_age_days override but no grace.
+    control_tid = await seed_tenant_created_days_ago(
+        db_conn,
+        days_ago=5,
+        config={"maturity_age_days": 90, "cold_start_grace_days": 0},
+    )
     try:
-        await _seed_mature_customer(db_conn, tenant_id, "cust-cs-compose")
-        resp = await _post(
+        await _seed_mature_customer(db_conn, grace_tid, "cust-cs-compose")
+        await _seed_mature_customer(db_conn, control_tid, "cust-cs-compose-ctrl")
+        grace_resp = await _post(
             unauth_client,
-            tenant_id,
+            grace_tid,
             _booking(request_id="REQ-cs-compose", customer="cust-cs-compose"),
         )
-        # Mature + grace halves → base_prior = MAX_NEW_ACCOUNT * 0.5 = 0.05.
-        # account_prior at trust=0.5 (computed by trust function for new customer
-        # with no observations) may contribute to trust_risk; we check decision
-        # is still ALLOW with elevated score relative to pure-default.
-        assert resp["decision"] == "ALLOW"
-        # Score should be measurably elevated above the baseline-mature case.
-        assert resp["score"] > 0.0
+        control_resp = await _post(
+            unauth_client,
+            control_tid,
+            _booking(request_id="REQ-cs-compose-ctrl", customer="cust-cs-compose-ctrl"),
+        )
+        assert grace_resp["decision"] == "ALLOW"
+        # Grace tenant's score is strictly higher than the control (no grace).
+        assert grace_resp["score"] > control_resp["score"]
     finally:
-        await _cleanup_tenant(db_conn, tenant_id)
+        await _cleanup_tenant(db_conn, grace_tid)
+        await _cleanup_tenant(db_conn, control_tid)
 
 
 async def test_grace_does_not_affect_layer_1_block(
     db_conn: asyncpg.Connection, unauth_client: AsyncClient
 ) -> None:
-    """A BLOCK rule (Tor exit IP) short-circuits Layer 1; cold-start grace
-    should not change BLOCK behavior."""
+    """A BLOCK rule (`blacklisted_ip`, conditioned on FireHOL Level 1 IP)
+    short-circuits Layer 1; cold-start grace should not change BLOCK
+    behavior."""
     tenant_id = await seed_tenant_created_days_ago(
         db_conn, days_ago=1, config={"cold_start_grace_days": 30}
     )
