@@ -50,6 +50,7 @@ from app.signal_helpers import (
     is_phone_dummy_pattern,
     netblock_24,
 )
+from app.tenant_config import TenantConfig
 from app.trust import compute_trust_score
 from app.velocity import (
     count_ip_daily,
@@ -73,6 +74,7 @@ async def build_context(
     enricher: Enricher,
     payload: BookingRequest,
     destination_hmac: str,
+    tenant_config: TenantConfig,
     email_hmac: str | None = None,
     phone_hmac: str | None = None,
     as_of: date | None = None,
@@ -82,7 +84,18 @@ async def build_context(
     The caller commits writes (baseline.save, shipment/decision insert,
     customer update) inside the same transaction as the baseline
     FOR UPDATE lock acquired here.
+
+    `tenant_config` is threaded through for downstream consumers
+    (4B currency normalization populates 5 ctx fields from it;
+    4C cold-start enforcement consults it in `score()`). 4A accepts
+    the parameter but populates nothing in ctx from it — keeping the
+    DSL evaluator's name-lookup environment unchanged in 4A.
     """
+    # Marker reference so mypy doesn't flag the parameter as unused while
+    # 4B/4C haven't landed their consumers yet. The reference is removed
+    # in 4B.4 once the 5 currency-derived ctx fields populate from
+    # tenant_config.value_caps.
+    _ = tenant_config
     today = as_of or date.today()
     source_ip = IPv4Address(str(payload.source_ip))
 
@@ -435,6 +448,7 @@ async def build_modification_context(
     customer_external_id: str,
     user_external_id: str,
     hmac_secret: bytes,
+    tenant_config: TenantConfig,
     contact: ContactData | None = None,
     as_of: date | None = None,
 ) -> tuple[dict[str, Any], CustomerBaseline, EnrichmentRow]:
@@ -469,6 +483,7 @@ async def build_modification_context(
         enricher=enricher,
         payload=synthetic_booking,
         destination_hmac=destination_hmac,
+        tenant_config=tenant_config,
         as_of=as_of,
     )
 
