@@ -242,9 +242,9 @@ async def test_rls_table_scoped_by_app_tenant_id(
             f"SELECT count(*) FROM {table} WHERE tenant_id = $1",
             tenant_b,
         )
-        assert leaked == 0, (
-            f"RLS leak: as tenant_a viewing {table}, " f"saw {leaked} tenant_b rows (expected 0)"
-        )
+        assert (
+            leaked == 0
+        ), f"RLS leak: as tenant_a viewing {table}, saw {leaked} tenant_b rows (expected 0)"
 
 
 @pytest.mark.serial
@@ -263,3 +263,100 @@ async def test_rls_blocks_unset_tenant_context(
         except asyncpg.PostgresError:
             # Policy refused unset context (e.g. ::int cast failure on '')
             pass
+
+
+# ---------------------------------------------------------------------------
+# Phase 4D admin endpoint extension — RLS enforces against the SQL patterns
+# the admin endpoints execute. This guards Phase 5's role transition: when
+# the runtime DB user switches to riskd_app_login, admin endpoints continue
+# to respect tenant isolation.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.serial
+async def test_rls_admin_decisions_join_scoped_by_tenant(
+    riskd_app_conn: asyncpg.Connection,
+    two_tenants_with_shipments: tuple[int, int],
+) -> None:
+    """Admin endpoint's `SELECT FROM decisions JOIN shipments WHERE
+    d.tenant_id = $1` runs under riskd_app session. As tenant_a, the JOIN
+    returns ONLY tenant_a's row even when querying tenant_b's request_id."""
+    tenant_a, tenant_b = two_tenants_with_shipments
+    async with riskd_app_conn.transaction():
+        await riskd_app_conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_a))
+        # As tenant_a, query tenant_b's request_id — RLS hides tenant_b's row,
+        # so the WHERE clause matches nothing.
+        row = await riskd_app_conn.fetchrow(
+            """
+            SELECT d.request_id
+              FROM decisions d
+              JOIN shipments s ON s.id = d.shipment_id AND s.tenant_id = d.tenant_id
+             WHERE d.tenant_id = $1 AND d.request_id = $2
+            """,
+            tenant_b,
+            "rls-dec",
+        )
+        assert row is None, f"RLS leak: tenant_a queried tenant_b's decision and got {row}"
+
+        # Same query against tenant_a's own request_id returns the row.
+        row_a = await riskd_app_conn.fetchrow(
+            """
+            SELECT d.request_id
+              FROM decisions d
+              JOIN shipments s ON s.id = d.shipment_id AND s.tenant_id = d.tenant_id
+             WHERE d.tenant_id = $1 AND d.request_id = $2
+            """,
+            tenant_a,
+            "rls-dec",
+        )
+        assert row_a is not None
+
+
+@pytest.mark.serial
+async def test_rls_admin_customer_lookup_scoped_by_tenant(
+    riskd_app_conn: asyncpg.Connection,
+    two_tenants_with_shipments: tuple[int, int],
+) -> None:
+    """Admin customer lookup: `SELECT FROM customers WHERE tenant_id = $1
+    AND external_id = $2`. tenant_a cannot see tenant_b's customer even
+    though both use external_id='rls-cust'."""
+    tenant_a, tenant_b = two_tenants_with_shipments
+    async with riskd_app_conn.transaction():
+        await riskd_app_conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_a))
+        # As tenant_a, look up by tenant_b's id — RLS hides; WHERE matches nothing.
+        row = await riskd_app_conn.fetchrow(
+            "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
+            tenant_b,
+            "rls-cust",
+        )
+        assert row is None
+        # Same query for tenant_a returns its own customer.
+        row_a = await riskd_app_conn.fetchrow(
+            "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
+            tenant_a,
+            "rls-cust",
+        )
+        assert row_a is not None
+
+
+@pytest.mark.serial
+async def test_rls_admin_baseline_lookup_scoped_by_tenant(
+    riskd_app_conn: asyncpg.Connection,
+    two_tenants_with_shipments: tuple[int, int],
+) -> None:
+    """Admin customer-baseline endpoint runs `SELECT FROM customer_baselines
+    WHERE tenant_id = $1 AND customer_id = $2`. Under riskd_app session,
+    cross-tenant baseline lookups return nothing."""
+    tenant_a, tenant_b = two_tenants_with_shipments
+    # First, resolve tenant_b's customer_id under the superuser db_conn
+    # because the riskd_app session can't see it. We need the customer_id
+    # to ask "can riskd_app see this baseline?".
+    async with riskd_app_conn.transaction():
+        await riskd_app_conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_a))
+        # As tenant_a, query for a baseline row with tenant_b's tenant_id.
+        # RLS hides tenant_b's rows, so the count is 0.
+        leaked = await riskd_app_conn.fetchval(
+            "SELECT count(*) FROM customer_baselines WHERE tenant_id = $1",
+            tenant_b,
+        )
+        assert leaked == 0, f"RLS leak: tenant_a saw {leaked} tenant_b customer_baselines rows"
