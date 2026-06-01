@@ -19,10 +19,15 @@ Phase 5 carry-forward: in-process 60s TTL cache wrapping the loader.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
+import asyncpg
+import structlog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_log = structlog.get_logger(__name__)
 
 DEFAULT_ALLOWED_CURRENCIES: list[str] = ["USD"]
 DEFAULT_COLD_START_GRACE_DAYS: int = 0
@@ -169,3 +174,66 @@ def parse_config_jsonb(
     payload["created_at"] = created_at
     payload["updated_at"] = updated_at
     return TenantConfig.model_validate(payload)
+
+
+async def load_tenant_config(
+    conn: asyncpg.Connection,
+    tenant_id: int,
+) -> TenantConfig:
+    """Load the tenant's config from the `tenants.config` JSONB column.
+
+    Returns a validated TenantConfig with override fields populated from
+    JSONB and metadata fields populated from row columns. Empty JSONB
+    `{}` (default for newly-created tenants) yields all overrides None;
+    consumers fall back to project defaults in app/scoring_constants.py.
+
+    Phase 4A does NOT cache. Phase 5 wraps this in a 60s TTL cache.
+
+    Defense-in-depth: explicit `tenant_id` parameter in the WHERE clause
+    rather than relying on session-scoped RLS. (The `tenants` table is
+    NOT RLS-enabled per 0001_initial.py:37-38 — tenants are not scoped
+    to themselves; we read by id with a tight WHERE.)
+
+    Raises:
+        LookupError: if tenant_id has no row. The caller decides the
+            HTTP translation — endpoints treat this as a 500-class
+            misconfiguration because auth has already validated the
+            token-tenant binding.
+        pydantic.ValidationError: if the stored JSONB shape is invalid.
+            Should not occur in production (onboarding script validates
+            on write) but surfaces stored-data corruption.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT config, created_at, updated_at
+          FROM tenants
+         WHERE id = $1
+        """,
+        tenant_id,
+    )
+    if row is None:
+        msg = f"tenant {tenant_id} not found"
+        raise LookupError(msg)
+
+    # asyncpg may return JSONB as str OR dict depending on codec config.
+    # Phase 3B cast-at-boundary pattern: handle both, narrow type for mypy.
+    raw_config = row["config"]
+    decoded: dict[str, Any]
+    if isinstance(raw_config, str):
+        decoded = cast("dict[str, Any]", json.loads(raw_config))
+    else:
+        decoded = cast("dict[str, Any]", raw_config or {})
+
+    config = parse_config_jsonb(
+        decoded,
+        tenant_id=tenant_id,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+    _log.debug(
+        "tenant_config.loaded",
+        tenant_id=tenant_id,
+        config_version=config.config_version,
+        metric=True,
+    )
+    return config
