@@ -11,8 +11,6 @@
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 from fastapi import HTTPException
 
@@ -47,16 +45,27 @@ async def test_empty_role_raises_403() -> None:
     assert exc.value.status_code == 403
 
 
-def test_require_admin_role_composes_with_require_api_token() -> None:
-    """The dependency takes an AuthContext argument that is annotated as
-    Depends(require_api_token). This is the FastAPI composition signal."""
-    sig = inspect.signature(require_admin_role)
-    auth_param = sig.parameters["auth"]
-    # The default value is the dependency object via Depends(require_api_token).
-    # The full annotated default includes a Depends() instance.
-    # We verify the param is annotated and references AuthContext.
-    assert auth_param.annotation is not inspect.Parameter.empty
-    # The Annotated metadata contains the Depends marker — check the
-    # underlying require_api_token reference appears in the signature's
-    # default representation.
-    assert "require_api_token" in str(auth_param) or "Depends" in str(auth_param)
+def test_require_admin_role_composes_with_require_api_token_specifically() -> None:
+    """Walk the Annotated metadata on the `auth` parameter and assert the
+    Depends marker wraps `require_api_token` BY IDENTITY — not just any
+    dependency. The earlier loose check (`"Depends" in str(...)`) would
+    pass even if a future refactor swapped Depends(require_api_token)
+    with Depends(some_other_function), which the operator watch-point
+    explicitly asks us to prevent."""
+    from typing import get_args, get_type_hints
+
+    from app.auth import require_api_token
+
+    hints = get_type_hints(require_admin_role, include_extras=True)
+    auth_hint = hints["auth"]
+    # auth_hint is Annotated[AuthContext, Depends(require_api_token)].
+    # get_args returns (AuthContext, Depends(require_api_token)).
+    type_, *metadata = get_args(auth_hint)
+    assert type_ is AuthContext
+    # Find the Depends instance in the metadata and verify its dependency.
+    depends_objs = [m for m in metadata if hasattr(m, "dependency")]
+    assert len(depends_objs) == 1, f"expected exactly one Depends marker, got {metadata}"
+    assert depends_objs[0].dependency is require_api_token, (
+        "require_admin_role must depend specifically on require_api_token "
+        "(operator watch-point — prevents silent auth-bypass via dependency swap)"
+    )
