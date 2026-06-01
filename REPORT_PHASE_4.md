@@ -95,10 +95,10 @@ Aggregated from per-batch reports. ~16 deviations total across the four batches,
 
 - 4A: 17 corrections across 7 commits
 - 4B: 15 corrections across 7 commits
-- 4C: 0 (no reviewer panel invoked; coverage via 829-test suite + case-1/case-2 regression gate)
-- 4D: 0 (no reviewer panel invoked; coverage via 23 new tests + 3C.3 RLS canary extension + audit doc)
+- 4C: 0 at land time (no reviewer panel invoked); **+1 retroactive fix commit** (`2a716b5`) addressing 4C.4 false-pass assertions, dead helper, and "Tor exit IP" misnomer. See `REPORT_PHASE_4_RETRO.md` for the full panel verdicts + finding-disposition table.
+- 4D: 0 at land time; **+5 retroactive fix commits** (`c097df3`, `e31ffbd`, `9d206d0`, `af79295`, `557962f`) addressing 4D.1 tautological composition test, 4D.2+3 HMAC truncation contract divergence, 4D.4 single-predicate-vs-dual-predicate test mismatch, 4D.5 stale line refs, and 4D.6 test-count reconciliation. See `REPORT_PHASE_4_RETRO.md`.
 
-Phase 4 totals: **32 reviewer-caught corrections across the 14 commits in 4A + 4B** that had reviewer panels invoked. 4C and 4D operated on the per-batch checkpoint convention with regression gate + extensive test coverage as the safety net.
+Phase 4 totals: **32 reviewer-caught corrections across the 14 commits in 4A + 4B at land time**; **+11 more findings caught and folded** across 4C + 4D in the retroactive pass (6 dispositioned via fix commits; 5 minor/informational left as-is). that had reviewer panels invoked. 4C and 4D operated on the per-batch checkpoint convention with regression gate + extensive test coverage as the safety net.
 
 ## Tangential issues logged to BUGS.md
 
