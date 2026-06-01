@@ -12,6 +12,7 @@ import pytest
 
 from app.rules import Rule, RuleSet, Thresholds
 from app.scoring import CustomerState, score
+from tests.conftest import make_default_tenant_config
 
 
 def _rule(
@@ -59,7 +60,7 @@ _established_clean = CustomerState(
 
 def test_layer1_short_circuit_skips_layer2() -> None:
     rs = _ruleset([_rule("blocked", True, weight=1.0, action="BLOCK")])
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     assert result.score == 1.0
     assert result.decision == "BLOCK"
     # Layer 2 must NOT have been computed — account_prior reported as 0.
@@ -75,7 +76,7 @@ def test_layer1_short_circuit_skips_layer2() -> None:
 
 def test_brand_new_customer_account_prior_above_zero() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.5)])  # no signals fire
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     # maturity=0; base_prior=0.10; trust_risk=(0.5-0.5)/0.5=0; flag_prior=0
     # → account_prior = noisyOR(0.10, 0, 0) = 0.10
     assert result.account_prior == pytest.approx(0.10)
@@ -86,7 +87,9 @@ def test_brand_new_customer_account_prior_above_zero() -> None:
 
 def test_established_customer_account_prior_collapses() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.5)])
-    result = score(rs, {}, customer_state=_established_clean)
+    result = score(
+        rs, {}, customer_state=_established_clean, tenant_config=make_default_tenant_config()
+    )
     # maturity=1 → base_prior=0; trust_risk=0; flag_prior=0
     assert result.account_prior == 0.0
     assert result.score == 0.0
@@ -102,7 +105,7 @@ def test_low_trust_drives_trust_contribution() -> None:
         flagged_count=0,
     )
     rs = _ruleset([_rule("r1", False, weight=0.5)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # trust_risk = (0.5 - 0.1) / 0.5 = 0.8
     # trust_contribution = 0.8 * 0.25 = 0.20
     # base_prior = 0.10; flag_prior = 0
@@ -118,7 +121,7 @@ def test_high_trust_zeros_trust_contribution() -> None:
         flagged_count=0,
     )
     rs = _ruleset([_rule("r1", False, weight=0.5)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # trust_risk clamps at 0 (max(0, -0.9) = 0)
     # → account_prior = noisyOR(0.10, 0, 0) = 0.10
     assert result.account_prior == pytest.approx(0.10)
@@ -129,7 +132,7 @@ def test_flag_tier_lookup_zero_flags() -> None:
         trust_score=1.0, account_age_days=365, total_shipments=100, flagged_count=0
     )
     rs = _ruleset([_rule("r1", False, weight=0.0)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     assert result.account_prior == 0.0
 
 
@@ -138,7 +141,7 @@ def test_flag_tier_lookup_one_flag() -> None:
         trust_score=1.0, account_age_days=365, total_shipments=100, flagged_count=1
     )
     rs = _ruleset([_rule("r1", False, weight=0.0)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # flag tier 1 → 0.15; base_prior = 0 (mature); trust_risk = 0
     assert result.account_prior == pytest.approx(0.15)
 
@@ -148,7 +151,7 @@ def test_flag_tier_lookup_mid_tier() -> None:
         trust_score=1.0, account_age_days=365, total_shipments=100, flagged_count=4
     )
     rs = _ruleset([_rule("r1", False, weight=0.0)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # flag tier 2 → 0.25
     assert result.account_prior == pytest.approx(0.25)
 
@@ -158,7 +161,7 @@ def test_flag_tier_lookup_top_tier() -> None:
         trust_score=1.0, account_age_days=365, total_shipments=100, flagged_count=20
     )
     rs = _ruleset([_rule("r1", False, weight=0.0)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # flag tier 3 → 0.35
     assert result.account_prior == pytest.approx(0.35)
 
@@ -170,7 +173,7 @@ def test_flag_tier_lookup_top_tier() -> None:
 
 def test_maturity_downweight_on_sensitive_rule_brand_new() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.40, maturity_sensitive=True)])
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     # maturity = 0 → effective weight = 0.40 * (1 - 0.30 * 1) = 0.40 * 0.70 = 0.28
     assert result.signal_score == pytest.approx(0.28)
     assert result.risk_factors[0].weight == pytest.approx(0.28)
@@ -178,7 +181,9 @@ def test_maturity_downweight_on_sensitive_rule_brand_new() -> None:
 
 def test_maturity_downweight_on_sensitive_rule_mature() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.40, maturity_sensitive=True)])
-    result = score(rs, {}, customer_state=_established_clean)
+    result = score(
+        rs, {}, customer_state=_established_clean, tenant_config=make_default_tenant_config()
+    )
     # maturity = 1 → effective weight = 0.40 * (1 - 0.30 * 0) = 0.40
     assert result.signal_score == pytest.approx(0.40)
     assert result.risk_factors[0].weight == pytest.approx(0.40)
@@ -186,7 +191,7 @@ def test_maturity_downweight_on_sensitive_rule_mature() -> None:
 
 def test_maturity_not_applied_when_flag_false() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.40, maturity_sensitive=False)])
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     # maturity_sensitive=False → no downweight even with maturity=0
     assert result.signal_score == pytest.approx(0.40)
     assert result.risk_factors[0].weight == pytest.approx(0.40)
@@ -199,7 +204,7 @@ def test_maturity_not_applied_when_flag_false() -> None:
 
 def test_layer2_layer3_compose_via_noisy_or() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.40, maturity_sensitive=False)])
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     # account_prior = 0.10 (brand-new, neutral trust, no flags)
     # signal_score = 0.40 (rule fires, not maturity_sensitive)
     # final = noisyOR(0.10, 0.40) = 1 - 0.9 * 0.6 = 0.46
@@ -210,7 +215,7 @@ def test_layer2_layer3_compose_via_noisy_or() -> None:
 
 def test_no_layer3_rules_fired_uses_account_prior_only() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.50)])
-    result = score(rs, {}, customer_state=_brand_new)
+    result = score(rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config())
     assert result.signal_score == 0.0
     assert result.score == pytest.approx(0.10)
     assert result.decision == "ALLOW"
@@ -218,7 +223,9 @@ def test_no_layer3_rules_fired_uses_account_prior_only() -> None:
 
 def test_no_account_prior_and_no_rules_returns_zero() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.50)])
-    result = score(rs, {}, customer_state=_established_clean)
+    result = score(
+        rs, {}, customer_state=_established_clean, tenant_config=make_default_tenant_config()
+    )
     assert result.account_prior == 0.0
     assert result.signal_score == 0.0
     assert result.score == 0.0
@@ -234,7 +241,7 @@ def test_highly_flagged_low_trust_brand_new_pushes_account_prior_high() -> None:
         flagged_count=10,
     )
     rs = _ruleset([_rule("r1", False, weight=0.5)])
-    result = score(rs, {}, customer_state=state)
+    result = score(rs, {}, customer_state=state, tenant_config=make_default_tenant_config())
     # base_prior = 0.10
     # trust_contribution = 0.8 * 0.25 = 0.20
     # flag_prior = 0.35 (tier 3)
@@ -250,7 +257,11 @@ def test_highly_flagged_low_trust_brand_new_pushes_account_prior_high() -> None:
 
 def test_maturity_field_exposed_on_result() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.0)])
-    result_new = score(rs, {}, customer_state=_brand_new)
-    result_mature = score(rs, {}, customer_state=_established_clean)
+    result_new = score(
+        rs, {}, customer_state=_brand_new, tenant_config=make_default_tenant_config()
+    )
+    result_mature = score(
+        rs, {}, customer_state=_established_clean, tenant_config=make_default_tenant_config()
+    )
     assert result_new.maturity == 0.0
     assert result_mature.maturity == pytest.approx(1.0)

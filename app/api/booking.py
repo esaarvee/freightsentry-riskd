@@ -172,7 +172,9 @@ async def evaluate_booking(
             total_shipments=context_env["total_shipments"],
             flagged_count=context_env["flagged_count"],
         )
-        result = score(ruleset, context_env, customer_state=customer_state)
+        result = score(
+            ruleset, context_env, customer_state=customer_state, tenant_config=tenant_config
+        )
 
         # Fold THIS booking into the baseline (positive observation).
         baseline.add_observation(

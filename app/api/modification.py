@@ -193,7 +193,9 @@ async def evaluate_modification(
             total_shipments=context_env["total_shipments"],
             flagged_count=context_env["flagged_count"],
         )
-        result = score(ruleset, context_env, customer_state=customer_state)
+        result = score(
+            ruleset, context_env, customer_state=customer_state, tenant_config=tenant_config
+        )
 
         # Persist decision with request_type='modification' against the
         # prior shipment_id (no new shipments row created).

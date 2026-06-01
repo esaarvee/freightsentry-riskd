@@ -11,6 +11,7 @@ import pytest
 
 from app.rules import Rule, RuleSet, Thresholds
 from app.scoring import CustomerState, _noisy_or, score
+from tests.conftest import make_default_tenant_config
 
 
 def _rule(
@@ -77,7 +78,9 @@ def test_noisy_or_commutative() -> None:
 
 def test_no_rules_fire_returns_allow_zero() -> None:
     rs = _ruleset([_rule("r1", False, weight=0.5)])
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == 0.0
     assert result.decision == "ALLOW"
     assert result.classification == "GREEN"
@@ -92,7 +95,9 @@ def test_block_rule_short_circuits_with_score_one() -> None:
             _rule("would_fire", True, weight=0.5),  # should NOT contribute
         ]
     )
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == 1.0
     assert result.decision == "BLOCK"
     assert result.classification == "RED"
@@ -107,7 +112,9 @@ def test_block_rule_not_firing_falls_through_to_layer3() -> None:
             _rule("r1", True, weight=0.5),
         ]
     )
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.decision == "ALLOW"  # 0.5 ≤ 0.60 → ALLOW
     assert result.triggered_rules == ("r1",)
 
@@ -121,7 +128,9 @@ def test_first_block_rule_wins_file_order() -> None:
             _rule("block_b", True, weight=1.0, action="BLOCK"),
         ]
     )
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.triggered_rules == ("block_a",)
 
 
@@ -132,7 +141,9 @@ def test_first_block_rule_wins_file_order() -> None:
 
 def test_single_low_weight_rule_stays_allow() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.30)])
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == pytest.approx(0.30)
     assert result.decision == "ALLOW"
     assert result.risk_level == "MEDIUM"  # 0.30 ≤ score < 0.60
@@ -146,7 +157,9 @@ def test_two_rules_below_threshold_compose_under_block_min() -> None:
         ]
     )
     # 1 - 0.6*0.6 = 0.64 → REVIEW band
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == pytest.approx(0.64)
     assert result.decision == "REVIEW"
     assert result.classification == "YELLOW"
@@ -162,7 +175,9 @@ def test_three_rules_compose_to_block() -> None:
         ]
     )
     # 1 - 0.5^3 = 0.875 → BLOCK (>= 0.80)
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == pytest.approx(0.875)
     assert result.decision == "BLOCK"
     assert result.classification == "RED"
@@ -171,7 +186,9 @@ def test_three_rules_compose_to_block() -> None:
 def test_score_at_allow_max_boundary_is_allow() -> None:
     """`score <= allow_max` (0.60) → ALLOW (per .ai/rules.md)."""
     rs = _ruleset([_rule("r1", True, weight=0.60)])
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == pytest.approx(0.60)
     assert result.decision == "ALLOW"
 
@@ -179,7 +196,9 @@ def test_score_at_allow_max_boundary_is_allow() -> None:
 def test_score_at_block_min_boundary_is_block() -> None:
     """`score >= block_min` (0.80) → BLOCK."""
     rs = _ruleset([_rule("r1", True, weight=0.80)])
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.score == pytest.approx(0.80)
     assert result.decision == "BLOCK"
 
@@ -192,13 +211,17 @@ def test_triggered_rules_preserves_file_order() -> None:
             _rule("r3", True, weight=0.1),
         ]
     )
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.triggered_rules == ("r1", "r3")
 
 
 def test_risk_factors_carry_metadata() -> None:
     rs = _ruleset([_rule("r1", True, weight=0.3)])
-    result = score(rs, {}, customer_state=_zero_layer2_state)
+    result = score(
+        rs, {}, customer_state=_zero_layer2_state, tenant_config=make_default_tenant_config()
+    )
     assert result.risk_factors[0].name == "r1"
     assert result.risk_factors[0].weight == 0.3
     assert "r1" in result.risk_factors[0].description
