@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 import structlog
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 from app.config import get_settings
 from app.db import get_conn
@@ -89,3 +89,36 @@ async def require_api_token(
         metric=True,
     )
     return AuthContext(tenant_id=row["tenant_id"], role=row["role"])
+
+
+async def require_admin_role(
+    auth: Annotated[AuthContext, Depends(require_api_token)],
+) -> AuthContext:
+    """Authorization layer: principal must carry role='admin' from api_tokens.
+
+    Composes with require_api_token. Returns the same AuthContext (the
+    tenant_id is preserved for downstream tenant-scoped queries).
+
+    403 is returned for authenticated-but-not-admin (auth.role != 'admin');
+    401 is returned upstream by require_api_token for unauthenticated calls.
+
+    The AUTH_ENABLED=false local-dev carve-out returns AuthContext with
+    role='tenant', which fails this check — admin endpoints under local
+    dev require AUTH_ENABLED=true. Local admin testing pattern: set
+    AUTH_ENABLED=true and seed an admin api_token via the onboarding
+    script (4A.5) with --rotate-token, then manually update
+    api_tokens.role to 'admin' (the script does not yet issue admin
+    tokens — out of scope per 4A.5 decisions).
+    """
+    if auth.role != "admin":
+        _log.info(
+            "auth.admin_required_denied",
+            tenant_id=auth.tenant_id,
+            role=auth.role,
+            metric=True,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="admin role required",
+        )
+    return auth
