@@ -25,7 +25,7 @@
 | Migrations | 5 | 5 (unchanged) |
 | Endpoints | 4 | **6** (+ admin decisions + admin customers baseline) |
 | Audit docs | 1 | 2 (added phase-4 audit) |
-| New modules under app/ | 2 | 3 (+ app/api/admin.py) |
+| New `.py` modules under app/ | 1 (`tenant_config.py` from 4A) | 2 (+ `app/api/admin.py`) |
 
 ## Per-commit disposition
 

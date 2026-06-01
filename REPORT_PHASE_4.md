@@ -25,15 +25,15 @@
 | Migrations | 4 | 5 (+1: `tenants.updated_at` in 4A.2) |
 | Endpoints | 4 | 6 (+ admin decisions + admin customers baseline) |
 | `.ai/decisions.md` new sections | — | 4 (TenantConfig design, currency resolution, cold-start mechanism, admin scope) |
-| Audit docs | 1 | 2 (added `security-audit-rls-phase-4.md`) |
-| New modules under `app/` | — | 3 (`tenant_config.py`, `api/admin.py`, plus a few scoring helpers) |
+| Audit docs (RLS / security-audit-rls family) | 1 | 2 (added `security-audit-rls-phase-4.md`; `initial-audit.md` predates the RLS series and is out of family) |
+| New modules under `app/` | — | 2 new `.py` files: `tenant_config.py` (4A), `api/admin.py` (4D). Plus helper functions added to existing `app/scoring.py` (`_resolved_maturity_constants`, `_maturity_with_overrides`, `_apply_cold_start_grace`). |
 | New scripts | — | 1 (`scripts/tenant_onboard.py`) |
 | Production bugs fixed pre-launch | — | 1 (`DELETE...RETURNING count(*) OVER ()` in 4A.5 → caught by 4A.6 integration test) |
 | BUGS.md new entries | — | 1 (ruff version drift in 4A.4) |
 
 ## Per-batch summary
 
-### Batch 4A — TenantConfig foundation (7 commits, +49 tests)
+### Batch 4A — TenantConfig foundation (7 commits, +54 tests)
 
 `63628eb` → `ab77d76`. Delivered:
 - TenantConfig Pydantic v2 model + `parse_config_jsonb` helper (4A.1, 25 tests)
@@ -98,7 +98,7 @@ Aggregated from per-batch reports. ~16 deviations total across the four batches,
 - 4C: 0 (no reviewer panel invoked; coverage via 829-test suite + case-1/case-2 regression gate)
 - 4D: 0 (no reviewer panel invoked; coverage via 23 new tests + 3C.3 RLS canary extension + audit doc)
 
-Phase 4 totals: **~32 reviewer-caught corrections across the 14 commits in 4A + 4B** that had reviewer panels invoked. 4C and 4D operated on the per-batch checkpoint convention with regression gate + extensive test coverage as the safety net.
+Phase 4 totals: **32 reviewer-caught corrections across the 14 commits in 4A + 4B** that had reviewer panels invoked. 4C and 4D operated on the per-batch checkpoint convention with regression gate + extensive test coverage as the safety net.
 
 ## Tangential issues logged to BUGS.md
 
