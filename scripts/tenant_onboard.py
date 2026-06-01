@@ -200,13 +200,11 @@ async def _onboard(
             )
             if rotate_token or token_count == 0:
                 if rotate_token and token_count > 0:
-                    deleted = await conn.fetchval(
-                        "DELETE FROM api_tokens WHERE tenant_id = $1 RETURNING count(*) OVER ()",
+                    await conn.execute(
+                        "DELETE FROM api_tokens WHERE tenant_id = $1",
                         tenant_id,
                     )
-                    print(
-                        f"revoked {deleted or token_count} prior api_token(s) for tenant_id={tenant_id}"
-                    )
+                    print(f"revoked {token_count} prior api_token(s) for tenant_id={tenant_id}")
                 plaintext = secrets.token_urlsafe(32)
                 await conn.execute(
                     """
