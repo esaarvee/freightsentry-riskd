@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from app.rules import Rule, RuleSet, Thresholds
@@ -87,6 +88,46 @@ def _maturity_with_overrides(
     age_frac = min(max(age_days, 0) / age_threshold, 1.0)
     ship_frac = min(max(total_shipments, 0) / ship_threshold, 1.0)
     return age_frac * ship_frac
+
+
+_COLD_START_GRACE_MULTIPLIER: float = 0.5
+
+
+def _apply_cold_start_grace(
+    maturity_value: float,
+    tenant_config: TenantConfig,
+    *,
+    now: datetime | None = None,
+) -> float:
+    """Apply cold-start grace multiplier to maturity if tenant is within grace.
+
+    For `cold_start_grace_days` after `tenant_config.created_at`, multiply
+    maturity by 0.5. After the window, return maturity unchanged.
+
+    `cold_start_grace_days == 0` (default) -> always returns maturity
+    unchanged.
+
+    `now` is injected for test determinism; production passes None and
+    uses `datetime.now(UTC)`.
+
+    Rationale: a newly-onboarded tenant has no accumulated baselines, so
+    maturity-sensitive rules may fire too aggressively on legitimate
+    first customers. The 0.5 multiplier softens scoring during the grace
+    window, biasing toward REVIEW rather than BLOCK.
+
+    The 0.5 multiplier is hardcoded — Phase 6 staging replay measures
+    FPR impact and may revise.
+
+    Per-customer cold-start is handled separately by Layer 2 base_prior;
+    `cold_start_grace_days` is tenant-wide.
+    """
+    if tenant_config.cold_start_grace_days <= 0:
+        return maturity_value
+    effective_now = now if now is not None else datetime.now(UTC)
+    elapsed_days = (effective_now - tenant_config.created_at).days
+    if elapsed_days < tenant_config.cold_start_grace_days:
+        return maturity_value * _COLD_START_GRACE_MULTIPLIER
+    return maturity_value
 
 
 @dataclass(frozen=True)
@@ -161,7 +202,7 @@ def score(
         age_threshold=age_threshold,
         ship_threshold=ship_threshold,
     )
-    # m = _apply_cold_start_grace(m, tenant_config)  # 4C.2 wires here
+    m = _apply_cold_start_grace(m, tenant_config)
     base_prior = MAX_NEW_ACCOUNT * (1.0 - m)
     trust_risk = max(0.0, (0.5 - customer_state.trust_score) / 0.5)
     trust_contribution = trust_risk * TRUST_FACTOR
