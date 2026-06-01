@@ -31,6 +31,21 @@ Two read-only admin endpoints land in Phase 4:
 
 No tenant-registration endpoint. No write-admin endpoints. Operator scripts (`scripts/tenant_onboard.py`) handle onboarding.
 
+### Admin endpoint scope (Phase 4D — 2026-06-01)
+
+Both Phase 4 admin endpoints are READ-ONLY and TENANT-BOUNDED:
+
+- `GET /api/v1/admin/decisions/{request_id}` — full decision detail + linked shipment data (city + country only; full address NOT surfaced).
+- `GET /api/v1/admin/customers/{external_id}/baseline` — customer record + truncated baseline (stat-dicts top-10 by `n` desc + `total_count` + `truncated` flag).
+
+Authorization: `require_admin_role` (`app/auth.py`) checks `auth.role == "admin"`, returns 403 otherwise. `auth.role` is sourced from `api_tokens.role` (Phase 1 schema). `app_users.role` exists but is not wired to auth in Phase 4 (Phase 5+ may add multi-user admin model).
+
+Cross-tenant lookups return 404 — hides existence per security-by-default convention.
+
+Admin write endpoints (decision overrides, manual feedback, etc.) are out of scope for v1 per `## Out of scope`. v2+ may introduce a separate admin write surface with workflow approvals.
+
+Stat-dict truncation: customer baseline endpoint truncates each stat-dict to top-10 by `n` desc. Full dicts deferred to Phase 5+ if a use case emerges.
+
 Implicit entity registration: customer / enterprise / user records auto-upsert from the first booking payload that references them. Booking payload carries optional metadata (registered_address, business_name, enterprise_id, etc.) which populates the records on first sight and can update on subsequent bookings.
 
 ---
