@@ -54,21 +54,28 @@ def _truncate_stat_dict(raw: Any, *, limit: int = _STAT_DICT_TRUNCATION_LIMIT) -
 
 
 def _truncate_hmac_set(raw: Any, *, limit: int = _STAT_DICT_TRUNCATION_LIMIT) -> dict[str, Any]:
-    """Truncate a flat HMAC set/dict (e.g., rejected_email_hmacs).
+    """Truncate a HMAC set (e.g., rejected_email_hmacs).
 
-    Returns up to `limit` HMAC hex strings + a total count. HMACs are
-    pre-obfuscated (no PII visible) so direct surfacing is acceptable
-    within the tenant-bounded admin scope.
+    Per `.ai/schema.md` the HMAC dimensions are dict-shape
+    `{hmac_hex: {n, r_n, last}}` — same shape as stat-dicts. We
+    delegate to `_truncate_stat_dict` so HMAC results are ordered by
+    `n` desc (highest-frequency HMACs first — what operators
+    inspecting for fraud patterns actually want) and the
+    `{n, r_n, last}` payload is preserved alongside the key.
+
+    The list-form branch below is a defensive fallback for historic
+    sets that may have been stored without payload (none today per
+    the schema doc); flat lists are returned in insertion order
+    because there is no `n` to sort by.
     """
     decoded = _decode_jsonb(raw)
     if isinstance(decoded, dict):
-        keys = list(decoded.keys())
-    elif isinstance(decoded, list):
+        return _truncate_stat_dict(decoded, limit=limit)
+    if isinstance(decoded, list):
         keys = list(decoded)
-    else:
-        return {"entries": [], "total_count": 0, "truncated": False}
-    total = len(keys)
-    return {"entries": keys[:limit], "total_count": total, "truncated": total > limit}
+        total = len(keys)
+        return {"entries": keys[:limit], "total_count": total, "truncated": total > limit}
+    return {"entries": [], "total_count": 0, "truncated": False}
 
 
 @router.get("/decisions/{request_id}")
