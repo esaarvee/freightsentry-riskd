@@ -54,6 +54,11 @@ class ShipmentData(BaseModel):
     destination: Address
     value: Decimal = Field(..., ge=Decimal("0"))
     channel: str
+    # Phase 4B: ISO 4217 currency code; defaults to USD so Phase 1-3 payloads
+    # are accepted unchanged. Allowed-list check against tenant_config runs
+    # at request time in app/api/booking.py (4B.3) — Pydantic enforces shape
+    # only.
+    currency: str = Field(default="USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
 class ContactData(BaseModel):
@@ -127,6 +132,10 @@ class ModificationRequest(BaseModel):
     source_ip: IPv4Address | None = None
     user: ModificationUser | None = None
     reason: str | None = Field(None, max_length=512)
+    # Phase 4B: applies to the modification evaluation, not the prior
+    # shipment. Currency-aware value-tier rules consult this. Defaults to
+    # USD for backward compatibility.
+    currency: str = Field(default="USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
 class ModificationResponse(BaseModel):
