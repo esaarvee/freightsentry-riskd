@@ -151,16 +151,17 @@ async def test_recipient_count_query_isolated_by_tenant(
             )
             assert count_a == 2, f"tenant_a should see 2 distinct customers, got {count_a}"
 
-        count_b = await db_conn.fetchval(
-            """
-            SELECT COUNT(DISTINCT customer_id)::int FROM shipments
-            WHERE tenant_id = $1 AND destination_hmac = $2
-              AND booking_ts > now() - interval '30 days'
-            """,
-            tenant_b,
-            dest_hmac,
-        )
-        assert count_b == 2, f"tenant_b should see 2 distinct customers, got {count_b}"
+        async with with_test_tenant_context(db_conn, tenant_b):
+            count_b = await db_conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT customer_id)::int FROM shipments
+                WHERE tenant_id = $1 AND destination_hmac = $2
+                  AND booking_ts > now() - interval '30 days'
+                """,
+                tenant_b,
+                dest_hmac,
+            )
+            assert count_b == 2, f"tenant_b should see 2 distinct customers, got {count_b}"
 
         # The combined query (no tenant filter): under RLS, the visible row
         # set is whichever tenant app.tenant_id currently scopes to (here

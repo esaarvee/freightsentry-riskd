@@ -185,11 +185,13 @@ async def with_test_tenant_context(conn: asyncpg.Connection, tenant_id: int) -> 
 
 
 async def reset_test_tenant_id(conn: asyncpg.Connection) -> None:
-    """Test helper: clear `app.tenant_id` after a fixture-scoped block.
+    """Test helper: reset `app.tenant_id` to the sentinel '0' on this
+    connection. Matches `app/db.py:_pool_setup`, which initialises the
+    same sentinel on every fresh pooled connection.
 
-    Postgres treats `set_config(name, '', false)` as a reset for custom
-    parameters. This prevents bleed-through to subsequent tests that
-    share the same pooled connection."""
+    Sentinel '0' is safe: no tenant has id 0, so RLS-protected reads
+    return empty and INSERTs fail WITH CHECK. Prevents bleed-through
+    to subsequent tests that share the same pooled connection."""
     await conn.execute("SELECT set_config('app.tenant_id', '0', false)")
 
 
