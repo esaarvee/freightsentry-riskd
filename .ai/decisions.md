@@ -637,6 +637,39 @@ Both add complexity without clear v1 benefit; TTL-only ships.
 
 ---
 
+## EMF observability backend (Phase 5C — 2026-06-02)
+
+### Why
+CloudWatch is the production observability target (matches the existing AWS deploy plan). Embedded Metric Format (EMF) lets the same JSON line on stdout serve as both a structured log entry AND a metric point — the CloudWatch Logs agent ingests EMF-formatted lines directly without a separate metric pipeline. No Prometheus scrape, no StatsD, no second container, no second protocol.
+
+### Discriminator
+`metric=True` keyword on the structured-log call site. The keyword is cheap, opt-in, and doesn't rename any existing event. The `emf_processor` short-circuits when the keyword is absent, so non-metric logs flow through unchanged.
+
+### Namespace
+`FreightSentry/RiskD`. Single namespace for all v1 metrics. Future Phase 6+ may split into per-component namespaces if metric volume grows; today the unified namespace is cleaner for cross-component analysis.
+
+### Dimensions vs metrics
+The `MetricSpec` table in `app/observability.py` is the single source of truth. Each event family declares:
+- **Dimensions**: low-cardinality grouping keys (e.g., `tenant_id`, `decision`, `role`). CloudWatch hashes the tuple per metric point — putting high-cardinality fields like `request_id` here would explode billing and lookups.
+- **Metrics**: numeric measurements with a CloudWatch unit (`Count`, `Milliseconds`, or unitless for normalized scores like `score`).
+- **synthetic_count**: flag to emit a constant `count=1` for events that fire as "this happened once" without an inherent numeric payload (auth.success, cache.hit, idempotent_replay).
+
+`triggered_rule_count` is DERIVED in the processor from `len(triggered_rules)` for the two evaluation events — the `triggered_rules` list itself stays in the log line as a regular field but is NOT promoted to a metric (lists aren't numeric in EMF; the count is the actionable measurement).
+
+### High-cardinality guard
+`request_id` is structurally incapable of being promoted to a dimension. The processor reads dimensions exclusively from `MetricSpec.dimensions`; it never iterates `event_dict` to discover keys. End-to-end test enforces this with a positive control on the regular log field.
+
+### Unknown event handling
+A `metric=True` event whose name is not in `METRIC_SPECS` passes through with a one-shot stderr warning, NOT silently dropped. Forward-compat for new metric=True call sites that predate their `MetricSpec` entry. The next operator-checkpoint catches the missing spec via the warning surface.
+
+### Test pattern
+`structlog.testing.capture_logs()` replaces the entire processor chain, so `emf_processor` does NOT run inside it. Integration tests bridge the production endpoint path with the EMF formatter path by capturing the structured event via `capture_logs`, then manually applying `emf_processor` to the captured event_dict. The unit tests cover the processor's internal logic exhaustively (parametrized over `METRIC_SPECS.keys()`); the integration tests verify the production endpoint emits events the formatter can consume.
+
+### Phase 6 wire-up
+The CloudWatch Logs agent on the production ECS task ingests stdout JSON; lines with an `_aws` block become metric points under `FreightSentry/RiskD`. Phase 5C delivers the formatter; Phase 6 wires the agent.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
