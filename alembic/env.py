@@ -22,9 +22,16 @@ if config.config_file_name is not None:
 
 
 def _build_url() -> str:
-    raw = os.environ.get("DATABASE_URL")
+    # Phase 5D.2: prefer ALEMBIC_DATABASE_URL if set (typically the
+    # superuser DSN so alembic can DROP/CREATE roles, ALTER policies,
+    # etc.). Fall back to DATABASE_URL — the runtime connection role,
+    # which under post-5D is `riskd_app_login` and lacks the privileges
+    # to run schema-changing migrations. Local dev MUST set
+    # ALEMBIC_DATABASE_URL once 5D.2 ships; CI alembic invocations and
+    # operator-run `alembic upgrade head` commands likewise.
+    raw = os.environ.get("ALEMBIC_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not raw:
-        msg = "DATABASE_URL is not set"
+        msg = "ALEMBIC_DATABASE_URL (preferred) or DATABASE_URL must be set"
         raise RuntimeError(msg)
     # alembic always uses sync psycopg; rewrite the common runtime forms
     # (bare postgresql:// and postgresql+asyncpg://) to the sync driver.

@@ -18,7 +18,7 @@ from httpx import AsyncClient
 
 from app.auth import AuthContext, require_api_token
 from app.main import app
-from tests.conftest import _cleanup_tenant
+from tests.conftest import _cleanup_tenant, set_test_tenant_id
 
 
 def _booking(
@@ -130,9 +130,11 @@ async def test_maturity_age_days_override_makes_younger_customer_mature(
         json.dumps({"maturity_age_days": 90}),
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_a)
         await _seed_customer_at_age(
             db_conn, tenant_a, external_id="cust-a", age_days=90, total_shipments=50
         )
+        await set_test_tenant_id(db_conn, tenant_b)
         await _seed_customer_at_age(
             db_conn, tenant_b, external_id="cust-b", age_days=90, total_shipments=50
         )
@@ -147,7 +149,9 @@ async def test_maturity_age_days_override_makes_younger_customer_mature(
         # Both score ALLOW but a's score should be higher (more new-customer prior).
         assert a["score"] > b["score"]
     finally:
+        await set_test_tenant_id(db_conn, tenant_a)
         await _cleanup_tenant(db_conn, tenant_a)
+        await set_test_tenant_id(db_conn, tenant_b)
         await _cleanup_tenant(db_conn, tenant_b)
 
 
@@ -166,9 +170,11 @@ async def test_maturity_shipments_override_reduces_threshold(
         json.dumps({"maturity_shipments": 10}),
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_a)
         await _seed_customer_at_age(
             db_conn, tenant_a, external_id="cust-a", age_days=180, total_shipments=10
         )
+        await set_test_tenant_id(db_conn, tenant_b)
         await _seed_customer_at_age(
             db_conn, tenant_b, external_id="cust-b", age_days=180, total_shipments=10
         )
@@ -181,7 +187,9 @@ async def test_maturity_shipments_override_reduces_threshold(
         # Same direction as the age-override test.
         assert a["score"] > b["score"]
     finally:
+        await set_test_tenant_id(db_conn, tenant_a)
         await _cleanup_tenant(db_conn, tenant_a)
+        await set_test_tenant_id(db_conn, tenant_b)
         await _cleanup_tenant(db_conn, tenant_b)
 
 
@@ -203,6 +211,7 @@ async def test_combined_overrides_score_matches_expected(
         ),
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _seed_customer_at_age(
             db_conn, tenant_id, external_id="cust-c", age_days=60, total_shipments=20
         )
@@ -214,6 +223,7 @@ async def test_combined_overrides_score_matches_expected(
         assert resp["decision"] == "ALLOW"
         assert resp["score"] < 0.1
     finally:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, tenant_id)
 
 
@@ -243,9 +253,11 @@ async def test_overrides_do_not_affect_layer_1_block(
         test_ip,
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_default)
         await _seed_customer_at_age(
             db_conn, tenant_default, external_id="cust-l1d", age_days=1, total_shipments=0
         )
+        await set_test_tenant_id(db_conn, tenant_extreme)
         await _seed_customer_at_age(
             db_conn, tenant_extreme, external_id="cust-l1e", age_days=1, total_shipments=0
         )
@@ -260,7 +272,9 @@ async def test_overrides_do_not_affect_layer_1_block(
             _booking(request_id="REQ-mat-l1-b", customer="cust-l1e", source_ip=test_ip),
         )
     finally:
+        await set_test_tenant_id(db_conn, tenant_default)
         await _cleanup_tenant(db_conn, tenant_default)
+        await set_test_tenant_id(db_conn, tenant_extreme)
         await _cleanup_tenant(db_conn, tenant_extreme)
         await db_conn.execute("DELETE FROM ip_enrichment WHERE ip = $1::inet", test_ip)
     # Both BLOCK with score=1.0 — overrides not consulted on Layer 1.

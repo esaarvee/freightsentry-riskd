@@ -19,7 +19,7 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token, seeded_ip_enrichment
+from tests.conftest import create_tenant_with_token, seeded_ip_enrichment, set_test_tenant_id
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _MOD_PATH = "/api/v1/shipments/modification/evaluate"
@@ -369,7 +369,7 @@ async def test_modification_velocity_isolated_by_tenant(
     """Tenant B issuing 5 modifications must not bump tenant A's
     modification_velocity_1h. Pin against the same external_id
     namespace to verify the WHERE tenant_id filter scopes correctly."""
-    token_a, _tenant_a = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.46", asn_org="Comcast"):
         # Tenant A: one booking, no modifications
         await unauth_client.post(
@@ -424,3 +424,8 @@ async def test_modification_velocity_isolated_by_tenant(
             assert mod_a.status_code == 200, mod_a.text
             triggered_a = set(mod_a.json()["triggered_rules"])
             assert "modification_high_velocity_1h" not in triggered_a, triggered_a
+
+        # Phase 5D.2: create_tenant_with_token's finally leaves
+        # app.tenant_id at tenant_b; restore tenant_a so the outer
+        # seeded_tenant fixture teardown can DELETE its rows under RLS.
+        await set_test_tenant_id(db_conn, tenant_a)

@@ -14,7 +14,7 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token, seeded_ip_enrichment
+from tests.conftest import create_tenant_with_token, seeded_ip_enrichment, set_test_tenant_id
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _FEEDBACK_PATH = "/api/v1/shipments/feedback"
@@ -378,7 +378,7 @@ async def test_cross_tenant_target_returns_404(
 ) -> None:
     """Tenant B token attempting feedback on Tenant A's request_id → 404
     (invisible, not 403)."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.56", asn_org="Comcast"):
         await unauth_client.post(
             _BOOKING_PATH,
@@ -396,6 +396,7 @@ async def test_cross_tenant_target_returns_404(
                 headers=_headers(token_b),
             )
             assert resp.status_code == 404
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_feedback_for_modification_decision(

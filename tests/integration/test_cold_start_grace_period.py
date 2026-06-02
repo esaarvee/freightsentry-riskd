@@ -18,7 +18,7 @@ from httpx import AsyncClient
 
 from app.auth import AuthContext, require_api_token
 from app.main import app
-from tests.conftest import _cleanup_tenant, seed_tenant_created_days_ago
+from tests.conftest import _cleanup_tenant, seed_tenant_created_days_ago, set_test_tenant_id
 
 
 def _booking(
@@ -114,7 +114,9 @@ async def test_grace_active_elevates_score_for_mature_customer(
         f"cs-default-{secrets.token_hex(3)}",
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _seed_mature_customer(db_conn, tenant_id, "cust-cs-grace")
+        await set_test_tenant_id(db_conn, default_tid)
         await _seed_mature_customer(db_conn, default_tid, "cust-cs-control")
         grace = await _post(
             unauth_client,
@@ -130,7 +132,9 @@ async def test_grace_active_elevates_score_for_mature_customer(
         # because maturity is halved → base_prior is elevated.
         assert grace["score"] > control["score"]
     finally:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, tenant_id)
+        await set_test_tenant_id(db_conn, default_tid)
         await _cleanup_tenant(db_conn, default_tid)
 
 
@@ -147,7 +151,9 @@ async def test_grace_expired_no_effect(
         f"cs-expired-{secrets.token_hex(3)}",
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _seed_mature_customer(db_conn, tenant_id, "cust-cs-expired")
+        await set_test_tenant_id(db_conn, default_tid)
         await _seed_mature_customer(db_conn, default_tid, "cust-cs-expired-ctrl")
         post = await _post(
             unauth_client,
@@ -165,7 +171,9 @@ async def test_grace_expired_no_effect(
         assert post["decision"] == control["decision"]
         assert abs(post["score"] - control["score"]) < 1e-9
     finally:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, tenant_id)
+        await set_test_tenant_id(db_conn, default_tid)
         await _cleanup_tenant(db_conn, default_tid)
 
 
@@ -192,7 +200,9 @@ async def test_grace_composed_with_maturity_overrides(
         config={"maturity_age_days": 90, "cold_start_grace_days": 0},
     )
     try:
+        await set_test_tenant_id(db_conn, grace_tid)
         await _seed_mature_customer(db_conn, grace_tid, "cust-cs-compose")
+        await set_test_tenant_id(db_conn, control_tid)
         await _seed_mature_customer(db_conn, control_tid, "cust-cs-compose-ctrl")
         grace_resp = await _post(
             unauth_client,
@@ -208,7 +218,9 @@ async def test_grace_composed_with_maturity_overrides(
         # Grace tenant's score is strictly higher than the control (no grace).
         assert grace_resp["score"] > control_resp["score"]
     finally:
+        await set_test_tenant_id(db_conn, grace_tid)
         await _cleanup_tenant(db_conn, grace_tid)
+        await set_test_tenant_id(db_conn, control_tid)
         await _cleanup_tenant(db_conn, control_tid)
 
 
@@ -231,6 +243,7 @@ async def test_grace_does_not_affect_layer_1_block(
         test_ip,
     )
     try:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _seed_mature_customer(db_conn, tenant_id, "cust-cs-l1")
         resp = await _post(
             unauth_client,
@@ -238,6 +251,7 @@ async def test_grace_does_not_affect_layer_1_block(
             _booking(request_id="REQ-cs-l1", customer="cust-cs-l1", source_ip=test_ip),
         )
     finally:
+        await set_test_tenant_id(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, tenant_id)
         await db_conn.execute("DELETE FROM ip_enrichment WHERE ip = $1::inet", test_ip)
     assert resp["decision"] == "BLOCK"

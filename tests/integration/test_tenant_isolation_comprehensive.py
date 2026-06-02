@@ -19,7 +19,12 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token, seeded_ip_enrichment
+from tests.conftest import (
+    create_tenant_with_token,
+    seeded_ip_enrichment,
+    set_test_tenant_id,
+    with_test_tenant_context,
+)
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _MOD_PATH = "/api/v1/shipments/modification/evaluate"
@@ -88,14 +93,18 @@ async def test_booking_request_id_namespace_is_per_tenant(
             assert b_resp.status_code == 200, b_resp.text
 
             # Each tenant has exactly 1 decision; cross-tenant counts match
-            a_count = await db_conn.fetchval(
-                "SELECT count(*) FROM decisions WHERE tenant_id = $1", tenant_a
-            )
-            b_count = await db_conn.fetchval(
-                "SELECT count(*) FROM decisions WHERE tenant_id = $1", tenant_b
-            )
+            async with with_test_tenant_context(db_conn, tenant_a):
+                a_count = await db_conn.fetchval(
+                    "SELECT count(*) FROM decisions WHERE tenant_id = $1", tenant_a
+                )
+            async with with_test_tenant_context(db_conn, tenant_b):
+                b_count = await db_conn.fetchval(
+                    "SELECT count(*) FROM decisions WHERE tenant_id = $1", tenant_b
+                )
             assert a_count == 1
             assert b_count == 1
+    # Restore tenant_a context so seeded_tenant teardown can cascade-delete.
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_booking_customer_external_id_namespace_is_per_tenant(
@@ -128,23 +137,31 @@ async def test_booking_customer_external_id_namespace_is_per_tenant(
                 headers=_headers(token_b),
             )
 
-            cust_count = await db_conn.fetchval(
-                "SELECT count(*) FROM customers WHERE external_id = 'shared-cust'"
-            )
-            assert cust_count == 2  # one per tenant
             # Each customer has total_shipments == 1, not 2
-            a_total = await db_conn.fetchval(
-                "SELECT total_shipments FROM customers WHERE tenant_id = $1 AND external_id = $2",
-                tenant_a,
-                "shared-cust",
-            )
-            b_total = await db_conn.fetchval(
-                "SELECT total_shipments FROM customers WHERE tenant_id = $1 AND external_id = $2",
-                tenant_b,
-                "shared-cust",
-            )
+            async with with_test_tenant_context(db_conn, tenant_a):
+                a_total = await db_conn.fetchval(
+                    "SELECT total_shipments FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                    tenant_a,
+                    "shared-cust",
+                )
+                a_count = await db_conn.fetchval(
+                    "SELECT count(*) FROM customers WHERE external_id = 'shared-cust'"
+                )
+            async with with_test_tenant_context(db_conn, tenant_b):
+                b_total = await db_conn.fetchval(
+                    "SELECT total_shipments FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                    tenant_b,
+                    "shared-cust",
+                )
+                b_count = await db_conn.fetchval(
+                    "SELECT count(*) FROM customers WHERE external_id = 'shared-cust'"
+                )
+            # Each tenant sees exactly 1 customer with that external_id under RLS
+            assert a_count == 1
+            assert b_count == 1
             assert a_total == 1
             assert b_total == 1
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +176,7 @@ async def test_modification_cross_tenant_original_returns_404(
 ) -> None:
     """Tenant B token attempting to modify Tenant A's booking → 404
     (the WHERE tenant_id filter scopes the lookup; invisible to B)."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.82", asn_org="Comcast"):
         await unauth_client.post(
             _BOOKING_PATH,
@@ -179,6 +196,7 @@ async def test_modification_cross_tenant_original_returns_404(
                 headers=_headers(token_b),
             )
             assert resp.status_code == 404
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_modification_velocity_isolated_by_tenant(
@@ -239,11 +257,13 @@ async def test_modification_velocity_isolated_by_tenant(
             assert "modification_high_velocity_1h" not in triggered, triggered
 
             # Confirm tenant A's modification count is still 1
-            a_mod_count = await db_conn.fetchval(
-                "SELECT count(*) FROM decisions WHERE tenant_id = $1 AND request_type = 'modification'",
-                tenant_a,
-            )
+            async with with_test_tenant_context(db_conn, tenant_a):
+                a_mod_count = await db_conn.fetchval(
+                    "SELECT count(*) FROM decisions WHERE tenant_id = $1 AND request_type = 'modification'",
+                    tenant_a,
+                )
             assert a_mod_count == 1
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +277,7 @@ async def test_feedback_cross_tenant_target_returns_404(
     seeded_api_token: tuple[str, int],
 ) -> None:
     """Tenant B token attempting feedback on Tenant A's target → 404."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.84", asn_org="Comcast"):
         await unauth_client.post(
             _BOOKING_PATH,
@@ -276,6 +296,7 @@ async def test_feedback_cross_tenant_target_returns_404(
                 headers=_headers(token_b),
             )
             assert resp.status_code == 404
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_feedback_does_not_mutate_other_tenants_customer_counter(
@@ -318,18 +339,21 @@ async def test_feedback_does_not_mutate_other_tenants_customer_counter(
             )
 
             # Tenant A's customer flagged_count = 1; Tenant B's same-name customer = 0
-            a_flag = await db_conn.fetchval(
-                "SELECT flagged_count FROM customers WHERE tenant_id = $1 AND external_id = $2",
-                tenant_a,
-                "iso-cust",
-            )
-            b_flag = await db_conn.fetchval(
-                "SELECT flagged_count FROM customers WHERE tenant_id = $1 AND external_id = $2",
-                tenant_b,
-                "iso-cust",
-            )
+            async with with_test_tenant_context(db_conn, tenant_a):
+                a_flag = await db_conn.fetchval(
+                    "SELECT flagged_count FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                    tenant_a,
+                    "iso-cust",
+                )
+            async with with_test_tenant_context(db_conn, tenant_b):
+                b_flag = await db_conn.fetchval(
+                    "SELECT flagged_count FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                    tenant_b,
+                    "iso-cust",
+                )
             assert a_flag == 1
             assert b_flag == 0
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_feedback_monotonicity_isolated_by_tenant(
@@ -341,7 +365,7 @@ async def test_feedback_monotonicity_isolated_by_tenant(
     monotonicity gate for the same nominal target_request_id. Two
     feedbacks with same external request_id namespace in different
     tenants are independent."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.86", asn_org="Comcast"):
         # Tenant A booking
         await unauth_client.post(
@@ -390,6 +414,7 @@ async def test_feedback_monotonicity_isolated_by_tenant(
             assert a_fb.status_code == 200
             assert a_fb.json()["applied"] is True
             assert a_fb.json()["previous_label"] is None
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_previously_rejected_baseline_isolated_by_tenant(
@@ -400,7 +425,7 @@ async def test_previously_rejected_baseline_isolated_by_tenant(
     """Tenant A's rejection of email/IP/origin must NOT leak into
     tenant B's build_context derivations (baseline.rejected_*_hmacs and
     .r_n counters are per-customer-per-tenant)."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.87", asn_org="Comcast"):
         await unauth_client.post(
             _BOOKING_PATH,
@@ -434,6 +459,7 @@ async def test_previously_rejected_baseline_isolated_by_tenant(
             triggered = set(b_resp.json()["triggered_rules"])
             previously_rejected = {r for r in triggered if "previously_rejected" in r}
             assert not previously_rejected, previously_rejected
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +492,14 @@ async def test_tenant_a_token_cannot_act_as_tenant_b(
         assert a_resp.status_code == 200
 
         # Tenant A's row count went up; tenant B's didn't
-        a_count = await db_conn.fetchval(
-            "SELECT count(*) FROM shipments WHERE tenant_id = $1", tenant_a
-        )
-        b_count = await db_conn.fetchval(
-            "SELECT count(*) FROM shipments WHERE tenant_id = $1", tenant_b
-        )
+        async with with_test_tenant_context(db_conn, tenant_a):
+            a_count = await db_conn.fetchval(
+                "SELECT count(*) FROM shipments WHERE tenant_id = $1", tenant_a
+            )
+        async with with_test_tenant_context(db_conn, tenant_b):
+            b_count = await db_conn.fetchval(
+                "SELECT count(*) FROM shipments WHERE tenant_id = $1", tenant_b
+            )
         assert a_count == 1
         assert b_count == 0
+    await set_test_tenant_id(db_conn, tenant_a)

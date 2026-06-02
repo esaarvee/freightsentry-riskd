@@ -29,7 +29,7 @@ from app import tenant_config as tenant_config_module
 from app.auth import AuthContext, require_api_token
 from app.main import app
 from app.tenant_config import TenantConfig, load_tenant_config
-from tests.conftest import _cleanup_tenant
+from tests.conftest import _cleanup_tenant, set_test_tenant_id
 
 
 async def _make_minimal_booking_payload() -> dict[str, object]:
@@ -121,7 +121,9 @@ async def test_load_tenant_config_called_with_each_request_tenant_id(
             await _post_booking_under_tenant(unauth_client, other_tenant_id, "x")
             await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
     finally:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         await _cleanup_tenant(db_conn, other_tenant_id)
+        await set_test_tenant_id(db_conn, seeded_tenant)
 
     assert call_tenant_ids == [
         seeded_tenant,
@@ -298,7 +300,9 @@ async def test_cross_tenant_isolation_via_endpoint_loads(
             await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
             await _post_booking_under_tenant(unauth_client, other_tenant_id, "x")
     finally:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         await _cleanup_tenant(db_conn, other_tenant_id)
+        await set_test_tenant_id(db_conn, seeded_tenant)
 
     assert captured[0].tenant_id == seeded_tenant
     assert captured[0].maturity_age_days == 60

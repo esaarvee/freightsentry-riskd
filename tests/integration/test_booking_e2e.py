@@ -13,7 +13,7 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token
+from tests.conftest import create_tenant_with_token, set_test_tenant_id, with_test_tenant_context
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 
@@ -296,24 +296,30 @@ async def test_cross_tenant_external_id_collision(
         r_b = await unauth_client.post(_BOOKING_PATH, json=payload_b, headers=_headers(token_b))
         assert r_b.status_code == 200
 
-        # Two distinct customer rows — one per tenant.
-        count = await db_conn.fetchval(
-            "SELECT count(*) FROM customers WHERE external_id = $1", shared_external
-        )
-        assert count == 2
-
         # Each tenant sees only its own customer (verify ids differ).
-        a_id = await db_conn.fetchval(
-            "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
-            tenant_a,
-            shared_external,
-        )
-        b_id = await db_conn.fetchval(
-            "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
-            tenant_b,
-            shared_external,
-        )
+        async with with_test_tenant_context(db_conn, tenant_a):
+            a_id = await db_conn.fetchval(
+                "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                tenant_a,
+                shared_external,
+            )
+            a_count = await db_conn.fetchval(
+                "SELECT count(*) FROM customers WHERE external_id = $1", shared_external
+            )
+        async with with_test_tenant_context(db_conn, tenant_b):
+            b_id = await db_conn.fetchval(
+                "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
+                tenant_b,
+                shared_external,
+            )
+            b_count = await db_conn.fetchval(
+                "SELECT count(*) FROM customers WHERE external_id = $1", shared_external
+            )
+        # Each tenant sees exactly 1 customer under RLS scoping.
+        assert a_count == 1
+        assert b_count == 1
         assert a_id != b_id
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +335,10 @@ async def test_rls_policies_exist_on_tenant_scoped_tables(
     update this expected set AND get a tenant_isolation policy in the
     migration. The assertion is intentionally strict (set equality, not
     superset)."""
+    # Migration 0009 (Phase 5D) dropped RLS from api_tokens and app_users to
+    # break the auth-lookup chicken-and-egg under the runtime non-superuser
+    # role. Auth tables are tenant-isolated at the app layer (auth dependency
+    # binds AuthContext.tenant_id from the row), not at the RLS layer.
     expected = {
         "enterprises",
         "customers",
@@ -337,8 +347,6 @@ async def test_rls_policies_exist_on_tenant_scoped_tables(
         "decisions",
         "feedback",
         "customer_baselines",
-        "api_tokens",
-        "app_users",
     }
     rows = await db_conn.fetch(
         """

@@ -476,10 +476,9 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
         )
 
     # Different tenant, same destination_hmac.
-    other_tenant = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ('recip-ctx-other') RETURNING id"
-    )
-    try:
+    from tests.conftest import create_extra_tenant, set_test_tenant_id
+
+    async with create_extra_tenant(db_conn, "recip-ctx-other") as other_tenant:
         for i in range(3):
             o_cust = await db_conn.fetchval(
                 "INSERT INTO customers (tenant_id, external_id) VALUES ($1, $2) RETURNING id",
@@ -507,6 +506,9 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
                 dest_hmac,
             )
 
+        # Switch back to seeded_tenant for the build_context call so the
+        # tenant-scoped SQL inside it sees tenant_a's rows under RLS.
+        await set_test_tenant_id(db_conn, seeded_tenant)
         enricher = _enricher_stub(EnrichmentRow.empty("192.0.2.42"))
         ctx, _b, _e = await build_context(
             db_conn,
@@ -520,10 +522,11 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
         )
         # Tenant_a sees 2 priors (NOT 5 — the 3 in other_tenant are excluded).
         assert ctx["recipient_cross_customer_count"] == 2
-    finally:
-        from tests.conftest import _cleanup_tenant
 
-        await _cleanup_tenant(db_conn, other_tenant)
+    # create_extra_tenant's finally sets app.tenant_id to the extra tenant
+    # before cleanup; restore seeded_tenant so the outer fixture teardown
+    # can DELETE its dependent rows under RLS.
+    await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 # ---------------------------------------------------------------------------

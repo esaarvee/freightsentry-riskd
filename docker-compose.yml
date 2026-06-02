@@ -25,7 +25,11 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://riskd:riskd@postgres:5432/riskd}
+      # Phase 5D.2: runtime connection is `riskd_app_login` (LOGIN
+      # INHERIT). RLS enforces under this role. Migrations run as
+      # superuser via ALEMBIC_DATABASE_URL (set explicitly when
+      # invoking `alembic upgrade head` inside the container).
+      DATABASE_URL: ${DATABASE_URL:-postgresql://riskd_app_login:riskd_app_login_dev@postgres:5432/riskd}
       HMAC_SECRET: ${HMAC_SECRET}
       API_TOKEN_PREFIX: ${API_TOKEN_PREFIX:-rsk_}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}

@@ -17,7 +17,7 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token, seeded_ip_enrichment
+from tests.conftest import create_tenant_with_token, seeded_ip_enrichment, set_test_tenant_id
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _FEEDBACK_PATH = "/api/v1/shipments/feedback"
@@ -269,7 +269,7 @@ async def test_cross_tenant_rejection_does_not_leak(
     """Tenant A rejects an email; Tenant B's booking with same email
     must NOT trigger email_previously_rejected (per-customer-per-tenant
     isolation; baselines are tenant-scoped)."""
-    token_a, _tenant_a = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.64", asn_org="Comcast"):
         # Tenant A rejection
         await unauth_client.post(
@@ -309,6 +309,11 @@ async def test_cross_tenant_rejection_does_not_leak(
             assert b_b.status_code == 200
             triggered = set(b_b.json()["triggered_rules"])
             assert "email_previously_rejected_for_customer" not in triggered, triggered
+
+        # Phase 5D.2: create_tenant_with_token's finally leaves
+        # app.tenant_id at tenant_b; restore tenant_a so the outer
+        # seeded_tenant fixture teardown can DELETE its rows under RLS.
+        await set_test_tenant_id(db_conn, tenant_a)
 
 
 # ---------------------------------------------------------------------------

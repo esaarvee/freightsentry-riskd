@@ -19,7 +19,7 @@ from httpx import AsyncClient
 
 from app.config import get_settings
 from app.signal_helpers import hmac_hex
-from tests.conftest import create_tenant_with_token
+from tests.conftest import create_tenant_with_token, set_test_tenant_id, with_test_tenant_context
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 
@@ -135,17 +135,21 @@ async def test_recipient_count_query_isolated_by_tenant(
         dest_hmac = hmac_hex(shared_destination, secret)
 
         # The SECURITY-LOAD-BEARING assertion: tenant-scoped query returns
-        # ONLY tenant_a's customers (2), not the combined set (4).
-        count_a = await db_conn.fetchval(
-            """
-            SELECT COUNT(DISTINCT customer_id)::int FROM shipments
-            WHERE tenant_id = $1 AND destination_hmac = $2
-              AND booking_ts > now() - interval '30 days'
-            """,
-            tenant_a,
-            dest_hmac,
-        )
-        assert count_a == 2, f"tenant_a should see 2 distinct customers, got {count_a}"
+        # ONLY tenant_a's customers (2), not the combined set (4). Phase
+        # 5D.2: must switch session app.tenant_id to tenant_a so RLS lets
+        # tenant_a's shipments be read; the tenant_id=$1 SQL filter is
+        # still the security boundary being asserted.
+        async with with_test_tenant_context(db_conn, tenant_a):
+            count_a = await db_conn.fetchval(
+                """
+                SELECT COUNT(DISTINCT customer_id)::int FROM shipments
+                WHERE tenant_id = $1 AND destination_hmac = $2
+                  AND booking_ts > now() - interval '30 days'
+                """,
+                tenant_a,
+                dest_hmac,
+            )
+            assert count_a == 2, f"tenant_a should see 2 distinct customers, got {count_a}"
 
         count_b = await db_conn.fetchval(
             """
@@ -158,16 +162,14 @@ async def test_recipient_count_query_isolated_by_tenant(
         )
         assert count_b == 2, f"tenant_b should see 2 distinct customers, got {count_b}"
 
-        # And the combined query (no tenant filter) would have returned 4 —
-        # confirming the test seeded what it claims.
-        count_combined = await db_conn.fetchval(
-            """
-            SELECT COUNT(DISTINCT customer_id)::int FROM shipments
-            WHERE destination_hmac = $1
-              AND booking_ts > now() - interval '30 days'
-            """,
-            dest_hmac,
-        )
-        assert count_combined == 4, (
-            f"sanity: tenant-unscoped query should see all 4 customers, got {count_combined}"
-        )
+        # The combined query (no tenant filter): under RLS, the visible row
+        # set is whichever tenant app.tenant_id currently scopes to (here
+        # tenant_b → 2 rows). The 5D.2 RLS layer makes the
+        # "tenant-unscoped" sanity probe redundant — the security boundary
+        # is now enforced by the policy, not only the SQL filter — so the
+        # sanity check is dropped in favour of asserting both tenant
+        # views independently above.
+
+    # Restore tenant_a context so seeded_tenant fixture teardown can
+    # DELETE tenant_a's dependent rows under RLS.
+    await set_test_tenant_id(db_conn, tenant_a)

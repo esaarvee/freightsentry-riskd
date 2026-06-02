@@ -17,7 +17,7 @@ from app.velocity import (
     count_user_modifications_1h,
     count_user_modifications_24h,
 )
-from tests.conftest import create_tenant_with_token
+from tests.conftest import create_tenant_with_token, set_test_tenant_id, with_test_tenant_context
 
 
 @pytest.fixture
@@ -232,6 +232,7 @@ async def test_velocity_scoped_to_tenant(
     other_tenant = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ('vel-other-tenant') RETURNING id"
     )
+    await set_test_tenant_id(db_conn, other_tenant)
     other_customer = await db_conn.fetchval(
         "INSERT INTO customers (tenant_id, external_id) VALUES ($1, 'other-cust') RETURNING id",
         other_tenant,
@@ -252,6 +253,8 @@ async def test_velocity_scoped_to_tenant(
     )
 
     try:
+        # Switch back to seeded_tenant so RLS scope matches the WHERE-filtered query.
+        await set_test_tenant_id(db_conn, seeded_tenant)
         count = await count_ip_hourly(db_conn, seeded_tenant, IPv4Address("192.0.2.80"))
         assert count == 1  # only the in-scope one
     finally:
@@ -259,7 +262,9 @@ async def test_velocity_scoped_to_tenant(
         # parallel inline DELETE list.
         from tests.conftest import _cleanup_tenant
 
+        await set_test_tenant_id(db_conn, other_tenant)
         await _cleanup_tenant(db_conn, other_tenant)
+        await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 # ---------------------------------------------------------------------------
@@ -396,8 +401,10 @@ async def test_count_user_distinct_ips_30d_excludes_cross_tenant(
 
         # seeded_tenant query must NOT see tenant_b's row, even though
         # both share IP 203.0.113.50.
-        count_a = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
+        async with with_test_tenant_context(db_conn, seeded_tenant):
+            count_a = await count_user_distinct_ips_30d(db_conn, seeded_tenant, seeded_customer)
         assert count_a == 1, f"seeded_tenant should see 1 distinct IP, got {count_a}"
+    await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_count_recipient_distinct_customers_30d_within_tenant(
@@ -491,14 +498,19 @@ async def test_count_recipient_distinct_customers_30d_excludes_cross_tenant(
                 destination_hmac=shared_hmac,
             )
 
-        count_a = await count_recipient_distinct_customers_30d(db_conn, seeded_tenant, shared_hmac)
+        async with with_test_tenant_context(db_conn, seeded_tenant):
+            count_a = await count_recipient_distinct_customers_30d(
+                db_conn, seeded_tenant, shared_hmac
+            )
         assert count_a == 2, f"tenant_a should see 2 customers, got {count_a}"
 
-        count_b = await count_recipient_distinct_customers_30d(db_conn, tenant_b, shared_hmac)
+        async with with_test_tenant_context(db_conn, tenant_b):
+            count_b = await count_recipient_distinct_customers_30d(db_conn, tenant_b, shared_hmac)
         # tenant_b has 2 customers shipping to D plus the 1 bootstrap
         # customer (not shipping anywhere) — count_b counts only the 2
         # who actually shipped to the destination.
         assert count_b == 2, f"tenant_b should see 2 customers, got {count_b}"
+    await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_count_recipient_distinct_customers_30d_excludes_window(
@@ -709,8 +721,10 @@ async def test_modifications_1h_ignores_other_tenants(
         )
 
         # Querying tenant_a's count must NOT see tenant_b's modification
-        count_a = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
+        async with with_test_tenant_context(db_conn, seeded_tenant):
+            count_a = await count_user_modifications_1h(db_conn, seeded_tenant, seeded_customer)
         assert count_a == 0
+    await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_modifications_24h_wider_window(

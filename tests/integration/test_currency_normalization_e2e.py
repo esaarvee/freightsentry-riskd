@@ -29,7 +29,7 @@ from httpx import AsyncClient
 
 from app.auth import AuthContext, require_api_token
 from app.main import app
-from tests.conftest import _cleanup_tenant
+from tests.conftest import create_extra_tenant, set_test_tenant_id
 
 
 async def _set_tenant_config(
@@ -167,19 +167,26 @@ async def test_cross_tenant_value_caps_isolation(
     """tenant_a (USD-default, high=10000) and tenant_b (USD-elevated,
     high=50000) on identical 11000-value bookings: tenant_a fires
     absolute_high_value, tenant_b does NOT. Confirms per-request load."""
-    # tenant_b with USD overridden upward
-    other_tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name, config) VALUES ($1, $2::jsonb) RETURNING id",
-        "tenant-b-cn",
-        json.dumps(
-            {
-                "value_caps": {
-                    "USD": {"high": 50000, "new_user": 25000, "medium": 10000, "low": 5000}
+    # tenant_b with USD overridden upward. create_extra_tenant handles
+    # tenant insert + app.tenant_id wiring + cleanup; we patch the config
+    # after creation since the helper doesn't accept a config kwarg.
+    async with create_extra_tenant(db_conn, "tenant-b-cn") as other_tenant_id:
+        await db_conn.execute(
+            "UPDATE tenants SET config = $1::jsonb WHERE id = $2",
+            json.dumps(
+                {
+                    "value_caps": {
+                        "USD": {
+                            "high": 50000,
+                            "new_user": 25000,
+                            "medium": 10000,
+                            "low": 5000,
+                        }
+                    }
                 }
-            }
-        ),
-    )
-    try:
+            ),
+            other_tenant_id,
+        )
         a = await _post_booking(
             unauth_client,
             seeded_tenant,
@@ -195,10 +202,12 @@ async def test_cross_tenant_value_caps_isolation(
                 customer="cust-iso-b",
             ),
         )
-    finally:
-        await _cleanup_tenant(db_conn, other_tenant_id)
-    assert "absolute_high_value" in a["triggered_rules"]
-    assert "absolute_high_value" not in b["triggered_rules"]
+        assert "absolute_high_value" in a["triggered_rules"]
+        assert "absolute_high_value" not in b["triggered_rules"]
+
+    # Restore seeded_tenant context so the outer fixture teardown can
+    # DELETE its dependent rows under RLS.
+    await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_allowed_currency_without_caps_falls_back_to_usd_default_with_warning(

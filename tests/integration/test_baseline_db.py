@@ -11,6 +11,7 @@ import asyncpg
 import pytest
 
 from app.baseline import IP_TYPE_CLOUD, CustomerBaseline
+from tests.conftest import set_test_tenant_id
 
 
 def _at(year: int, month: int, day: int) -> datetime:
@@ -102,6 +103,7 @@ async def test_first_write_concurrency_no_lost_update_via_unique_constraint(
 
     async def _increment_from_empty() -> None:
         async with _pool.acquire() as conn, conn.transaction():
+            await set_test_tenant_id(conn, seeded_tenant)
             bl = await CustomerBaseline.load(conn, seeded_tenant, seeded_customer, for_update=True)
             # `load(for_update=True)` reserve-inserts an empty row if none
             # existed, so `bl.id` is always populated. The first-write
@@ -115,6 +117,7 @@ async def test_first_write_concurrency_no_lost_update_via_unique_constraint(
     await asyncio.gather(_increment_from_empty(), _increment_from_empty())
 
     async with _pool.acquire() as conn:
+        await set_test_tenant_id(conn, seeded_tenant)
         final = await CustomerBaseline.load(conn, seeded_tenant, seeded_customer)
     assert final.value_n == pytest.approx(2.0), (
         "Lost-update on first-write path — UNIQUE constraint should have "
@@ -131,6 +134,7 @@ async def test_select_for_update_blocks_concurrent_writers(
     2 — not 1 (which would be a lost-update bug)."""
     # Seed an initial row so FOR UPDATE has something to lock.
     async with _pool.acquire() as setup_conn:
+        await set_test_tenant_id(setup_conn, seeded_tenant)
         bl0 = CustomerBaseline.empty(seeded_tenant, seeded_customer)
         bl0.value_n = 0.0
         bl0.decay_anchor_date = date(2026, 5, 26)
@@ -138,6 +142,7 @@ async def test_select_for_update_blocks_concurrent_writers(
 
     async def _increment_with_lock() -> None:
         async with _pool.acquire() as conn, conn.transaction():
+            await set_test_tenant_id(conn, seeded_tenant)
             bl = await CustomerBaseline.load(conn, seeded_tenant, seeded_customer, for_update=True)
             bl.value_n += 1.0
             # Small await to maximise overlap with the sibling task.
@@ -147,6 +152,7 @@ async def test_select_for_update_blocks_concurrent_writers(
     await asyncio.gather(_increment_with_lock(), _increment_with_lock())
 
     async with _pool.acquire() as conn:
+        await set_test_tenant_id(conn, seeded_tenant)
         final = await CustomerBaseline.load(conn, seeded_tenant, seeded_customer)
     assert final.value_n == pytest.approx(2.0), (
         "Lost-update detected — FOR UPDATE did not serialise writers"

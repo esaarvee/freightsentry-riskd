@@ -27,7 +27,7 @@ import asyncpg
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import create_tenant_with_token
+from tests.conftest import create_tenant_with_token, set_test_tenant_id
 
 
 def _assert_decisions_equivalent(first: dict[str, Any], second: dict[str, Any]) -> None:
@@ -236,7 +236,7 @@ async def test_modification_cross_tenant_returns_404(
     """Tenant B token attempting to modify Tenant A's booking → 404
     (the WHERE tenant_id filter scopes the lookup; the booking is
     invisible to tenant B)."""
-    token_a, _ = seeded_api_token
+    token_a, tenant_a = seeded_api_token
     await unauth_client.post(_BOOKING_PATH, json=_booking_payload(), headers=_headers(token_a))
 
     async with create_tenant_with_token(db_conn) as (token_b, _tenant_b):
@@ -249,6 +249,7 @@ async def test_modification_cross_tenant_returns_404(
             headers=_headers(token_b),
         )
         assert resp.status_code == 404
+    await set_test_tenant_id(db_conn, tenant_a)
 
 
 async def test_modification_reusing_booking_request_id_now_succeeds(

@@ -19,7 +19,7 @@ from httpx import AsyncClient
 
 from app.auth import AuthContext, _hash_token, require_api_token
 from app.main import app
-from tests.conftest import _cleanup_tenant
+from tests.conftest import _cleanup_tenant, set_test_tenant_id
 
 pytestmark = pytest.mark.asyncio
 
@@ -145,9 +145,11 @@ async def test_admin_decision_cross_tenant_returns_404(
         f"adm-other-{secrets.token_hex(3)}",
     )
     try:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         rid = f"REQ-adm-cross-{secrets.token_hex(3)}"
         await _post_booking_as_tenant(unauth_client, other_tenant_id, rid, "cust-cross")
         # Now tenant_a (seeded_tenant) admin looks up tenant_b's request_id.
+        await set_test_tenant_id(db_conn, seeded_tenant)
         admin_token_a = await _seed_admin_token(db_conn, seeded_tenant)
         r = await unauth_client.get(
             f"/api/v1/admin/decisions/{rid}",
@@ -155,7 +157,9 @@ async def test_admin_decision_cross_tenant_returns_404(
         )
         assert r.status_code == 404
     finally:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         await _cleanup_tenant(db_conn, other_tenant_id)
+        await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_admin_decision_no_auth_401(unauth_client: AsyncClient) -> None:
@@ -211,9 +215,11 @@ async def test_admin_customer_baseline_cross_tenant_404(
         f"adm-other-c-{secrets.token_hex(3)}",
     )
     try:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         await _post_booking_as_tenant(
             unauth_client, other_tenant_id, f"REQ-bcross-{secrets.token_hex(3)}", "cust-bcross"
         )
+        await set_test_tenant_id(db_conn, seeded_tenant)
         admin_token_a = await _seed_admin_token(db_conn, seeded_tenant)
         r = await unauth_client.get(
             "/api/v1/admin/customers/cust-bcross/baseline",
@@ -221,7 +227,9 @@ async def test_admin_customer_baseline_cross_tenant_404(
         )
         assert r.status_code == 404
     finally:
+        await set_test_tenant_id(db_conn, other_tenant_id)
         await _cleanup_tenant(db_conn, other_tenant_id)
+        await set_test_tenant_id(db_conn, seeded_tenant)
 
 
 async def test_admin_customer_baseline_tenant_token_403(

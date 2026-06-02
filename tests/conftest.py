@@ -148,27 +148,89 @@ async def _pool() -> AsyncIterator[asyncpg.Pool]:
     await close_pool()
 
 
+async def set_test_tenant_id(conn: asyncpg.Connection, tenant_id: int) -> None:
+    """Test helper: set `app.tenant_id` session-scoped on this connection.
+
+    Phase 5D.2: with the runtime role switched to `riskd_app_login`,
+    every INSERT into a tenant-scoped table is subject to RLS WITH CHECK
+    (the policy USING clause acts as WITH CHECK by default in Postgres).
+    Test fixtures that issue raw `INSERT INTO customers/users/...` must
+    set `app.tenant_id` BEFORE the INSERT or the policy rejects.
+
+    Production endpoints use `set_tenant_id` (in app/db.py) with
+    is_local=True inside a request transaction. Tests typically run in
+    asyncpg autocommit, so we use is_local=False — the parameter
+    persists for the rest of the session (which is the connection's
+    lifetime in the pool). Subsequent test queries on the same db_conn
+    see the same app.tenant_id; tests that need to switch tenants
+    mid-flow call this helper again.
+    """
+    await conn.execute("SELECT set_config('app.tenant_id', $1, false)", str(tenant_id))
+
+
+@asynccontextmanager
+async def with_test_tenant_context(conn: asyncpg.Connection, tenant_id: int) -> AsyncIterator[None]:
+    """Phase 5D.2 helper: temporarily switch `app.tenant_id` on the
+    given connection, then restore the prior context on exit. Use for
+    cross-tenant verification reads in tests that need to count or
+    inspect rows belonging to a different tenant than the one the
+    fixture session is currently scoped to."""
+    prev_raw = await conn.fetchval("SELECT current_setting('app.tenant_id', true)")
+    await set_test_tenant_id(conn, tenant_id)
+    try:
+        yield
+    finally:
+        prev_int = int(prev_raw) if prev_raw else 0
+        await set_test_tenant_id(conn, prev_int)
+
+
+async def reset_test_tenant_id(conn: asyncpg.Connection) -> None:
+    """Test helper: clear `app.tenant_id` after a fixture-scoped block.
+
+    Postgres treats `set_config(name, '', false)` as a reset for custom
+    parameters. This prevents bleed-through to subsequent tests that
+    share the same pooled connection."""
+    await conn.execute("SELECT set_config('app.tenant_id', '0', false)")
+
+
 @pytest_asyncio.fixture
 async def db_conn(_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
     """Single connection from the shared pool. NOT auto-transactional —
-    callers manage their own transactions for seed/cleanup."""
+    callers manage their own transactions for seed/cleanup.
+
+    Phase 5D.2: `app.tenant_id` is reset to '0' on acquire so a
+    stale value from a prior pool tenant doesn't leak in. Tests that
+    insert into tenant-scoped tables must call `set_test_tenant_id`
+    before INSERT (or wrap in `async with conn.transaction(): set_tenant_id`)."""
     async with _pool.acquire() as conn:
-        yield conn
+        await reset_test_tenant_id(conn)
+        try:
+            yield conn
+        finally:
+            await reset_test_tenant_id(conn)
 
 
 @pytest_asyncio.fixture
 async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
     """Insert a tenant; cleanup all dependent rows on teardown.
 
-    FKs are non-CASCADE in the migration (deliberate — prevents accidental
-    bulk deletes in production). The fixture compensates by deleting in
-    reverse-FK order so tests don't have to.
+    Phase 5D.2: after inserting `tenants` (which is NOT RLS-enabled),
+    set `app.tenant_id` session-scoped to the new id so subsequent
+    INSERTs on tenant-scoped tables succeed under RLS WITH CHECK.
+
+    FKs are non-CASCADE in the migration (deliberate — prevents
+    accidental bulk deletes in production). The fixture compensates
+    by deleting in reverse-FK order so tests don't have to.
     """
     tenant_id: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
         f"test-tenant-{secrets.token_hex(4)}",
     )
+    await set_test_tenant_id(db_conn, tenant_id)
     yield tenant_id
+    # Cleanup runs as superuser-equivalent role only because session has
+    # app.tenant_id set; under riskd_app_login DELETE statements on
+    # tenant-scoped tables must execute under that tenant's RLS view.
     await _cleanup_tenant(db_conn, tenant_id)
 
 
@@ -412,11 +474,20 @@ async def create_tenant_with_token(
 ) -> AsyncIterator[tuple[str, int]]:
     """Context-manager helper that creates a second tenant + api_token and
     cascade-cleans on exit. Use inside tests that need >1 tenant (e.g.
-    cross-tenant isolation checks)."""
+    cross-tenant isolation checks).
+
+    Phase 5D.2: sets `app.tenant_id` to the new tenant's id while the
+    block is open (so dependent inserts succeed under RLS WITH CHECK);
+    on exit, restores the prior `app.tenant_id` after cleanup so the
+    outer fixture's teardown sees its own tenant's rows.
+    """
+    prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
+    prev_int = int(prev_raw) if prev_raw else 0
     tenant_id: int = await db_conn.fetchval(
         "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
         f"test-tenant-{secrets.token_hex(4)}",
     )
+    await set_test_tenant_id(db_conn, tenant_id)
     plaintext = secrets.token_urlsafe(24)
     token_hash = _hash_token(plaintext)
     await db_conn.execute(
@@ -428,4 +499,34 @@ async def create_tenant_with_token(
     try:
         yield plaintext, tenant_id
     finally:
+        # Cleanup needs RLS visibility into this tenant's rows.
+        await set_test_tenant_id(db_conn, tenant_id)
         await _cleanup_tenant(db_conn, tenant_id)
+        # Restore prior tenant context so the outer fixture's teardown
+        # can DELETE its own rows.
+        await set_test_tenant_id(db_conn, prev_int)
+
+
+@asynccontextmanager
+async def create_extra_tenant(
+    db_conn: asyncpg.Connection, name_prefix: str = "extra"
+) -> AsyncIterator[int]:
+    """Phase 5D.2 helper: create an extra tenant + set `app.tenant_id`
+    session-scoped to it. Use inside tests that need to seed dependent
+    rows under a second tenant alongside `seeded_tenant`. On exit
+    cascades all tenant-scoped rows AND restores the prior tenant
+    context so the outer fixture's teardown can see its own rows.
+    """
+    prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
+    prev_int = int(prev_raw) if prev_raw else 0
+    tenant_id: int = await db_conn.fetchval(
+        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        f"{name_prefix}-{secrets.token_hex(4)}",
+    )
+    await set_test_tenant_id(db_conn, tenant_id)
+    try:
+        yield tenant_id
+    finally:
+        await set_test_tenant_id(db_conn, tenant_id)
+        await _cleanup_tenant(db_conn, tenant_id)
+        await set_test_tenant_id(db_conn, prev_int)

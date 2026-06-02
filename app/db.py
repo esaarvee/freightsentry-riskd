@@ -19,6 +19,23 @@ from app.config import Settings
 _pool: asyncpg.Pool | None = None
 
 
+async def _pool_setup(conn: asyncpg.Connection) -> None:
+    """Pool setup callback: runs once when each new pooled connection is
+    created. Phase 5D.2: sets `app.tenant_id` to a sentinel '0' so the
+    custom parameter is known to the session. Without this, any query
+    that hits an RLS policy (which references `current_setting('app.tenant_id')`)
+    before the request's `set_tenant_id` call raises
+    `UndefinedObjectError: unrecognized configuration parameter`.
+
+    The sentinel '0' is safe: no tenant has id 0, so RLS filters return
+    empty result sets until the request handler issues its own
+    `set_tenant_id` inside the transaction. INSERTs without a prior
+    `set_tenant_id` likewise get blocked (WITH CHECK fails on
+    `tenant_id != 0`), which is the correct security posture for any
+    code path that forgets to scope its operation."""
+    await conn.execute("SELECT set_config('app.tenant_id', '0', false)")
+
+
 async def init_pool(settings: Settings) -> asyncpg.Pool:
     """Create the global asyncpg pool. Idempotent guard against double-init."""
     global _pool
@@ -29,6 +46,7 @@ async def init_pool(settings: Settings) -> asyncpg.Pool:
         dsn=settings.database_url,
         min_size=2,
         max_size=10,
+        setup=_pool_setup,
     )
     return _pool
 

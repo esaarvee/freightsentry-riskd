@@ -1,26 +1,23 @@
-"""Non-superuser RLS enforcement verification (3C.3).
+"""Non-superuser RLS enforcement verification (3C.3, refactored 5D.2).
 
-The 3C.2 sweep proves the app-layer WHERE tenant_id = $N filter works
-under the bootstrap-superuser connection (which BYPASSes RLS). This
-file proves the OTHER half: the tenant_isolation policies actually
-enforce when the connection is a NON-superuser role with `app.tenant_id`
-set.
+This file is the canary that proves `tenant_isolation` policies
+actually enforce when the connection is non-superuser with
+`app.tenant_id` set.
 
-Without this, a Phase 5 role transition could ship with broken RLS
-(e.g. a missing policy, a wrong policy expression) and we'd only
-discover at runtime that tenant isolation depends on app-layer
-filtering alone. This test is the canary.
+5D.2 mechanism: the `riskd_app_login` role exists per Phase 5D.1
+migration 0008 (LOGIN INHERIT, GRANT riskd_app) and is the runtime
+DATABASE_URL identity for the app. Tests open a fresh asyncpg
+connection as that role using the same parse-from-settings approach
+production endpoints use — no temporary-grant dance, no role-state
+mutation, xdist-safe (no @pytest.mark.serial needed any more).
 
-Mechanism: the `riskd_app` role exists (NOLOGIN) per Phase 1
-0001_initial.py:33 with GRANTs on all tables in 0001_initial.py:324-326.
-The fixture grants LOGIN temporarily for the test, opens a fresh
-connection as that role, exercises queries with `SET LOCAL
-app.tenant_id`, then revokes LOGIN on teardown.
+The fixture is unchanged in signature and yields a `riskd_app_login`
+connection; tests still use it the same way.
 
-Marked @pytest.mark.serial because it mutates a role privilege —
-xdist-incompatible. Teardown discipline: LOGIN must be revoked even on
-test failure (try/finally), otherwise the test DB role is left in a
-LOGIN state.
+Pre-5D.2 history: the fixture used to grant LOGIN on the legacy
+`riskd_app` role temporarily and revoke on teardown, because that
+role was NOLOGIN per Phase 1. 5D.1's `riskd_app_login` makes the
+dance obsolete.
 """
 
 from __future__ import annotations
@@ -28,6 +25,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlparse
 
 import asyncpg
 import pytest
@@ -35,49 +33,33 @@ import pytest_asyncio
 
 from app.auth import _hash_token
 from app.config import get_settings
-from tests.conftest import _cleanup_tenant
+from tests.conftest import _cleanup_tenant, set_test_tenant_id
 
 
 @pytest_asyncio.fixture
-async def riskd_app_conn(
-    db_conn: asyncpg.Connection,
-) -> AsyncIterator[asyncpg.Connection]:
-    """Grant LOGIN on the `riskd_app` role, open a fresh connection as
-    that role, yield it, then revoke LOGIN on teardown.
+async def riskd_app_conn() -> AsyncIterator[asyncpg.Connection]:
+    """Yield a fresh asyncpg connection as `riskd_app_login`.
 
-    Uses a fresh random password per test to avoid persisting a known
-    credential. teardown via try/finally ensures the role returns to
-    NOLOGIN even if the test body raises.
+    Connection parameters: parse host/port/database from
+    `settings.database_url` (which post-5D.2 already points at
+    `riskd_app_login`), so the test connects under the exact runtime
+    identity. Password is the local-dev convention from migration
+    0008 (`riskd_app_login_dev`). The connection is closed on
+    teardown; no role state is mutated.
     """
-    password = secrets.token_urlsafe(16)
-    await db_conn.execute(f"ALTER ROLE riskd_app WITH LOGIN PASSWORD '{password}'")
-    riskd_conn: asyncpg.Connection | None = None
+    settings = get_settings()
+    parsed = urlparse(settings.database_url.replace("postgresql+asyncpg", "postgresql"))
+    riskd_conn = await asyncpg.connect(
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        user="riskd_app_login",
+        password="riskd_app_login_dev",
+        database=(parsed.path or "/riskd").lstrip("/"),
+    )
     try:
-        settings = get_settings()
-        # Construct a DSN for riskd_app. settings.database_url is the
-        # superuser DSN; swap the userinfo for riskd_app:<password>.
-        # asyncpg.connect accepts host/port/user/password kwargs as an
-        # alternative to a DSN string — use those to avoid DSN parsing
-        # gymnastics across drivers.
-        original_dsn = settings.database_url
-        # Parse host/port/database out of the canonical DSN
-        # postgres://user:pass@host:port/dbname
-        from urllib.parse import urlparse
-
-        parsed = urlparse(original_dsn.replace("postgresql+asyncpg", "postgresql"))
-        riskd_conn = await asyncpg.connect(
-            host=parsed.hostname,
-            port=parsed.port or 5432,
-            user="riskd_app",
-            password=password,
-            database=(parsed.path or "/riskd").lstrip("/"),
-        )
         yield riskd_conn
     finally:
-        if riskd_conn is not None:
-            await riskd_conn.close()
-        # Revoke LOGIN even if the connection / yield raised
-        await db_conn.execute("ALTER ROLE riskd_app WITH NOLOGIN PASSWORD NULL")
+        await riskd_conn.close()
 
 
 @pytest_asyncio.fixture
@@ -96,6 +78,11 @@ async def two_tenants_with_shipments(
     )
     try:
         for tenant_id in (tenant_a, tenant_b):
+            # 5D.2: switch session app.tenant_id BEFORE the dependent
+            # inserts so RLS WITH CHECK accepts them. The fixture
+            # connection (db_conn) carries state across iterations,
+            # so we explicitly switch each loop.
+            await set_test_tenant_id(db_conn, tenant_id)
             cust = await db_conn.fetchval(
                 "INSERT INTO customers (tenant_id, external_id) VALUES ($1, 'rls-cust') RETURNING id",
                 tenant_id,
@@ -171,7 +158,10 @@ async def two_tenants_with_shipments(
             )
         yield tenant_a, tenant_b
     finally:
+        # 5D.2: cleanup DELETEs must run under the tenant's RLS view.
+        await set_test_tenant_id(db_conn, tenant_a)
         await _cleanup_tenant(db_conn, tenant_a)
+        await set_test_tenant_id(db_conn, tenant_b)
         await _cleanup_tenant(db_conn, tenant_b)
 
 
@@ -206,7 +196,9 @@ async def test_rls_shipments_scoped_by_app_tenant_id(
         "decisions",
         "feedback",
         "customer_baselines",
-        "api_tokens",
+        # api_tokens RLS dropped in migration 0009 (auth-lookup chicken-and-egg);
+        # app_users likewise. See docs/security-audit-rls-phase-5.md for the
+        # auth-table RLS rationale.
     ],
 )
 async def test_rls_table_scoped_by_app_tenant_id(
@@ -356,15 +348,16 @@ async def test_rls_admin_baseline_lookup_scoped_by_tenant(
     above (which only tests the single-predicate `tenant_id = $1`).
     """
     tenant_a, tenant_b = two_tenants_with_shipments
-    # Resolve both tenants' customer_id values under the superuser db_conn
-    # — the riskd_app session can't see tenant_b's customers (RLS hides
-    # them), so we need the actual customer_ids to pose the two-predicate
-    # lookup the admin endpoint runs.
+    # Resolve both tenants' customer_id values under the db_conn (which
+    # is also under RLS post-5D.2). Switch app.tenant_id per lookup so
+    # each tenant's row is visible.
+    await set_test_tenant_id(db_conn, tenant_b)
     tenant_b_customer_id: int = await db_conn.fetchval(
         "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 LIMIT 1",
         tenant_b,
     )
     assert tenant_b_customer_id is not None, "fixture seed failed for tenant_b"
+    await set_test_tenant_id(db_conn, tenant_a)
     tenant_a_customer_id: int = await db_conn.fetchval(
         "SELECT customer_id FROM customer_baselines WHERE tenant_id = $1 LIMIT 1",
         tenant_a,
