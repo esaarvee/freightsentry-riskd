@@ -73,9 +73,19 @@ async def require_api_token(
 
     async with get_conn() as conn:
         row = await conn.fetchrow(
-            "SELECT tenant_id, role FROM api_tokens WHERE token_hash = $1",
+            "SELECT id, tenant_id, role FROM api_tokens WHERE token_hash = $1",
             token_hash,
         )
+        if row is not None:
+            # Stamp last_used_at on the success path only. asyncpg connections
+            # default to autocommit, so the write persists independent of the
+            # downstream endpoint handler's transaction outcome (verified by
+            # the 5A.5 integration tests).
+            await conn.execute(
+                "UPDATE api_tokens SET last_used_at = now() WHERE id = $1 AND token_hash = $2",
+                row["id"],
+                token_hash,
+            )
 
     if row is None:
         _log.info("auth.invalid_token", token_hash_prefix=token_hash[:8], metric=True)
