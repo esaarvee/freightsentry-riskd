@@ -68,3 +68,45 @@ across the codebase once in a dedicated formatting-sync commit, and
 land that BEFORE the next phase to avoid re-running into the same
 scope-creep risk on every commit. Until then: only run `ruff format`
 on the files actually touched by the commit, not the whole tree.
+
+## 2026-06-02 — docker-compose `app` service unusable without DATABASE_URL override
+
+Discovered by: implementer during PLAN_PHASE_5A.md 5A.4 (Dockerfile non-root smoke test)
+Location: `.env` line 8 vs `docker-compose.yml` line 28
+Severity: medium
+Observation: `.env` sets `DATABASE_URL=postgresql://riskd:riskd@localhost:5432/riskd`
+(correct for host-side pytest/alembic runs against dockerized postgres).
+`docker-compose.yml` substitutes `${DATABASE_URL:-postgresql://riskd:riskd@postgres:5432/riskd}`,
+preferring the `.env` value — which points at `localhost` from inside the
+container, where it resolves to itself, not postgres. Net effect: `docker compose up`
+of the `app` service fails on startup with `ConnectionRefusedError`. The dev
+workflow has been "pytest from host against dockerized postgres only," so the
+app container has not been exercised. 5A.4 smoke test required a transient
+shell-env override (`DATABASE_URL='postgresql://riskd:riskd@postgres:5432/riskd'
+docker compose up -d`) to validate the non-root user change.
+Suggested action: split the env into two — `DATABASE_URL` for the container
+(stays `postgres:5432`), and a separate `DATABASE_URL_HOST` for host-side
+commands at `localhost:5432`. Or add a docker-compose `.env.docker` and
+document the two-file workflow. Address before Phase 6 production deploy
+(production won't have this confusion since it uses Secrets Manager) and
+ideally before 5D.2's role transition (which already touches `DATABASE_URL`
+and adds `ALEMBIC_DATABASE_URL`).
+
+## 2026-06-02 — Dockerfile pip install failed (pytricia sdist + missing build deps)
+
+Discovered by: implementer during PLAN_PHASE_5A.md 5A.4
+Location: `Dockerfile` line 12 (former), `pyproject.toml` pytricia dep, `uv.lock` pytricia entry
+Severity: medium (pre-existing)
+Observation: `pytricia==1.3.0` ships sdist only — no aarch64 wheel. The
+`python:3.13-slim` base image lacks `gcc` and `libc6-dev`, so
+`pip install --no-cache-dir .` failed mid-build. The Dockerfile had not
+been rebuilt since the slim base dropped gcc; tests run host-side against
+dockerized postgres only, so the broken app build was invisible. Resolved
+in 5A.4 by adding `apt-get install -y --no-install-recommends build-essential`
+to the Dockerfile before pip install. Phase 6 multi-stage build will strip
+build-tools from the runtime image.
+Suggested action: pytricia build RESOLVED in 5A.4 (build-essential
+included in runtime image). The build-tools-in-runtime hardening
+regression (gcc/make/libc-dev now ship to production) is deferred to
+Phase 6 multi-stage. Re-check at Phase 6 plan time as a hard prerequisite
+for production deploy.
