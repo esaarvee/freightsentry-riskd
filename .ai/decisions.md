@@ -602,6 +602,41 @@ Global (non-tenant-scoped) tables:
 
 ---
 
+## Tenant-config caching (Phase 5B — 2026-06-02)
+
+### Why
+Every endpoint (booking, modification, feedback, admin x2) calls `load_tenant_config` at request entry. Pre-5B that was a per-request `SELECT config, created_at, updated_at FROM tenants WHERE id = $1` against a small but hot table. The Phase 5D load test targets 100 RPS sustained at p95<200ms; per-request DB roundtrip on the tenant_config path was a measurable hotspot. The cache reduces the per-request DB roundtrip to a dict lookup on the hit path.
+
+### Cache shape
+- `app/tenant_config_cache.py` wraps `load_tenant_config`.
+- In-process dict keyed by `tenant_id`, value `(TenantConfig, loaded_at_monotonic)`.
+- TTL: 60 seconds. Documented and operator-visible (the onboarding script's output mentions the staleness window).
+- Per-process scope. Multi-worker uvicorn deployments each carry their own cache; TTL bounds divergence at 60s.
+
+### Concurrency
+- Reads are lock-free dict lookups followed by a TTL check (`time.monotonic()` source via a `_now()` seam — module-level so tests can mock without poisoning asyncio's internal `time.monotonic` reads).
+- Misses serialize per-tenant via `asyncio.Lock` — 10 concurrent requests for the same `tenant_id` produce exactly 1 DB load; the remaining 9 hit the inner DCL re-check inside the lock. Misses for *different* `tenant_id`s do NOT serialize against each other.
+- Per-tenant lock creation uses `dict.setdefault(tenant_id, asyncio.Lock())` — atomic under CPython GIL. Both racing constructors discard the loser's Lock and use the same dict-stored instance. No meta-lock needed.
+
+### Invalidation
+**TTL-only for v1.** A config write via `scripts/tenant_onboard.py` (or future admin write endpoints) takes up to 60 seconds to propagate to all workers. The staleness window is acceptable because tenant config changes are operator-initiated narrowing/widening of an authenticated tenant's own settings — never a cross-tenant security boundary.
+
+Explicit invalidation (per-tenant invalidate on write) is **out of scope for v1**. If a future requirement emerges for sub-60s propagation (e.g. emergency revocation of a tenant's `allowed_currencies`), Phase 5+ may add either:
+1. A version-bump signal on `tenants.config_version` that the cache checks on hit, or
+2. A pub/sub / NOTIFY channel from the onboarding script.
+
+Both add complexity without clear v1 benefit; TTL-only ships.
+
+### Errors are not cached
+`LookupError` (tenant missing) propagates and is NOT cached. A subsequent legitimate request retries the DB. This avoids the "tenant onboarded but locked out for 60s" race.
+
+### Production behavior changes
+- Cache hit/miss events are structured-log entries with `metric=True`. 5C's EMF formatter consumes them.
+- A config UPDATE in the dev workflow may not be visible to the local app until the TTL expires. The `scripts/tenant_onboard.py` UPDATE-branch output surfaces the 60s window to operators.
+- Test harness invalidates the cache via `tenant_config_cache._reset_for_tests()` between/inside tests where mid-test config changes are exercised.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.

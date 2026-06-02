@@ -165,6 +165,10 @@ async def _onboard(
                     tenant_id,
                 )
                 print(f"updated tenant id={tenant_id} name={external_id!r}")
+                print(
+                    "note: config changes propagate to running workers within "
+                    "60 seconds (in-process cache TTL, Phase 5B)."
+                )
             else:
                 tenant_id = await conn.fetchval(
                     """
