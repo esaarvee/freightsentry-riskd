@@ -12,6 +12,8 @@ import sys
 
 import structlog
 
+from app.observability import emf_processor
+
 
 def configure_logging(level: str = "INFO") -> None:
     """Configure structlog. Idempotent — safe to call multiple times."""
@@ -21,6 +23,10 @@ def configure_logging(level: str = "INFO") -> None:
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
+            # EMF processor (Phase 5C): events with metric=True gain a
+            # `_aws.CloudWatchMetrics` block before JSONRenderer
+            # serializes the line. Non-metric events pass through.
+            emf_processor,
             structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(level_int),
