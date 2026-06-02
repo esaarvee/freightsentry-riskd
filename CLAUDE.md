@@ -284,7 +284,7 @@ When a subagent encounters an issue tangential to its current task — a bug in 
 
    ```
    ## YYYY-MM-DD — <one-line summary>
-   
+
    Discovered by: <subagent role> during <task ID, e.g. PLAN_PHASE_2.md 2D.3>
    Location: <file:line or N/A>
    Severity: low | medium | high

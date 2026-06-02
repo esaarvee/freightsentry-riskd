@@ -32,9 +32,16 @@ from types import MappingProxyType
 from typing import Any
 
 # Allowed comparison operators (Python ast types)
-_ALLOWED_CMP_OPS: frozenset[type[ast.cmpop]] = frozenset({
-    ast.Gt, ast.Lt, ast.GtE, ast.LtE, ast.Eq, ast.NotEq,
-})
+_ALLOWED_CMP_OPS: frozenset[type[ast.cmpop]] = frozenset(
+    {
+        ast.Gt,
+        ast.Lt,
+        ast.GtE,
+        ast.LtE,
+        ast.Eq,
+        ast.NotEq,
+    }
+)
 
 # Allowed primitive constant types
 _ALLOWED_CONST_TYPES: tuple[type, ...] = (int, float, str, bool, type(None))
@@ -52,40 +59,30 @@ def _validate(node: ast.AST, source: str) -> None:
         return
     if isinstance(node, ast.BoolOp):
         if not isinstance(node.op, (ast.And, ast.Or)):
-            raise DSLError(
-                f"unsupported BoolOp `{type(node.op).__name__}` in: {source}"
-            )
+            raise DSLError(f"unsupported BoolOp `{type(node.op).__name__}` in: {source}")
         for value in node.values:
             _validate(value, source)
         return
     if isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, ast.Not):
-            raise DSLError(
-                f"unsupported UnaryOp `{type(node.op).__name__}` in: {source}"
-            )
+            raise DSLError(f"unsupported UnaryOp `{type(node.op).__name__}` in: {source}")
         _validate(node.operand, source)
         return
     if isinstance(node, ast.Compare):
         for op in node.ops:
             if type(op) not in _ALLOWED_CMP_OPS:
-                raise DSLError(
-                    f"unsupported comparison `{type(op).__name__}` in: {source}"
-                )
+                raise DSLError(f"unsupported comparison `{type(op).__name__}` in: {source}")
         _validate(node.left, source)
         for comp in node.comparators:
             _validate(comp, source)
         return
     if isinstance(node, ast.Name):
         if not isinstance(node.ctx, ast.Load):
-            raise DSLError(
-                f"unsupported Name context `{type(node.ctx).__name__}` in: {source}"
-            )
+            raise DSLError(f"unsupported Name context `{type(node.ctx).__name__}` in: {source}")
         return
     if isinstance(node, ast.Constant):
         if not isinstance(node.value, _ALLOWED_CONST_TYPES):
-            raise DSLError(
-                f"unsupported constant type `{type(node.value).__name__}` in: {source}"
-            )
+            raise DSLError(f"unsupported constant type `{type(node.value).__name__}` in: {source}")
         return
     raise DSLError(f"unsupported AST node `{type(node).__name__}` in: {source}")
 
@@ -135,9 +132,7 @@ def collect_names(source: str) -> frozenset[str]:
         msg = f"syntax error in rule condition: {source!r} ({exc})"
         raise DSLError(msg) from exc
     _validate(tree, source)
-    return frozenset(
-        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
-    )
+    return frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
 
 
 def _normalise(source: str) -> str:

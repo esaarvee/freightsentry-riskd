@@ -242,9 +242,9 @@ async def test_rls_table_scoped_by_app_tenant_id(
             f"SELECT count(*) FROM {table} WHERE tenant_id = $1",
             tenant_b,
         )
-        assert (
-            leaked == 0
-        ), f"RLS leak: as tenant_a viewing {table}, saw {leaked} tenant_b rows (expected 0)"
+        assert leaked == 0, (
+            f"RLS leak: as tenant_a viewing {table}, saw {leaked} tenant_b rows (expected 0)"
+        )
 
 
 @pytest.mark.serial

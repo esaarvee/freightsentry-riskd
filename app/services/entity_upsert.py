@@ -60,9 +60,7 @@ async def upsert_customer(
     """
     enterprise_id: int | None = None
     if payload.enterprise is not None:
-        enterprise_id = await upsert_enterprise(
-            conn, tenant_id, payload.enterprise.external_id
-        )
+        enterprise_id = await upsert_enterprise(conn, tenant_id, payload.enterprise.external_id)
 
     c = payload.customer
     row = await conn.fetchrow(

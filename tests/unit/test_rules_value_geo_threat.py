@@ -68,9 +68,9 @@ def test_value_zscore_rules_are_tier_disjoint(ruleset: RuleSet) -> None:
     ctx["customer_observations"] = 15.0
     for z_int in range(0, 50):
         ctx["value_zscore"] = z_int / 10.0
-        assert not (
-            extreme.evaluate(ctx) and above.evaluate(ctx)
-        ), f"both value-anomaly rules fired at z={z_int / 10.0}"
+        assert not (extreme.evaluate(ctx) and above.evaluate(ctx)), (
+            f"both value-anomaly rules fired at z={z_int / 10.0}"
+        )
 
 
 def test_above_normal_value_vpn(ruleset: RuleSet) -> None:

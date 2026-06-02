@@ -114,8 +114,7 @@ def test_hmac_hex_value_dependent() -> None:
 def test_hmac_hex_no_lru_cache() -> None:
     """hmac_hex must NOT be lru-cached (secret-rotation hazard)."""
     assert not hasattr(hmac_hex, "cache_info"), (
-        "hmac_hex is lru-cached — secret-rotation hazard per "
-        ".ai/gotchas/python.md"
+        "hmac_hex is lru-cached — secret-rotation hazard per .ai/gotchas/python.md"
     )
 
 

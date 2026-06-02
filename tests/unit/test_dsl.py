@@ -39,12 +39,12 @@ def test_not_negates() -> None:
 
 
 def test_compound_with_grouping() -> None:
-    fn = parse_condition(
-        "(is_vpn OR is_tor) AND shipment_value >= 500 AND NOT is_api_partner"
-    )
+    fn = parse_condition("(is_vpn OR is_tor) AND shipment_value >= 500 AND NOT is_api_partner")
     env = {
-        "is_vpn": True, "is_tor": False,
-        "shipment_value": 500, "is_api_partner": False,
+        "is_vpn": True,
+        "is_tor": False,
+        "shipment_value": 500,
+        "is_api_partner": False,
     }
     assert fn(env) is True
     assert fn({**env, "shipment_value": 499}) is False
@@ -64,9 +64,7 @@ def test_compound_with_grouping() -> None:
         ("==", 5, 6, False),
     ],
 )
-def test_all_six_comparison_operators(
-    op: str, left: int, right: int, expected: bool
-) -> None:
+def test_all_six_comparison_operators(op: str, left: int, right: int, expected: bool) -> None:
     fn = parse_condition(f"x {op} y")
     assert fn({"x": left, "y": right}) is expected
 
@@ -88,30 +86,30 @@ def test_constant_int_float_str_bool_none() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "ctx.is_vpn",                    # attribute access
-        "ctx['is_vpn']",                 # subscript
-        "is_vpn()",                      # function call
-        "len(triggered_rules)",          # builtin call
-        "is_vpn + 1",                    # arithmetic (BinOp)
+        "ctx.is_vpn",  # attribute access
+        "ctx['is_vpn']",  # subscript
+        "is_vpn()",  # function call
+        "len(triggered_rules)",  # builtin call
+        "is_vpn + 1",  # arithmetic (BinOp)
         "is_vpn * 2",
         "is_vpn - 1",
         "is_vpn / 1",
         "is_vpn % 1",
-        "is_vpn ** 2",                   # power
-        "is_vpn // 1",                   # floor div
-        "is_vpn & is_tor",               # bitwise
+        "is_vpn ** 2",  # power
+        "is_vpn // 1",  # floor div
+        "is_vpn & is_tor",  # bitwise
         "is_vpn | is_tor",
         "is_vpn ^ is_tor",
-        "is_vpn << 1",                   # shift
-        "[1, 2, 3]",                     # list literal
-        "{'k': 'v'}",                    # dict literal
-        "{1, 2}",                        # set literal
-        "(1, 2)",                        # tuple literal
-        "lambda x: x",                   # lambda
-        "x if y else z",                 # ternary (IfExp)
-        "x in (1, 2, 3)",                # `in` operator
-        "x is None",                     # `is` operator (we only allow ==/!=)
-        "yield x",                       # yield (would fail mode='eval' too)
+        "is_vpn << 1",  # shift
+        "[1, 2, 3]",  # list literal
+        "{'k': 'v'}",  # dict literal
+        "{1, 2}",  # set literal
+        "(1, 2)",  # tuple literal
+        "lambda x: x",  # lambda
+        "x if y else z",  # ternary (IfExp)
+        "x in (1, 2, 3)",  # `in` operator
+        "x is None",  # `is` operator (we only allow ==/!=)
+        "yield x",  # yield (would fail mode='eval' too)
     ],
 )
 def test_disallowed_constructs_raise_dsl_error(source: str) -> None:

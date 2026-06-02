@@ -159,9 +159,9 @@ async def test_established_clean_customer_returns_near_zero_score(
     assert event["account_prior"] == pytest.approx(0.0, abs=0.01)
     assert body["score"] < 0.05
     assert body["decision"] == "ALLOW"
-    assert (
-        body["triggered_rules"] == []
-    ), f"established clean customer triggered rules: {body['triggered_rules']}"
+    assert body["triggered_rules"] == [], (
+        f"established clean customer triggered rules: {body['triggered_rules']}"
+    )
 
 
 # ---------------------------------------------------------------------------

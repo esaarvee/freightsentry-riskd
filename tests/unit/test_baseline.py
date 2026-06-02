@@ -106,9 +106,7 @@ def test_decay_to_per_ip_type_half_lives() -> None:
         100.0 * _decay_factor(90, 365.0), rel=0.001
     )
     # residential: 60d half-life → 1.5 half-lives → factor ~0.354
-    assert bl.ip_stats["10.0.0.2"]["n"] == pytest.approx(
-        100.0 * _decay_factor(90, 60.0), rel=0.001
-    )
+    assert bl.ip_stats["10.0.0.2"]["n"] == pytest.approx(100.0 * _decay_factor(90, 60.0), rel=0.001)
     # unknown: 180d half-life → 0.5 half-lives → factor ~0.707
     assert bl.ip_stats["10.0.0.3"]["n"] == pytest.approx(
         100.0 * _decay_factor(90, 180.0), rel=0.001
@@ -213,20 +211,14 @@ def test_value_zscore_after_known_distribution() -> None:
 def test_ip_familiarity_familiar_exact_match() -> None:
     bl = CustomerBaseline.empty(1, 2)
     _add_minimal(bl, _at(2026, 5, 26))
-    assert (
-        bl.ip_familiarity_tier("192.0.2.1", "192.0.2.0", "AS-Test")
-        == "familiar"
-    )
+    assert bl.ip_familiarity_tier("192.0.2.1", "192.0.2.0", "AS-Test") == "familiar"
 
 
 def test_ip_familiarity_family_via_netblock_match_only() -> None:
     """New IP, same /24 → family_familiar (not the previous ASN-only path)."""
     bl = CustomerBaseline.empty(1, 2)
     _add_minimal(bl, _at(2026, 5, 26))
-    assert (
-        bl.ip_familiarity_tier("192.0.2.99", "192.0.2.0", "Some-Other-ASN")
-        == "family_familiar"
-    )
+    assert bl.ip_familiarity_tier("192.0.2.99", "192.0.2.0", "Some-Other-ASN") == "family_familiar"
 
 
 def test_ip_familiarity_new_known_asn() -> None:
@@ -234,19 +226,13 @@ def test_ip_familiarity_new_known_asn() -> None:
     upgraded to family_familiar; now demoted per verification §2.2)."""
     bl = CustomerBaseline.empty(1, 2)
     _add_minimal(bl, _at(2026, 5, 26))
-    assert (
-        bl.ip_familiarity_tier("203.0.113.5", "203.0.113.0", "AS-Test")
-        == "new_known_asn"
-    )
+    assert bl.ip_familiarity_tier("203.0.113.5", "203.0.113.0", "AS-Test") == "new_known_asn"
 
 
 def test_ip_familiarity_fully_new() -> None:
     bl = CustomerBaseline.empty(1, 2)
     _add_minimal(bl, _at(2026, 5, 26))
-    assert (
-        bl.ip_familiarity_tier("203.0.113.5", "203.0.113.0", "Unknown-ASN")
-        == "fully_new"
-    )
+    assert bl.ip_familiarity_tier("203.0.113.5", "203.0.113.0", "Unknown-ASN") == "fully_new"
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +243,7 @@ def test_ip_familiarity_fully_new() -> None:
 def test_add_rejected_observation_increments_r_n() -> None:
     bl = CustomerBaseline.empty(1, 2)
     bl.email_hmacs["abc"] = {"n": 1.0, "r_n": 0.0, "last": "2026-05-25"}
-    bl.add_rejected_observation(
-        key_in="abc", stat="email_hmacs", ts=_at(2026, 5, 26)
-    )
+    bl.add_rejected_observation(key_in="abc", stat="email_hmacs", ts=_at(2026, 5, 26))
     assert bl.email_hmacs["abc"]["r_n"] == 1.0
     assert bl.email_hmacs["abc"]["n"] == 1.0  # n unchanged
     assert bl.email_hmacs["abc"]["last"] == "2026-05-26"

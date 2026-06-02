@@ -30,7 +30,7 @@ test = [
     "hypothesis>=6.115",
 ]
 dev = [
-    "ruff>=0.7",
+    "ruff>=0.15.0,<0.16.0",
     "mypy>=1.13",
     "types-pyyaml>=6.0",
 ]

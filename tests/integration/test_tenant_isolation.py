@@ -168,6 +168,6 @@ async def test_recipient_count_query_isolated_by_tenant(
             """,
             dest_hmac,
         )
-        assert (
-            count_combined == 4
-        ), f"sanity: tenant-unscoped query should see all 4 customers, got {count_combined}"
+        assert count_combined == 4, (
+            f"sanity: tenant-unscoped query should see all 4 customers, got {count_combined}"
+        )

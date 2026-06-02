@@ -197,7 +197,7 @@ async def test_booking_with_enterprise_links_customer(
     assert response.status_code == 200
 
     customer_row = await db_conn.fetchrow(
-        "SELECT id, enterprise_id FROM customers " "WHERE tenant_id = $1 AND external_id = $2",
+        "SELECT id, enterprise_id FROM customers WHERE tenant_id = $1 AND external_id = $2",
         tenant_id,
         "ent-cust",
     )

@@ -107,9 +107,9 @@ async def test_low_risk_modification_does_not_block(
         # No modification rule should fire on this benign payload
         triggered = set(mod.json()["triggered_rules"])
         modification_rules_fired = {r for r in triggered if r.startswith("modification_")}
-        assert (
-            not modification_rules_fired
-        ), f"unexpected modification rules fired: {modification_rules_fired}"
+        assert not modification_rules_fired, (
+            f"unexpected modification rules fired: {modification_rules_fired}"
+        )
 
 
 async def test_high_risk_30min_value_jacking_fires_value_rule(
@@ -349,9 +349,9 @@ async def test_booking_path_does_not_trigger_modification_rules(
         assert booking.status_code == 200, booking.text
         triggered = set(booking.json()["triggered_rules"])
         modification_rules_fired = {r for r in triggered if r.startswith("modification_")}
-        assert (
-            not modification_rules_fired
-        ), f"booking unexpectedly triggered modification rules: {modification_rules_fired}"
+        assert not modification_rules_fired, (
+            f"booking unexpectedly triggered modification rules: {modification_rules_fired}"
+        )
 
 
 # ---------------------------------------------------------------------------

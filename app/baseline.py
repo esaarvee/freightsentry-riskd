@@ -213,8 +213,7 @@ class CustomerBaseline:
         """
         suffix = " FOR UPDATE" if for_update else ""
         row = await conn.fetchrow(
-            "SELECT * FROM customer_baselines "
-            "WHERE tenant_id = $1 AND customer_id = $2" + suffix,
+            "SELECT * FROM customer_baselines WHERE tenant_id = $1 AND customer_id = $2" + suffix,
             tenant_id,
             customer_id,
         )
@@ -240,9 +239,7 @@ class CustomerBaseline:
                 customer_id,
             )
             if row is None:
-                msg = (
-                    "customer_baselines row not found after reserve-insert — " "concurrency anomaly"
-                )
+                msg = "customer_baselines row not found after reserve-insert — concurrency anomaly"
                 raise RuntimeError(msg)
         return cls._from_row(row)
 

@@ -40,4 +40,3 @@ async def test_health_returns_503_on_db_failure(
     response = await unauth_client.get("/health/")
     assert response.status_code == 503
     assert response.json() == {"ok": False, "db": "unreachable"}
-

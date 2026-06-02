@@ -32,14 +32,16 @@ _log = structlog.get_logger(__name__)
 # `is_proxy` must be gated on `proxy_type` NOT being one of these (per
 # verification §2.4) — a bare True with a sentinel `proxy_type` is a
 # false positive.
-_IP2P_NULL_SENTINELS: frozenset[str] = frozenset({
-    "",
-    "-",
-    "INVALID IP ADDRESS",
-    "NOT SUPPORTED",
-    "INVALID DATABASE FILE",
-    "DATABASE NOT FOUND",
-})
+_IP2P_NULL_SENTINELS: frozenset[str] = frozenset(
+    {
+        "",
+        "-",
+        "INVALID IP ADDRESS",
+        "NOT SUPPORTED",
+        "INVALID DATABASE FILE",
+        "DATABASE NOT FOUND",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -232,7 +234,10 @@ class Enricher:
             fields["fh_level2"] = True
         fh_hits = [
             name
-            for name, hit in (("level1", fields.get("fh_level1")), ("level2", fields.get("fh_level2")))
+            for name, hit in (
+                ("level1", fields.get("fh_level1")),
+                ("level2", fields.get("fh_level2")),
+            )
             if hit
         ]
         if fh_hits:
@@ -315,10 +320,24 @@ class Enricher:
                 threat          = EXCLUDED.threat,
                 updated_at      = now()
             """,
-            row.ip, row.country, row.region, row.city, row.lat, row.lon, row.asn_org,
-            row.fh_level1, row.fh_level2, row.fh_lists,
-            row.is_cloud, row.cloud_provider, row.is_datacenter,
-            row.is_proxy, row.is_vpn, row.is_tor, row.proxy_type, row.threat,
+            row.ip,
+            row.country,
+            row.region,
+            row.city,
+            row.lat,
+            row.lon,
+            row.asn_org,
+            row.fh_level1,
+            row.fh_level2,
+            row.fh_lists,
+            row.is_cloud,
+            row.cloud_provider,
+            row.is_datacenter,
+            row.is_proxy,
+            row.is_vpn,
+            row.is_tor,
+            row.proxy_type,
+            row.threat,
         )
 
 

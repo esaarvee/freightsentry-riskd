@@ -76,9 +76,7 @@ async def test_cache_hit_returns_persisted_row(
         await _delete_ip(db_conn, str(ip))
 
 
-async def test_stale_cache_refreshes(
-    db_conn: asyncpg.Connection, empty_enricher: Enricher
-) -> None:
+async def test_stale_cache_refreshes(db_conn: asyncpg.Connection, empty_enricher: Enricher) -> None:
     """A row older than 14 days triggers a refresh (the empty Enricher
     overwrites with default fields). The freshness window is the SQL
     `updated_at > now() - interval '14 days'` predicate in enrich()."""

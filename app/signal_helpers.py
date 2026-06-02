@@ -23,31 +23,73 @@ import re
 # Email constants (lowercased domains / addresses)
 # ---------------------------------------------------------------------------
 
-THROWAWAY_DOMAINS: frozenset[str] = frozenset({
-    "10minutemail.com", "20minutemail.com", "30minutemail.com",
-    "anonbox.net", "deadaddress.com", "dispostable.com",
-    "fakeinbox.com", "getairmail.com", "guerrillamail.com",
-    "guerrillamail.org", "guerrillamailblock.com", "harakirimail.com",
-    "incognitomail.com", "incognitomail.net", "jetable.org",
-    "mailcatch.com", "mailinator.com", "mailmoat.com",
-    "mailnator.com", "mailnesia.com", "mailtemp.info",
-    "maildrop.cc", "mintemail.com", "mohmal.com",
-    "moot.email", "mvrht.com", "nada.email",
-    "spamgourmet.com", "tempmail.de", "tempmailo.com",
-    "tempr.email", "throwawaymail.com", "trashmail.com",
-    "trashmail.de", "trashmail.io", "yopmail.com",
-    "yopmail.net",
-})
+THROWAWAY_DOMAINS: frozenset[str] = frozenset(
+    {
+        "10minutemail.com",
+        "20minutemail.com",
+        "30minutemail.com",
+        "anonbox.net",
+        "deadaddress.com",
+        "dispostable.com",
+        "fakeinbox.com",
+        "getairmail.com",
+        "guerrillamail.com",
+        "guerrillamail.org",
+        "guerrillamailblock.com",
+        "harakirimail.com",
+        "incognitomail.com",
+        "incognitomail.net",
+        "jetable.org",
+        "mailcatch.com",
+        "mailinator.com",
+        "mailmoat.com",
+        "mailnator.com",
+        "mailnesia.com",
+        "mailtemp.info",
+        "maildrop.cc",
+        "mintemail.com",
+        "mohmal.com",
+        "moot.email",
+        "mvrht.com",
+        "nada.email",
+        "spamgourmet.com",
+        "tempmail.de",
+        "tempmailo.com",
+        "tempr.email",
+        "throwawaymail.com",
+        "trashmail.com",
+        "trashmail.de",
+        "trashmail.io",
+        "yopmail.com",
+        "yopmail.net",
+    }
+)
 
-EMAIL_BLOCKLIST: frozenset[str] = frozenset({
-    "abuse@example.com", "noreply@example.com", "no-reply@example.com",
-    "test@test.com", "test@example.com", "fake@fake.com",
-    "anonymous@anonymous.com", "user@example.com",
-    "admin@example.com", "root@localhost", "fraud@fraud.com",
-})
+EMAIL_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        "abuse@example.com",
+        "noreply@example.com",
+        "no-reply@example.com",
+        "test@test.com",
+        "test@example.com",
+        "fake@fake.com",
+        "anonymous@anonymous.com",
+        "user@example.com",
+        "admin@example.com",
+        "root@localhost",
+        "fraud@fraud.com",
+    }
+)
 
 KEYBOARD_MASH: tuple[str, ...] = (
-    "asdf", "qwer", "zxcv", "qwerty", "asdfgh", "wasd", "1234", "abcd",
+    "asdf",
+    "qwer",
+    "zxcv",
+    "qwerty",
+    "asdfgh",
+    "wasd",
+    "1234",
+    "abcd",
 )
 
 # ---------------------------------------------------------------------------
@@ -55,17 +97,42 @@ KEYBOARD_MASH: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 _DATACENTER_KEYWORDS: tuple[str, ...] = (
-    "data center", "data centre", "datacenter", "datacentre",
-    "colocation", "co-location", "web hosting", "hosting services",
-    "dedicated server", "dedicated servers", "vps", "virtual private server",
-    "cloud", "cloud services", "cloud computing",
+    "data center",
+    "data centre",
+    "datacenter",
+    "datacentre",
+    "colocation",
+    "co-location",
+    "web hosting",
+    "hosting services",
+    "dedicated server",
+    "dedicated servers",
+    "vps",
+    "virtual private server",
+    "cloud",
+    "cloud services",
+    "cloud computing",
 )
 
 _DATACENTER_PROVIDERS: tuple[str, ...] = (
-    "estruxture", "equinix", "ovh", "ovh sas", "hetzner",
-    "digitalocean", "linode", "vultr", "rackspace", "softlayer",
-    "leaseweb", "scaleway", "contabo", "interserver", "iweb",
-    "akamai", "fastly", "limelight",
+    "estruxture",
+    "equinix",
+    "ovh",
+    "ovh sas",
+    "hetzner",
+    "digitalocean",
+    "linode",
+    "vultr",
+    "rackspace",
+    "softlayer",
+    "leaseweb",
+    "scaleway",
+    "contabo",
+    "interserver",
+    "iweb",
+    "akamai",
+    "fastly",
+    "limelight",
 )
 
 # ---------------------------------------------------------------------------
@@ -193,9 +260,7 @@ def is_datacenter_asn(asn_org: str | None) -> bool:
     if not asn_org:
         return False
     s = asn_org.lower()
-    return any(kw in s for kw in _DATACENTER_KEYWORDS) or any(
-        p in s for p in _DATACENTER_PROVIDERS
-    )
+    return any(kw in s for kw in _DATACENTER_KEYWORDS) or any(p in s for p in _DATACENTER_PROVIDERS)
 
 
 # ---------------------------------------------------------------------------

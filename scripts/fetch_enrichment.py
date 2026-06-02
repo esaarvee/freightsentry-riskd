@@ -25,9 +25,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-_FIREHOL_BASE = (
-    "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master"
-)
+_FIREHOL_BASE = "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master"
 _CLOUD_URLS = {
     "aws": "https://ip-ranges.amazonaws.com/ip-ranges.json",
     "gcp": "https://www.gstatic.com/ipranges/cloud.json",
@@ -95,10 +93,7 @@ def _fetch_ip2proxy(data_dir: Path, token: str | None, *, dry_run: bool) -> None
     if not token:
         print("[skip] IP2PROXY_DOWNLOAD_TOKEN not set — skipping IP2Proxy download")
         return
-    url = (
-        f"https://www.ip2location.com/download/"
-        f"?token={token}&file=PX11LITEBIN"
-    )
+    url = f"https://www.ip2location.com/download/?token={token}&file=PX11LITEBIN"
     _download(url, data_dir / "IP2PROXY-LITE-PX11.BIN", dry_run=dry_run)
 
 

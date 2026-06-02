@@ -23,9 +23,9 @@ def test_build_context_signature_requires_tenant_config() -> None:
     assert "tenant_config" in sig.parameters
     param = sig.parameters["tenant_config"]
     assert param.kind == inspect.Parameter.KEYWORD_ONLY
-    assert (
-        param.default is inspect.Parameter.empty
-    ), "tenant_config must be a required keyword arg; 4B/4C consumers depend on it being present"
+    assert param.default is inspect.Parameter.empty, (
+        "tenant_config must be a required keyword arg; 4B/4C consumers depend on it being present"
+    )
 
 
 def test_build_modification_context_signature_requires_tenant_config() -> None:

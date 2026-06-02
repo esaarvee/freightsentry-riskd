@@ -240,9 +240,9 @@ async def test_high_velocity_1h_fires_for_both_thin_and_mature(
             )
             assert final.status_code == 200, final.text
             triggered = set(final.json()["triggered_rules"])
-            assert (
-                "modification_high_velocity_1h" in triggered
-            ), f"high_velocity_1h didn't fire for {ext_id}: {triggered}"
+            assert "modification_high_velocity_1h" in triggered, (
+                f"high_velocity_1h didn't fire for {ext_id}: {triggered}"
+            )
 
 
 # ---------------------------------------------------------------------------

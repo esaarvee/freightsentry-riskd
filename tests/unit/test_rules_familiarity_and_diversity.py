@@ -175,6 +175,6 @@ def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:
     copy-paste duplication that the set-membership tests would silently
     miss."""
     names = [r.name for r in ruleset.rules]
-    assert len(names) == len(
-        set(names)
-    ), f"duplicate rule names found: {[n for n in names if names.count(n) > 1]}"
+    assert len(names) == len(set(names)), (
+        f"duplicate rule names found: {[n for n in names if names.count(n) > 1]}"
+    )

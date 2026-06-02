@@ -331,6 +331,6 @@ async def test_modification_rule_1_currency_independent(
         finally:
             app.dependency_overrides.pop(require_api_token, None)
         assert mod_resp.status_code == 200
-        assert (
-            "modification_within_30_min_value_increase" in mod_resp.json()["triggered_rules"]
-        ), f"Rule must fire for {mod_currency} (magnitude-based, currency-independent)"
+        assert "modification_within_30_min_value_increase" in mod_resp.json()["triggered_rules"], (
+            f"Rule must fire for {mod_currency} (magnitude-based, currency-independent)"
+        )

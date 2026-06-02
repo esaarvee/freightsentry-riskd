@@ -41,9 +41,9 @@ def test_cadence_anomaly_z_threshold_is_6() -> None:
     """is_abnormally_dormant must remain at z > 6.0. A drift to 4.0 would
     fire dormancy rules far too often; a drift to 8.0 would miss case-1."""
     src = _CONTEXT_PY.read_text()
-    assert (
-        "cadence_zscore > 6.0" in src
-    ), "is_abnormally_dormant derivation no longer uses the tuned z > 6.0 threshold"
+    assert "cadence_zscore > 6.0" in src, (
+        "is_abnormally_dormant derivation no longer uses the tuned z > 6.0 threshold"
+    )
 
 
 def test_velocity_spike_daily_api_threshold_is_50() -> None:
@@ -51,9 +51,9 @@ def test_velocity_spike_daily_api_threshold_is_50() -> None:
     rule = _load_rule_by_name("velocity_spike_daily_api")
     condition = str(rule["condition"])
     assert "velocity_user_daily > 50" in condition
-    assert (
-        "5000" not in condition
-    ), "velocity_spike_daily_api drifted back to the untuned 5000 threshold"
+    assert "5000" not in condition, (
+        "velocity_spike_daily_api drifted back to the untuned 5000 threshold"
+    )
 
 
 def test_residential_asn_high_velocity_threshold_is_15() -> None:
@@ -62,9 +62,9 @@ def test_residential_asn_high_velocity_threshold_is_15() -> None:
     condition = str(rule["condition"])
     assert "velocity_ip_hourly > 15" in condition
     # Symmetric drift-back guard (trailing space to avoid matching `> 15`)
-    assert (
-        "velocity_ip_hourly > 5 " not in condition
-    ), "residential_asn_high_velocity drifted back to the untuned 5 threshold"
+    assert "velocity_ip_hourly > 5 " not in condition, (
+        "residential_asn_high_velocity drifted back to the untuned 5 threshold"
+    )
 
 
 def test_ip_familiarity_tier_requires_netblock_match() -> None:

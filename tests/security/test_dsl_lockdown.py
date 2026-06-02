@@ -76,6 +76,7 @@ def test_builtins_walled_off_behaviourally() -> None:
     `{"__builtins__": {}}` (explicit empty dict), which defeats the
     silent-insertion behavior and forces a NameError → DSLError."""
     from app.dsl import DSLError, parse_condition
+
     fn = parse_condition("len")
     with pytest.raises(DSLError, match="unknown field"):
         fn({})  # env has no `len`; builtins are walled off, so this raises
