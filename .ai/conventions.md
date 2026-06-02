@@ -69,6 +69,21 @@ Single conventions file for the project. Load this for any coding or test-writin
 - `mypy app/` strict mode. No `# type: ignore` without a comment.
 - `ruff` (lint + format), `mypy`, and `pytest tests/unit/` run via `pre-commit` hooks on every commit as non-bypassable gates. Hook config in `.pre-commit-config.yaml`. See `CLAUDE.md` "Pre-commit enforcement" for the bypass rules around declared-break commits.
 
+### Dependency locking
+
+- `uv.lock` at repo root is the single source of truth for resolved dependency versions. Committed to git.
+- The `.pre-commit-config.yaml` ruff hook `rev:` MUST match the ruff version resolved in `uv.lock`. Mismatches cause format-sync drift: pre-commit's ruff reformats files differently than the locally-installed ruff, so commits churn across unrelated files.
+- The project uses `uv` for resolution only. Runtime install (in the Dockerfile and in local dev) is pip-driven — uv produces the lockfile; the container and dev environment install via pip.
+- After any `pyproject.toml` change touching `[project] dependencies` or `[project.optional-dependencies]`:
+
+  ```bash
+  uv lock
+  git add uv.lock pyproject.toml
+  git commit
+  ```
+
+- To install uv if missing: `python3 -m pip install --user uv` (one-time, per-developer). Then `python3 -m uv lock` regenerates the lockfile.
+
 ### Comments
 
 - Default to writing no comments. Code reads top-to-bottom; names carry meaning.
