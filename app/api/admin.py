@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import AuthContext, require_admin_role
 from app.db import get_conn, set_tenant_id
-from app.tenant_config import load_tenant_config
+from app.tenant_config_cache import load_tenant_config_cached
 
 _log = structlog.get_logger(__name__)
 
@@ -95,7 +95,7 @@ async def get_admin_decision(
         await set_tenant_id(conn, auth.tenant_id)
         # Load tenant config for shape consistency with other endpoints (4A
         # wiring); admin endpoint doesn't consult config fields.
-        _tc = await load_tenant_config(conn, auth.tenant_id)
+        _tc = await load_tenant_config_cached(conn, auth.tenant_id)
         _ = _tc
 
         row = await conn.fetchrow(
@@ -182,7 +182,7 @@ async def get_admin_customer_baseline(
     """
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
-        _tc = await load_tenant_config(conn, auth.tenant_id)
+        _tc = await load_tenant_config_cached(conn, auth.tenant_id)
         _ = _tc
 
         customer_row = await conn.fetchrow(

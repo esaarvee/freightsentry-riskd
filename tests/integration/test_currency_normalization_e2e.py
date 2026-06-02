@@ -35,11 +35,16 @@ from tests.conftest import _cleanup_tenant
 async def _set_tenant_config(
     db_conn: asyncpg.Connection, tenant_id: int, config: dict[str, object]
 ) -> None:
+    from app import tenant_config_cache
+
     await db_conn.execute(
         "UPDATE tenants SET config = $1::jsonb WHERE id = $2",
         json.dumps(config),
         tenant_id,
     )
+    # 5B cache invalidation: the tenants.config UPDATE is otherwise
+    # invisible to the endpoint for up to 60s within a single test run.
+    tenant_config_cache._reset_for_tests()
 
 
 def _booking(

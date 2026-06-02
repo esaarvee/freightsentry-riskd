@@ -28,7 +28,7 @@ from app.runtime import get_enricher, get_ruleset
 from app.scoring import CustomerState, score
 from app.services.entity_upsert import upsert_customer, upsert_user
 from app.signal_helpers import email_domain, hmac_hex, netblock_24
-from app.tenant_config import load_tenant_config
+from app.tenant_config_cache import load_tenant_config_cached
 
 _log = structlog.get_logger(__name__)
 
@@ -51,7 +51,7 @@ async def evaluate_booking(
         # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
         # Sub-millisecond indexed PK lookup; consumers (4B currency
         # validation, 4C cold-start) are downstream.
-        tenant_config = await load_tenant_config(conn, auth.tenant_id)
+        tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
         # 4B.3 request-time currency check. ISO 4217 shape is enforced at the
         # Pydantic layer (4B.1); this is the allowed-list enforcement. 400 is

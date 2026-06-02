@@ -6,6 +6,13 @@ updated config between calls. Stored-corruption test verifies the
 endpoint's failure mode when JSONB is invalid (no caching layer in
 Phase 4 means subsequent retries also fail until the bad config is
 fixed).
+
+5B note: the spy-based tests below patch `load_tenant_config_cached`
+directly with a spy that delegates to the underlying
+`load_tenant_config`. This BYPASSES the 60s TTL cache so the original
+"endpoint-loads-config" invariants still verify under each request.
+Cache-staleness behavior (production contract) is covered by 5B unit
+tests in `tests/unit/test_tenant_config_cache.py`.
 """
 
 from __future__ import annotations
@@ -109,7 +116,7 @@ async def test_load_tenant_config_called_with_each_request_tenant_id(
         return await real_loader(conn, tid)
 
     try:
-        with patch("app.api.booking.load_tenant_config", spy):
+        with patch("app.api.booking.load_tenant_config_cached", spy):
             await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
             await _post_booking_under_tenant(unauth_client, other_tenant_id, "x")
             await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
@@ -126,7 +133,13 @@ async def test_load_tenant_config_called_with_each_request_tenant_id(
 async def test_per_request_fresh_load_reflects_db_update(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Update tenants.config between two requests; second load reflects change."""
+    """Update tenants.config between two requests; second load reflects
+    change. The spy patches `load_tenant_config_cached` and delegates to
+    the underlying `load_tenant_config`, BYPASSING the 60s TTL cache
+    (5B). In production, the second request would hit the cache and
+    return the stale config until the 60s window expires. This test
+    verifies the underlying loader invariant; cache-staleness behavior
+    is covered separately by 5B unit tests."""
     captured: list[TenantConfig] = []
     real_loader = tenant_config_module.load_tenant_config
 
@@ -135,7 +148,7 @@ async def test_per_request_fresh_load_reflects_db_update(
         captured.append(cfg)
         return cfg
 
-    with patch("app.api.booking.load_tenant_config", spy):
+    with patch("app.api.booking.load_tenant_config_cached", spy):
         s1 = await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
         # Bump the tenant's config between requests.
         await db_conn.execute(
@@ -172,7 +185,7 @@ async def test_modification_endpoint_loads_tenant_config(
         tenant_id=seeded_tenant, role="tenant"
     )
     try:
-        with patch("app.api.modification.load_tenant_config", spy):
+        with patch("app.api.modification.load_tenant_config_cached", spy):
             r = await unauth_client.post(
                 "/api/v1/shipments/modification/evaluate",
                 json={
@@ -206,7 +219,7 @@ async def test_feedback_endpoint_loads_tenant_config(
         tenant_id=seeded_tenant, role="tenant"
     )
     try:
-        with patch("app.api.feedback.load_tenant_config", spy):
+        with patch("app.api.feedback.load_tenant_config_cached", spy):
             r = await unauth_client.post(
                 "/api/v1/shipments/feedback",
                 json={
@@ -281,7 +294,7 @@ async def test_cross_tenant_isolation_via_endpoint_loads(
         return cfg
 
     try:
-        with patch("app.api.booking.load_tenant_config", spy):
+        with patch("app.api.booking.load_tenant_config_cached", spy):
             await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
             await _post_booking_under_tenant(unauth_client, other_tenant_id, "x")
     finally:

@@ -38,7 +38,7 @@ from app.models import ModificationRequest, ModificationResponse, RiskFactor
 from app.rules import RuleSet
 from app.runtime import get_enricher, get_ruleset
 from app.scoring import CustomerState, score
-from app.tenant_config import load_tenant_config
+from app.tenant_config_cache import load_tenant_config_cached
 
 _log = structlog.get_logger(__name__)
 
@@ -57,7 +57,7 @@ async def evaluate_modification(
         await set_tenant_id(conn, auth.tenant_id)
 
         # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
-        tenant_config = await load_tenant_config(conn, auth.tenant_id)
+        tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
         # 4B.3 request-time currency check. Modification carries its own
         # `currency` (defaults to USD); the modification's currency may differ

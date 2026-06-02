@@ -54,11 +54,16 @@ def _minimal_modification_payload(currency: str | None = None) -> dict[str, obje
 async def _set_allowed_currencies(
     db_conn: asyncpg.Connection, tenant_id: int, currencies: list[str]
 ) -> None:
+    from app import tenant_config_cache
+
     await db_conn.execute(
         "UPDATE tenants SET config = $1::jsonb WHERE id = $2",
         json.dumps({"allowed_currencies": currencies}),
         tenant_id,
     )
+    # 5B cache invalidation: the tenants.config UPDATE is otherwise
+    # invisible to the endpoint for up to 60s within a single test run.
+    tenant_config_cache._reset_for_tests()
 
 
 # ---------------------------------------------------------------------------

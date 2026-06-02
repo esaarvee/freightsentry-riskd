@@ -31,7 +31,7 @@ from app.auth import AuthContext, require_api_token
 from app.baseline import CustomerBaseline
 from app.db import get_conn, set_tenant_id
 from app.models import FeedbackLabel, FeedbackRequest, FeedbackResponse
-from app.tenant_config import load_tenant_config
+from app.tenant_config_cache import load_tenant_config_cached
 
 _log = structlog.get_logger(__name__)
 
@@ -112,7 +112,7 @@ async def submit_feedback(
         # 4A; 4B+ may consult tenant_config.allowed_currencies if feedback
         # semantics extend to per-currency thresholds. The underscore
         # prefix marks the binding as intentionally unused for now.
-        _tenant_config = await load_tenant_config(conn, auth.tenant_id)
+        _tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
         # Tier 1: per-POST idempotency — replay of the same request_id
         # returns the prior outcome without re-applying. Network-retry-safe.

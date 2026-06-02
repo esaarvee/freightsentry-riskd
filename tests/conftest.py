@@ -115,6 +115,19 @@ def load_payload() -> Callable[[str], dict[str, Any]]:
     return _load
 
 
+@pytest.fixture(autouse=True)
+def _reset_tenant_config_cache() -> None:
+    """5B introduces an in-process 60s TTL cache fronting load_tenant_config.
+    Many integration tests mutate `tenants.config` mid-test and expect the
+    next endpoint call to observe the new value. In production the
+    staleness window is operator-acceptable; in tests it would surface
+    as flaky cross-test bleed. Reset the cache before each test so any
+    UPDATE on `tenants.config` is immediately visible."""
+    from app import tenant_config_cache
+
+    tenant_config_cache._reset_for_tests()
+
+
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def _pool() -> AsyncIterator[asyncpg.Pool]:
     """Initialise the app's asyncpg pool once for the test session.
