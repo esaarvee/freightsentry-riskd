@@ -110,3 +110,21 @@ included in runtime image). The build-tools-in-runtime hardening
 regression (gcc/make/libc-dev now ship to production) is deferred to
 Phase 6 multi-stage. Re-check at Phase 6 plan time as a hard prerequisite
 for production deploy.
+
+## 2026-06-02 — Redundant index ix_api_tokens_tenant after 0006 lands
+
+Discovered by: db-reviewer during PLAN_PHASE_5A.md 5A.6
+Location: `alembic/versions/0001_initial.py:256` (the redundant index) vs
+`alembic/versions/0006_api_tokens_last_used_index.py:32` (the superset)
+Severity: low
+Observation: 0006 adds `ix_api_tokens_tenant_last_used (tenant_id,
+last_used_at DESC NULLS LAST)`. Per the leading-column rule, this composite
+covers all `WHERE tenant_id = $1`-equality queries that the legacy
+`ix_api_tokens_tenant (tenant_id)` index served. Both indexes now exist;
+Postgres may pick either at planning time. The legacy index pays write
+amplification on every api_tokens insert/update for no read benefit.
+Suggested action: DROP INDEX ix_api_tokens_tenant in a future cleanup
+migration. Not done in 5A.6 because that commit's framing is "purely
+additive index" and removing the legacy would muddy review. Safe to defer
+indefinitely — write amplification on api_tokens is negligible (low row
+churn) — but worth a cleanup commit in Phase 6 or a later hardening pass.
