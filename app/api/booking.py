@@ -70,11 +70,11 @@ async def evaluate_booking(
         # scoring. Scoped by request_type='booking' to keep the booking
         # and modification idempotency lookups symmetric — both
         # endpoints filter by their own discriminator (parallel intent,
-        # easier to read side-by-side). The ux_decisions_tenant_request
-        # constraint enforces that request_id is unique within
-        # (tenant_id, request_id) regardless of type, so the filter
-        # narrows correctly even when both types theoretically share a
-        # namespace.
+        # easier to read side-by-side). The
+        # ux_decisions_tenant_request_type UNIQUE INDEX (0007) enforces
+        # that request_id is unique within (tenant_id, request_type),
+        # so booking and modification request_ids are genuinely separate
+        # namespaces at the DB layer.
         existing = await conn.fetchrow(
             """
             SELECT decision, score, classification, risk_level,
@@ -236,12 +236,12 @@ async def evaluate_booking(
         # explicit literal mirrors the modification endpoint's
         # 'modification' literal and makes intent unambiguous).
         #
-        # UniqueViolation handling: see app/api/modification.py for the
-        # parallel case. The current flat UNIQUE on
-        # (tenant_id, request_id) means a request_id colliding across
-        # booking + modification namespaces would 500 without this
-        # catch. Phase 5 BUGS.md follow-up widens the UNIQUE to include
-        # request_type.
+        # UniqueViolation handling: catches duplicate POSTs of the same
+        # booking request_id (intra-type collision). The UNIQUE is now
+        # `(tenant_id, request_type, request_id)` per 0007 — RESOLVED in
+        # 5A.7 — so booking and modification with the same request_id
+        # legitimately coexist. This try/except stays as defense-in-depth
+        # for the same-type duplicate case.
         risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])
         try:
             await conn.execute(
@@ -267,8 +267,8 @@ async def evaluate_booking(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "request_id already used by another decision in this tenant "
-                    "(booking-modification namespace collision)"
+                    "request_id already used by another booking in this tenant "
+                    "(intra-type duplicate)"
                 ),
             ) from exc
 

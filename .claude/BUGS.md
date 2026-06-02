@@ -18,6 +18,11 @@ Suggested action: when 2C closes, refresh the rule-count summary in
 PLAN_PHASE_2C.md to reflect actual 17 (and update the batch-summary
 "~63" total downstream — actual is 62 at the end of 2C.6, will be
 greater at end of 2C.7).
+RESOLVED: pre-Phase-5 — Phase 4 wrap report (REPORT_PHASE_4.md) and
+the verified `rules.yaml` rule count (79 rules per Phase 5 bootstrap
+precondition) supersede the stale PLAN_PHASE_2C.md count. The plan-file
+arithmetic is a frozen historical artifact; no live code or doc depends
+on the "13"/"~63" numbers.
 
 ## 2026-05-27 — decisions.ux_decisions_tenant_request UNIQUE is flat across request_type
 
@@ -45,6 +50,11 @@ the UNIQUE constraint to
 in place, the try/except 409 catches in booking.py + modification.py
 become defense-in-depth; the comments referencing this BUGS entry
 should be updated to mark RESOLVED.
+RESOLVED: 5A.7 (migration 0007 drops `ux_decisions_tenant_request`
+and adds `CREATE UNIQUE INDEX ux_decisions_tenant_request_type ON
+decisions (tenant_id, request_type, request_id)`). Inline comments in
+booking.py / modification.py updated. Try/except → 409 retained as
+defense-in-depth for intra-type duplicate POSTs.
 
 ## 2026-06-01 — ruff version drift between pre-commit pin and local install
 
@@ -68,6 +78,10 @@ across the codebase once in a dedicated formatting-sync commit, and
 land that BEFORE the next phase to avoid re-running into the same
 scope-creep risk on every commit. Until then: only run `ruff format`
 on the files actually touched by the commit, not the whole tree.
+RESOLVED: 5A.1 (pre-commit pin bumped to v0.15.15; pyproject ruff
+constraint pinned `>=0.15.0,<0.16.0`; `uv.lock` regenerated; one-shot
+`ruff format` applied across `app/`, `tests/`, `scripts/`, `alembic/`
+as part of the same commit).
 
 ## 2026-06-02 — docker-compose `app` service unusable without DATABASE_URL override
 
@@ -128,3 +142,35 @@ migration. Not done in 5A.6 because that commit's framing is "purely
 additive index" and removing the legacy would muddy review. Safe to defer
 indefinitely — write amplification on api_tokens is negligible (low row
 churn) — but worth a cleanup commit in Phase 6 or a later hardening pass.
+
+## 2026-06-02 — UniqueViolation 409 catch in booking/modification is unreachable in serial tests
+
+Discovered by: test-reviewer during PLAN_PHASE_5A.md 5A.7
+Location: `app/api/booking.py` line ~266; `app/api/modification.py` line ~234
+Severity: low (defense-in-depth code, not load-bearing for primary flow)
+Observation: After 5A.7 widened the UNIQUE to `(tenant_id, request_type,
+request_id)`, the only way to hit the `except asyncpg.UniqueViolationError`
+catch is a concurrent-race scenario: two writers both SELECT-miss the
+idempotency check, then race the INSERT. Serial test flow always returns
+200 via SELECT-then-replay before the INSERT can fail. The catch path is
+correct defense-in-depth but has zero test coverage.
+Suggested action: add an `asyncio.gather` race test that POSTs two same-
+request-id same-type payloads concurrently and asserts one returns 200
+(winner) and the other returns 409 (UniqueViolation catch fires). Defer
+to Phase 5B or a dedicated concurrency-test commit. Not urgent — the
+catch is small, the path is straightforward, and the failure mode (500
+without the catch) would be loud in production logs.
+
+## 2026-06-02 — _assert_decisions_equivalent duplicated across two test files
+
+Discovered by: test-reviewer during PLAN_PHASE_5A.md 5A.7 cycle 2
+Location: `tests/integration/test_modification_endpoint.py:33-42` +
+`tests/integration/test_decisions_unique_widening.py:29-39`
+Severity: low
+Observation: Both files define an identical `_assert_decisions_equivalent`
+helper for handling numeric(5,4) score precision in idempotency-replay
+assertions. Cleanest fix: lift to a shared `tests/integration/_helpers.py`
+or extend the `db` fixture so the comparison is invoked via a fixture
+method. Two copies WILL drift over time.
+Suggested action: lift in a Phase 5B or 5C cleanup commit. Not urgent —
+both copies are byte-identical today and the helper is small.

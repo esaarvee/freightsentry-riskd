@@ -200,17 +200,11 @@ async def evaluate_modification(
         # Persist decision with request_type='modification' against the
         # prior shipment_id (no new shipments row created).
         #
-        # The ux_decisions_tenant_request UNIQUE constraint is flat
-        # (tenant_id, request_id) regardless of request_type, while the
-        # idempotency SELECT above scopes by request_type='modification'.
-        # If a tenant submits a modification whose request_id was
-        # previously used as a BOOKING's request_id, the idempotency
-        # SELECT returns no row (no matching modification), scoring runs,
-        # and the INSERT fails on the flat UNIQUE. Catching the
-        # UniqueViolation and returning 409 is more useful than an
-        # unhandled 500. Phase 5 follow-up (BUGS.md): widen the UNIQUE
-        # to (tenant_id, request_id, request_type) so the namespaces
-        # are genuinely separate at the DB layer.
+        # UNIQUE is `(tenant_id, request_type, request_id)` per 0007 —
+        # RESOLVED in 5A.7 — so booking and modification with the same
+        # request_id legitimately coexist at the DB layer. The try/except
+        # below stays as defense-in-depth for the same-type duplicate
+        # case (two POSTs of the same modification request_id).
         risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])
         try:
             await conn.execute(
@@ -236,8 +230,8 @@ async def evaluate_modification(
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "request_id already used by another decision in this tenant "
-                    "(booking-modification namespace collision)"
+                    "request_id already used by another modification in this tenant "
+                    "(intra-type duplicate)"
                 ),
             ) from exc
 

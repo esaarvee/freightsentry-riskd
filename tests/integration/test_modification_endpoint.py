@@ -251,33 +251,43 @@ async def test_modification_cross_tenant_returns_404(
         assert resp.status_code == 404
 
 
-async def test_modification_reusing_booking_request_id_returns_409(
+async def test_modification_reusing_booking_request_id_now_succeeds(
     unauth_client: AsyncClient,
     seeded_api_token: tuple[str, int],
+    db_conn: asyncpg.Connection,
 ) -> None:
-    """A modification whose request_id collides with a prior booking's
-    request_id (within the same tenant) must surface as 409, not an
-    unhandled 500. The ux_decisions_tenant_request UNIQUE is flat
-    (tenant_id, request_id) regardless of request_type; the endpoint
-    catches the UniqueViolation and translates to 409 with a clear
-    message. Phase 5 will widen the UNIQUE to include request_type;
-    until then the 409 is the safety net."""
-    token, _ = seeded_api_token
+    """Per 5A.7, the UNIQUE is `(tenant_id, request_type, request_id)`
+    (migration 0007 / index ux_decisions_tenant_request_type). A
+    modification whose request_id matches a prior booking's request_id
+    now succeeds — they occupy separate namespaces. Asserts two distinct
+    decisions rows persist (one per request_type)."""
+    token, tenant_id = seeded_api_token
     booking_resp = await unauth_client.post(
-        _BOOKING_PATH, json=_booking_payload(request_id="shared-id-001"), headers=_headers(token)
+        _BOOKING_PATH,
+        json=_booking_payload(request_id="shared-id-001"),
+        headers=_headers(token),
     )
     assert booking_resp.status_code == 200, booking_resp.text
 
-    collision = await unauth_client.post(
+    cross_type = await unauth_client.post(
         _MOD_PATH,
         json=_modification_payload(
-            request_id="shared-id-001",  # same as the booking
-            original_request_id="shared-id-001",  # the booking we're modifying
+            request_id="shared-id-001",
+            original_request_id="shared-id-001",
         ),
         headers=_headers(token),
     )
-    assert collision.status_code == 409
-    assert "namespace collision" in collision.json()["detail"]
+    assert cross_type.status_code == 200, cross_type.text
+
+    request_types = sorted(
+        row["request_type"]
+        for row in await db_conn.fetch(
+            "SELECT request_type FROM decisions WHERE tenant_id = $1 AND request_id = $2",
+            tenant_id,
+            "shared-id-001",
+        )
+    )
+    assert request_types == ["booking", "modification"]
 
 
 async def test_modification_replay_with_different_payload_still_returns_prior(
