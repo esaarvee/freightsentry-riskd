@@ -36,12 +36,12 @@ def test_build_modification_context_signature_requires_tenant_config() -> None:
     assert param.default is inspect.Parameter.empty
 
 
-def test_allowed_context_fields_count_is_73_after_6a2() -> None:
+def test_allowed_context_fields_count_is_75_after_6a5() -> None:
     """4A starts at 66; 4B.4 adds 5 currency-derived fields → 71;
-    6A.2 adds 2 case-3a signals → 73."""
+    6A.2 adds 2 case-3a signals → 73; 6A.5 adds 2 case-3b signals → 75."""
     from app.rules import ALLOWED_CONTEXT_FIELDS
 
-    assert len(ALLOWED_CONTEXT_FIELDS) == 73
+    assert len(ALLOWED_CONTEXT_FIELDS) == 75
     # The 5 Phase 4B fields must remain present in the whitelist.
     assert "shipment_currency" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_high" in ALLOWED_CONTEXT_FIELDS
@@ -51,3 +51,6 @@ def test_allowed_context_fields_count_is_73_after_6a2() -> None:
     # The 2 Phase 6A.2 fields must be present.
     assert "origin_via_carrier_dropoff" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_route_unfamiliar_for_customer" in ALLOWED_CONTEXT_FIELDS
+    # The 2 Phase 6A.5 fields must be present.
+    assert "customer_registered_country" in ALLOWED_CONTEXT_FIELDS
+    assert "customer_country_triangle_mismatch" in ALLOWED_CONTEXT_FIELDS

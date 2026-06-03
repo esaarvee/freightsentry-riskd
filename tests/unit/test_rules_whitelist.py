@@ -45,9 +45,11 @@ def test_whitelist_size_matches_phase_6a_total() -> None:
     Phase 3B adds 4 → 66; Phase 4B.4 adds 5 (shipment_currency +
     4 tier thresholds) → 71; Phase 6A.2 adds 2
     (origin_via_carrier_dropoff, shipment_route_unfamiliar_for_customer)
-    → 73. A size drift catches both accidental removal AND silent
-    addition that bypasses operator + reviewer scrutiny."""
-    assert len(ALLOWED_CONTEXT_FIELDS) == 73
+    → 73; Phase 6A.5 adds 2 (customer_registered_country,
+    customer_country_triangle_mismatch) → 75. A size drift catches both
+    accidental removal AND silent addition that bypasses operator +
+    reviewer scrutiny."""
+    assert len(ALLOWED_CONTEXT_FIELDS) == 75
 
 
 def test_whitelist_contains_phase_6a_2_additions() -> None:
@@ -55,6 +57,13 @@ def test_whitelist_contains_phase_6a_2_additions() -> None:
     phase_6a_2 = frozenset({"origin_via_carrier_dropoff", "shipment_route_unfamiliar_for_customer"})
     missing = phase_6a_2 - ALLOWED_CONTEXT_FIELDS
     assert not missing, f"Phase 6A.2 fields not in whitelist: {missing}"
+
+
+def test_whitelist_contains_phase_6a_5_additions() -> None:
+    """Phase 6A.5 case-3b signals must both be in the whitelist."""
+    phase_6a_5 = frozenset({"customer_registered_country", "customer_country_triangle_mismatch"})
+    missing = phase_6a_5 - ALLOWED_CONTEXT_FIELDS
+    assert not missing, f"Phase 6A.5 fields not in whitelist: {missing}"
 
 
 def test_whitelist_contains_every_phase_2b_addition() -> None:

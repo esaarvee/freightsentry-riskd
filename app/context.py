@@ -119,6 +119,30 @@ def _derive_route_unfamiliar(
     return current_key not in top_n_keys
 
 
+def _triangle_mismatch(
+    customer_country: str | None,
+    origin_country: str | None,
+    destination_country: str | None,
+) -> bool:
+    """Phase 6A.5 customer_country_triangle_mismatch derivation.
+
+    Returns True iff the customer ships outside their declared country
+    in BOTH origin AND destination — the case-3b shape (e.g., a CA
+    customer shipping US → US). Returns False when ANY of the three
+    countries is None: corpora without ground-truth structured-field
+    data cannot trigger the country-mismatch rule by accident.
+
+    Pure boolean over already-validated inputs; no I/O, no exceptions.
+    """
+    return (
+        customer_country is not None
+        and origin_country is not None
+        and destination_country is not None
+        and customer_country != origin_country
+        and customer_country != destination_country
+    )
+
+
 async def build_context(
     conn: asyncpg.Connection,
     *,
@@ -266,6 +290,21 @@ async def build_context(
             shipment_origin_country,
             shipment_destination_country,
             baseline.effective_observations,
+        ),
+        # Phase 6A.5 — case-3b signals (brand-new-customer fraud)
+        # customer_registered_country is a structured-field passthrough
+        # from payload.customer (ISO 3166-1 alpha-2). customer_country_
+        # triangle_mismatch returns True iff the customer is shipping
+        # outside their declared country in BOTH origin and destination
+        # — a sharp signal when combined with cold-start + carrier-
+        # dropoff in the cold_start_country_triangle_with_carrier_dropoff
+        # compound (6A.5 rule). Returns False when any of the three
+        # countries is None (no signal without ground-truth data).
+        "customer_registered_country": payload.customer.registered_country,
+        "customer_country_triangle_mismatch": _triangle_mismatch(
+            payload.customer.registered_country,
+            shipment_origin_country,
+            shipment_destination_country,
         ),
         # Velocity
         "velocity_user_hourly": vel_uh,

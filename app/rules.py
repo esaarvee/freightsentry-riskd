@@ -119,6 +119,13 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         # _derive_route_unfamiliar in app/context.py.
         "origin_via_carrier_dropoff",
         "shipment_route_unfamiliar_for_customer",
+        # Phase 6A.5 — case-3b signals. customer_registered_country is a
+        # structured-field passthrough from payload.customer (ISO 3166-1
+        # alpha-2). customer_country_triangle_mismatch is derived in
+        # build_context — True iff customer is shipping outside their
+        # declared country in BOTH origin and destination.
+        "customer_registered_country",
+        "customer_country_triangle_mismatch",
     }
 )
 

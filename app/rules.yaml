@@ -578,3 +578,35 @@ rules:
     condition: "origin_via_carrier_dropoff AND shipment_route_unfamiliar_for_customer AND ip_fully_new AND customer_observations >= 10"
     weight: 0.70
     maturity_sensitive: true
+
+  # =====================================================================
+  # Phase 6A.5 — case-3b simple compound (brand-new-customer fraud).
+  # Brand-new customer (< 10 obs, so the per-customer route baseline is
+  # not meaningful) ships outside their declared country in BOTH origin
+  # AND destination, AND uses a carrier-dropoff origin handoff. Each
+  # signal is benign-ish in isolation:
+  #   - cross-border freight forwarders legitimately ship outside their
+  #     own country
+  #   - small businesses occasionally test carrier-dropoff
+  #   - brand-new customers obviously exist
+  # The combination of all three is the case-3b attack shape (e.g. the
+  # Roulottes Lupien 95-record fraud cluster, where a Canadian business
+  # appeared as a brand-new customer shipping CA → US repeatedly with
+  # carrier-facility drop-off).
+  #
+  # Weight 0.65 sits just below BLOCK band 0.80 standalone — lands in
+  # REVIEW by itself. Composes with IP-quality / value-tier / IP-novelty
+  # cold-start rules to reach BLOCK when multiple signals fire. Maturity-
+  # INSENSITIVE because the cold-start gate is already in the condition.
+  #
+  # The sophisticated case-3b sibling rule
+  # (cold_start_population_baseline_rare_with_carrier_dropoff) lands in
+  # 6A.9 and uses the tenant population baseline instead of the fixed
+  # country-equality heuristic.
+  # =====================================================================
+
+  - name: cold_start_country_triangle_with_carrier_dropoff
+    description: "Case-3b simple — brand-new customer (< 10 obs) ships outside their declared country in BOTH origin AND destination AND uses carrier-dropoff origin handoff. Targets brand-new-customer fraud where transaction baseline cannot anchor route-deviation."
+    condition: "customer_country_triangle_mismatch AND origin_via_carrier_dropoff AND customer_observations < 10"
+    weight: 0.65
+    maturity_sensitive: false

@@ -121,6 +121,13 @@ def base_ctx() -> dict[str, Any]:
         # shipment_route_unfamiliar_for_customer explicitly.
         "origin_via_carrier_dropoff": False,
         "shipment_route_unfamiliar_for_customer": False,
+        # Phase 6A.5 — case-3b signals. Defaults are None / False;
+        # case-3b rule tests override explicitly. The triangle-mismatch
+        # default is False because the rule shape AND-chains it with
+        # cold-start + carrier-dropoff signals — keeping it neutral
+        # preserves prior-phase regression.
+        "customer_registered_country": None,
+        "customer_country_triangle_mismatch": False,
         # Modification (3A) — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum

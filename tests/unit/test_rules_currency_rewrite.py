@@ -235,11 +235,12 @@ def test_usd_default_invariance_matrix(ruleset: Any, shipment_value: float) -> N
         )
 
 
-def test_rule_count_after_6a3(ruleset: Any) -> None:
+def test_rule_count_after_6a5(ruleset: Any) -> None:
     """4B.5 rewrites 7 rules but adds/removes none → 79; Phase 6A.3 adds
-    case_3_compound → 80.
+    case_3_compound → 80; Phase 6A.5 adds
+    cold_start_country_triangle_with_carrier_dropoff → 81.
 
     Uses the conftest `ruleset` fixture (cwd-independent) rather than
     opening rules.yaml by relative path.
     """
-    assert len(ruleset.rules) == 80
+    assert len(ruleset.rules) == 81

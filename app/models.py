@@ -20,7 +20,12 @@ class Address(BaseModel):
 
     address: str
     city: str | None = None
-    country: str | None = None
+    # Phase 6A.5: ISO 3166-1 alpha-2 validation when not None. Two-letter
+    # uppercase code or None. Eliminates the composite-key collision
+    # risk (lane_stats / country_route_stats use "||"-separated composite
+    # keys; unbounded country strings could collide via crafted "||"
+    # values per 6A.2 security-auditor informational note).
+    country: str | None = Field(default=None, min_length=2, max_length=2, pattern=r"^[A-Z]{2}$")
     postal_code: str | None = None
 
 
@@ -30,6 +35,18 @@ class CustomerData(BaseModel):
     external_id: str
     registered_address: str | None = None
     business_name: str | None = None
+    # Phase 6A.5: structured country signal for case-3b detection
+    # (cold_start_country_triangle_with_carrier_dropoff). ISO 3166-1
+    # alpha-2 uppercase code or None. Platform integration supplies the
+    # field on production booking payloads; replay corpora inject ground
+    # truth where known (CA for Roulottes Lupien census; null for
+    # case-2 and approved corpora). Structured field rejects address-
+    # string parsing on purpose — format variation across users / forms /
+    # platforms makes parsers silently unreliable (same family of
+    # problem that dropped address-string-matching signals earlier).
+    registered_country: str | None = Field(
+        default=None, min_length=2, max_length=2, pattern=r"^[A-Z]{2}$"
+    )
     first_seen_at: datetime | None = None
     is_api_partner: bool | None = None
 
