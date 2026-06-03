@@ -1,0 +1,84 @@
+# Phase 6D.6 — Level 1 CI workflow (test + Snyk dependency scan).
+#
+# Runs on pull requests targeting main or release/* branches. Mirrors
+# the same gates the project's pre-commit hook chain enforces locally:
+# ruff (check + format), mypy --strict, pytest. Snyk runs in parallel
+# as a separate job; fails the workflow on high-severity findings,
+# medium/low surface as warnings.
+#
+# Postgres-dependent integration tests are not run in CI v1
+# (project floor is pytest unit subset; full integration suite runs
+# locally against docker-compose postgres). Adding a postgres service
+# container is a Phase 7+ scope item.
+
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "release/*"
+
+# Workflow-level least-privilege. Default repo GITHUB_TOKEN scope is
+# wider than needed for a PR-triggered lint/types/test workflow.
+permissions:
+  contents: read
+
+jobs:
+  lint-types-tests:
+    name: ruff + ruff format + mypy + pytest (unit)
+    runs-on: ubuntu-24.04
+    # Bound the blast radius of a hung dep install / pytest hang.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install runtime + dev dependencies
+        # Pip install + dev extras mirrors the Dockerfile 6D.1 dep-only
+        # install pattern. uv.lock-based reproducible install is
+        # deferred per the 6D.1 code-flow note (no uv.lock in repo).
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: ruff check
+        run: ruff check app/ tests/ scripts/
+
+      - name: ruff format --check
+        run: ruff format --check app/ tests/ scripts/
+
+      - name: mypy --strict
+        run: mypy app/
+
+      - name: pytest (unit tests only)
+        # Integration tests require docker-compose postgres which is not
+        # spun up in CI v1. Unit subset matches the pre-commit gate.
+        run: pytest tests/unit/ -x --no-header -q --asyncio-mode=auto
+
+  snyk:
+    name: Snyk dependency scan
+    runs-on: ubuntu-24.04
+    # Snyk runs in parallel with lint-types-tests (independent gate).
+    # Required GitHub Secret: SNYK_TOKEN (configured per the 6D.4
+    # runbook's GitHub Secrets section).
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Snyk to check for dependency vulnerabilities
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          # High-severity threshold: workflow fails on critical/high
+          # findings. Medium and low surface as PR-comment warnings
+          # but do not block merge.
+          args: --severity-threshold=high
