@@ -166,8 +166,9 @@ def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
     2C.7 familiarity-tier + closing pieces:       +5 =  67
     3A.7 modification rules:                      +8 =  75
     3B.5 previously-rejected rules:               +4 =  79
+    6A.3 case_3_compound:                         +1 =  80
     """
-    assert len(ruleset.rules) == 79
+    assert len(ruleset.rules) == 80
 
 
 def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:

@@ -554,3 +554,27 @@ rules:
     condition: "ip_previously_rejected"
     weight: 0.70
     maturity_sensitive: true
+
+  # =====================================================================
+  # Phase 6A.3 — case-3a compound rule (established-customer compromise).
+  # Fires when an established customer (>= 10 obs) ships from a
+  # carrier-dropoff origin AND the country pair is outside the top-N
+  # covering >= 80% of their historical routes AND the source IP is
+  # fully new for them. Weight 0.70 (maturity_sensitive) is set so that
+  # this rule + the existing ip_fully_new_for_customer rule (0.35) reach
+  # BLOCK band 0.80 at full maturity via noisy-OR (1 - 0.30*0.65 = 0.805);
+  # at maturity 0.5 the contribution degrades to REVIEW band, which is
+  # the correct safety behavior for lower-maturity customers.
+  #
+  # Case-3a is the established-customer-compromise threat (customer has
+  # legitimate baseline; attacker uses stolen credentials to ship under
+  # the customer's identity to a fraud destination). NOT the brand-new-
+  # customer fraud case (case-3b) — that threat is covered by separate
+  # cold_start_* rules introduced in 6A.5 + 6A.9.
+  # =====================================================================
+
+  - name: case_3_compound
+    description: "Compound case-3a (established-customer compromise) — carrier-dropoff origin + route outside customer's top-N baseline + fully-new IP. Requires >= 10 observations so the route baseline has meaning."
+    condition: "origin_via_carrier_dropoff AND shipment_route_unfamiliar_for_customer AND ip_fully_new AND customer_observations >= 10"
+    weight: 0.70
+    maturity_sensitive: true

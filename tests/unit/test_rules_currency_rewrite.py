@@ -235,10 +235,11 @@ def test_usd_default_invariance_matrix(ruleset: Any, shipment_value: float) -> N
         )
 
 
-def test_rule_count_unchanged_at_79(ruleset: Any) -> None:
-    """4B.5 rewrites 7 rules but adds/removes none. Rule count stays at 79.
+def test_rule_count_after_6a3(ruleset: Any) -> None:
+    """4B.5 rewrites 7 rules but adds/removes none → 79; Phase 6A.3 adds
+    case_3_compound → 80.
 
     Uses the conftest `ruleset` fixture (cwd-independent) rather than
     opening rules.yaml by relative path.
     """
-    assert len(ruleset.rules) == 79
+    assert len(ruleset.rules) == 80
