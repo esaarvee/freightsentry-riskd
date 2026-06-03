@@ -913,6 +913,170 @@ backlog action before ceiling breach).
 
 ---
 
+## Phase 6C replay-validation findings + calibration backlog seed (2026-06-03)
+
+Phase 6C executed the replay-validation orchestrator against three
+corpora exported from the sibling freight_risk repo. The measurement
+doc at `docs/replay-validation.md` is the strict-reading reference;
+this section seeds the post-launch calibration backlog so future
+Claude Code phases + operators have a single decision-document
+anchor.
+
+**NO TUNING was performed in response to these measurements.** Per
+the project-wide build-phase discipline, rule weights, thresholds,
+maturity parameters, and rule definitions were NOT changed in
+response to the findings below. Phase 6E synthesizes these items
+into `docs/calibration-backlog.md` for the post-launch real-data
+observation window.
+
+### Findings summary (raw counts; full detail in docs/replay-validation.md)
+
+| Corpus | Records | BLOCK | REVIEW | ALLOW |
+|---|---|---|---|---|
+| Approved (Jan-Mar 2026 sample) | 10,000 | 18 (0.18%) | 4,083 (40.83%) | 5,899 |
+| Case-2 (gobolt-non-34x-api) | 500 | 66 | 424 | 10 (2%) |
+| Case-3 (Roulottes Lupien census) | 95 | 0 | 0 | 95 (100%) |
+
+- Case-2 recall = 490/500 = **98%** (above the ≥85% target).
+- Case-3b detection rate = **0/95 = 0%** (far below ≥85% target).
+- Approved FPR (BLOCK) = **0.18%** (18 records); REVIEW share = **41%**.
+
+### Calibration backlog seed
+
+Items deferred to post-launch real-data observation. The 5-month
+post-launch window provides production traffic across diverse
+customers/IPs/value-tiers that the synthetic-history replay tenant
+cannot supply. Each item carries (a) the observed pattern, (b) the
+deferred action, (c) the rationale for deferral.
+
+1. **Domestic-origin + cross-border-destination + carrier-dropoff
+   case-3b sub-pattern.** The Roulottes Lupien attack shape (CA
+   customer with CA origin shipping to US with carrier dropoff)
+   triggered 0 fires on either case-3b compound during 6C. Both
+   compounds were designed to fire when the customer ships outside
+   their declared country in BOTH origin and destination, which
+   does not match this attack's asymmetric origin-matches-customer
+   pattern. Deferred action: post-launch evaluation of whether
+   (a) the simple compound's `customer_country_triangle_mismatch`
+   predicate should relax to fire when customer ≠ destination
+   only, or (b) a separate compound targets the asymmetric pattern.
+   Rationale for deferral: a single-customer cluster (95 records
+   from one CA business) is insufficient to drive a rule shape
+   change; real-data observation across diverse fraud actors will
+   determine whether this sub-pattern recurs or is specific to
+   Roulottes Lupien.
+
+2. **Population baseline seeding for new tenants.** The
+   sophisticated case-3b compound
+   (`cold_start_population_baseline_rare_with_carrier_dropoff`) fires
+   only when the tenant has ≥100 observations in
+   `tenant_route_baselines`. The replay tenant had empty baseline
+   (operator option (b)) so the rule did not have an opportunity
+   to fire. Deferred action: post-launch monitoring of
+   `shipment_route_rare_for_tenant` fire rate per tenant — if it
+   fires more than 10% of bookings sustained, calibration may need
+   to revisit the `RARITY_THRESHOLD = 0.02` or
+   `RARITY_MIN_OBSERVATIONS = 100` initial values. Rationale for
+   deferral: post-launch tenants will accumulate population data
+   organically; production-shaped observation drives tuning, not
+   synthetic-seed approximations.
+
+3. **`case_3_compound` empirical validation.** The case-3a rule
+   was not expected to fire on the case-3b census (maturity gate +
+   contaminated baseline) and did not. Deferred action: empirical
+   validation waits for (a) the platform integration shipping
+   `customer.registered_country` + `origin_via_carrier_dropoff`
+   structured fields, AND (b) case-3a-style fraud (established-
+   customer compromise with these structured signals) observed in
+   production traffic. Rationale for deferral: the rule targets a
+   threat shape that requires both structural and behavioral
+   prerequisites not present in the case-3b census.
+
+4. **`unfamiliar_ip_country_for_origin` baseline fire rate (72%
+   on approved corpus).** The rule fired on 7,183 / 10,000 of the
+   operator-approved sample, contributing to the 41% REVIEW share.
+   Deferred action: evaluate whether the rule's weight is
+   correctly tuned against the broader-than-expected legitimate-
+   customer cross-border-IP pattern, or whether the rule needs a
+   tighter trigger (compound with route deviation rather than IP-
+   origin pair novelty alone). Rationale for deferral: the
+   replay corpus's per-record IP-enrichment freshness is unknown;
+   post-launch traffic with current MaxMind / IP2Proxy data will
+   give a cleaner baseline.
+
+5. **`unknown_destination_address` baseline fire rate (65% on
+   approved corpus).** Similar pattern: 6,482 / 10,000. Deferred
+   action: evaluate whether the weight is correctly tuned or
+   whether the rule should compound with other signals before
+   contributing. Rationale for deferral: same enrichment-
+   freshness consideration as above.
+
+6. **Case-2 compound co-fire on approved traffic.** The
+   `api_non_cloud_ip` + `non_cloud_established_account` compound
+   that drives case-2 detection (490/500 case-2 records) also
+   fires on >40% of operator-approved traffic. Deferred action:
+   real-data evaluation of whether the compound's weights are
+   discriminating enough between case-2 fraud and legitimate API-
+   booking customer behavior. Rationale for deferral: case-2
+   recall is excellent at 98%; the partial overlap with
+   legitimate traffic only matters at the BLOCK margin (18
+   approved records crossing the 0.80 threshold), not the recall
+   ceiling.
+
+7. **18 BLOCK records on operator-approved corpus.** All 18 fire
+   the same 4-rule compound (`unknown_destination_address` +
+   `unfamiliar_ip_country_for_origin` + `api_non_cloud_ip` +
+   `non_cloud_established_account`), with
+   `value_novelty_compound` adding 13 / 18 and `extreme_value`
+   adding 6 / 18 to push over BLOCK threshold. Deferred action:
+   per-record `request_id` list retained in
+   `docs/replay-results/approved.json` per_transaction array
+   (decision=='BLOCK'). Post-launch operators can triage whether
+   this pattern persists on real traffic of similar shape.
+   Rationale for deferral: 18 records may be operator-mislabeled-
+   approved rather than truly legitimate (label-noise tolerance
+   per the 6C limitations section).
+
+8. **Case-2 false-negative ALLOWs (10/500).** A subset of case-2
+   records bypassed BLOCK + REVIEW. The fire-count distribution
+   shows IP-familiar customers + known origin addresses softening
+   the compound. Deferred action: post-launch evaluation of
+   whether weight adjustments would improve case-2 recall toward
+   100% without inflating the approved-corpus FPR. Rationale for
+   deferral: 98% recall is acceptable for v1 launch; tuning
+   without diverse production-traffic counter-examples risks
+   regression on the approved-corpus pattern.
+
+### Phase 7+ architectural workstreams (not parameter tuning)
+
+These are NOT calibration items — they're architecture changes
+requiring design + multi-commit implementation, deferred to
+Phase 7+:
+
+- **Trust-suppression on mature accounts.** Already documented in
+  `.ai/decisions.md` Phase 6A section (Case-3 detection capability)
+  under "Phase 7+ architectural concerns documented for post-
+  launch". Phase 6C did not surface new evidence on this; carried
+  forward unchanged.
+
+### Non-tuning statement (project-wide build-phase discipline)
+
+The eight calibration items above are RECORDED, not ACTED ON. No
+rule weight, threshold value, maturity parameter, rule condition,
+or fallback target was changed in response to the Phase 6C
+findings. Phase 6E will synthesize this list into
+`docs/calibration-backlog.md` — the canonical post-launch tuning
+checklist.
+
+The 5-month post-launch observation window (per Phase 6 prompt) is
+where tuning happens. Build-phase tuning on synthetic-history data
+risks calibrating to the artifact of the synthesis rather than the
+production reality. The discipline is to ship the rules as-is,
+observe under real traffic, and tune against the calibration
+backlog with confidence.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
