@@ -66,27 +66,41 @@ async def _post_booking_under_tenant(unauth_client: AsyncClient, tenant_id: int,
         app.dependency_overrides.pop(require_api_token, None)
 
 
-async def test_empty_config_tenant_booking_succeeds(
+async def test_seeded_config_tenant_booking_succeeds(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Booking endpoint loads an empty-JSONB tenant's config successfully."""
+    """Booking endpoint loads the seeded_tenant config successfully.
+
+    Phase 6B: seeded_tenant fixture now seeds `allowed_currencies =
+    ["USD", "CAD"]` (multi-currency convenience for the broader
+    integration suite). This test asserts that the loader returns
+    that exact list, plus the all-None overrides for the remaining
+    optional fields."""
     status = await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
     assert status == 200
 
-    # Confirm the stored config is the default empty dict (and so the loader
-    # returned all-None overrides).
     tc = await load_tenant_config(db_conn, seeded_tenant)
     assert tc.maturity_age_days is None
-    assert tc.allowed_currencies == ["USD"]
+    assert tc.allowed_currencies == ["USD", "CAD"]
 
 
 async def test_custom_config_tenant_booking_succeeds(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Custom override config doesn't break the endpoint (4A doesn't consume yet)."""
+    """Custom override config doesn't break the endpoint (4A doesn't consume yet).
+
+    Phase 6B: seeded_tenant fixture seeds multi-currency by default,
+    so the UPDATE here must preserve allowed_currencies (otherwise the
+    USD booking payload gets rejected against the override config)."""
     await db_conn.execute(
         "UPDATE tenants SET config = $1::jsonb WHERE id = $2",
-        json.dumps({"maturity_age_days": 90, "cold_start_grace_days": 7}),
+        json.dumps(
+            {
+                "maturity_age_days": 90,
+                "cold_start_grace_days": 7,
+                "allowed_currencies": ["USD", "CAD"],
+            }
+        ),
         seeded_tenant,
     )
     status = await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")
@@ -102,9 +116,11 @@ async def test_load_tenant_config_called_with_each_request_tenant_id(
 ) -> None:
     """Patch the loader, alternate tenants, confirm correct tenant_id passed each time."""
 
-    # Create a second tenant.
+    # Create a second tenant (Phase 6B: multi-currency config to match
+    # the seeded_tenant fixture default).
     other_tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id", "other-tc"
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
+        "other-tc",
     )
 
     # Patch where the booking endpoint imports load_tenant_config.
@@ -155,7 +171,7 @@ async def test_per_request_fresh_load_reflects_db_update(
         # Bump the tenant's config between requests.
         await db_conn.execute(
             "UPDATE tenants SET config = $1::jsonb, updated_at = now() WHERE id = $2",
-            json.dumps({"cold_start_grace_days": 21}),
+            json.dumps({"cold_start_grace_days": 21, "allowed_currencies": ["USD", "CAD"]}),
             seeded_tenant,
         )
         s2 = await _post_booking_under_tenant(unauth_client, seeded_tenant, "x")

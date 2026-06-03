@@ -32,22 +32,32 @@ async def _seed_config(conn: asyncpg.Connection, tenant_id: int, config: dict[st
     )
 
 
-async def test_empty_config_returns_defaults(
-    db_conn: asyncpg.Connection, seeded_tenant: int
-) -> None:
-    tc = await load_tenant_config(db_conn, seeded_tenant)
-    assert tc.tenant_id == seeded_tenant
-    assert tc.config_version == 0
-    assert tc.maturity_age_days is None
-    assert tc.maturity_shipments is None
-    assert tc.maturity_k is None
-    assert tc.value_caps is None
-    assert tc.allowed_currencies == ["USD"]
-    assert tc.cold_start_grace_days == 0
-    # Timestamps are timezone-aware so downstream scoring can subtract from
-    # datetime.now(UTC) without naive/aware mismatch.
-    assert tc.created_at.tzinfo is not None
-    assert tc.updated_at.tzinfo is not None
+async def test_empty_config_returns_defaults(db_conn: asyncpg.Connection) -> None:
+    # Phase 6B: seeded_tenant fixture now seeds a non-empty config
+    # (allowed_currencies = ["USD", "CAD"]) to support the broader
+    # test suite. To exercise the empty-config-returns-defaults loader
+    # path, insert a fresh tenant directly with no config override.
+    fresh_tenant: int = await db_conn.fetchval(
+        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        "test-empty-config-loader",
+    )
+    try:
+        tc = await load_tenant_config(db_conn, fresh_tenant)
+        assert tc.tenant_id == fresh_tenant
+        assert tc.config_version == 0
+        assert tc.maturity_age_days is None
+        assert tc.maturity_shipments is None
+        assert tc.maturity_k is None
+        assert tc.value_caps is None
+        # Phase 6B switched the default from ["USD"] to ["CAD"].
+        assert tc.allowed_currencies == ["CAD"]
+        assert tc.cold_start_grace_days == 0
+        # Timestamps are timezone-aware so downstream scoring can subtract
+        # from datetime.now(UTC) without naive/aware mismatch.
+        assert tc.created_at.tzinfo is not None
+        assert tc.updated_at.tzinfo is not None
+    finally:
+        await db_conn.execute("DELETE FROM tenants WHERE id = $1", fresh_tenant)
 
 
 async def test_partial_override_only_target_field_set(

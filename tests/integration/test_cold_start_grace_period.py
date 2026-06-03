@@ -110,7 +110,7 @@ async def test_grace_active_elevates_score_for_mature_customer(
     )
     # Also seed a default tenant for comparison.
     default_tid: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"cs-default-{secrets.token_hex(3)}",
     )
     try:
@@ -147,7 +147,7 @@ async def test_grace_expired_no_effect(
         db_conn, days_ago=10, config={"cold_start_grace_days": 7}
     )
     default_tid: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"cs-expired-{secrets.token_hex(3)}",
     )
     try:

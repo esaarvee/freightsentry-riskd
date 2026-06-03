@@ -1,13 +1,19 @@
-"""Unit tests for DEFAULT_VALUE_CAPS + resolve_value_caps (4B.2).
+"""Unit tests for DEFAULT_VALUE_CAPS + resolve_value_caps (4B.2 / 6B.1).
 
-8 tests covering:
-- None value_caps + USD currency → DEFAULT_VALUE_CAPS["USD"]
-- None value_caps + non-USD currency → USD fallback + warning
+Phase 6B re-keyed DEFAULT_VALUE_CAPS from "USD" to "CAD" with same
+numeric thresholds. The fallback path now returns
+DEFAULT_VALUE_CAPS["CAD"]. USD-explicit value_caps overrides still
+work end-to-end; multi-currency tenants are still supported.
+
+Tests covering:
+- None value_caps + CAD currency → DEFAULT_VALUE_CAPS["CAD"]
+- None value_caps + non-CAD currency → CAD fallback + warning
 - Custom value_caps + matching currency → custom values
-- Custom USD-only value_caps + USD → custom values
-- Multi-currency value_caps + missing currency → USD fallback + warning
-- DEFAULT_VALUE_CAPS["USD"] has all 4 tier keys
-- DEFAULT_VALUE_CAPS["USD"] values match Phase 2 thresholds
+- Custom CAD-only value_caps + CAD → custom values
+- Custom USD-only value_caps + USD → custom values (multi-currency support)
+- Multi-currency value_caps + missing currency → CAD fallback + warning
+- DEFAULT_VALUE_CAPS["CAD"] has all 4 tier keys
+- DEFAULT_VALUE_CAPS["CAD"] values match Phase 2 thresholds
 - Returned dict identity (not deep-copied; callers must not mutate)
 """
 
@@ -33,39 +39,40 @@ def _tc(value_caps: dict[str, dict[str, float]] | None = None, tenant_id: int = 
     )
 
 
-def test_none_value_caps_usd_returns_default() -> None:
+def test_none_value_caps_cad_returns_default() -> None:
     # value_caps=None is technically the FALLBACK path (the warning is
     # expected); this test only verifies the resolved dict.
-    result = resolve_value_caps(_tc(value_caps=None), "USD")
+    result = resolve_value_caps(_tc(value_caps=None), "CAD")
     assert result == {"high": 10000.0, "new_user": 5000.0, "medium": 2000.0, "low": 1000.0}
 
 
 def test_empty_value_caps_dict_falls_back() -> None:
     # An operator could store `value_caps: {}` in JSONB (passes the validator
     # because the dict is empty). Falsy short-circuit in resolve_value_caps
-    # means this path behaves like None — fall back to USD-default with warning.
+    # means this path behaves like None — fall back to CAD-default with warning.
     with patch("app.tenant_config._log") as mock_log:
-        result = resolve_value_caps(_tc(value_caps={}, tenant_id=99), "USD")
-    assert result == DEFAULT_VALUE_CAPS["USD"]
+        result = resolve_value_caps(_tc(value_caps={}, tenant_id=99), "CAD")
+    assert result == DEFAULT_VALUE_CAPS["CAD"]
     mock_log.warning.assert_called_once_with(
         "tenant_config.value_caps.fallback",
         tenant_id=99,
-        currency="USD",
+        currency="CAD",
         metric=True,
     )
 
 
-def test_none_value_caps_cad_falls_back_to_usd_with_warning() -> None:
+def test_none_value_caps_usd_falls_back_to_cad_with_warning() -> None:
     # structlog doesn't route through stdlib by default, so we patch the
     # bound logger directly and assert the warning was emitted with the
     # tenant_id, currency, and metric=True tag for Phase 5 EMF.
+    # Phase 6B: USD now triggers the fallback (was CAD pre-6B).
     with patch("app.tenant_config._log") as mock_log:
-        result = resolve_value_caps(_tc(value_caps=None, tenant_id=42), "CAD")
-    assert result == DEFAULT_VALUE_CAPS["USD"]
+        result = resolve_value_caps(_tc(value_caps=None, tenant_id=42), "USD")
+    assert result == DEFAULT_VALUE_CAPS["CAD"]
     mock_log.warning.assert_called_once_with(
         "tenant_config.value_caps.fallback",
         tenant_id=42,
-        currency="CAD",
+        currency="USD",
         metric=True,
     )
 
@@ -77,7 +84,7 @@ def test_multi_currency_value_caps_missing_currency_falls_back_with_warning() ->
     }
     with patch("app.tenant_config._log") as mock_log:
         result = resolve_value_caps(_tc(value_caps=custom, tenant_id=7), "EUR")
-    assert result == DEFAULT_VALUE_CAPS["USD"]
+    assert result == DEFAULT_VALUE_CAPS["CAD"]
     mock_log.warning.assert_called_once_with(
         "tenant_config.value_caps.fallback",
         tenant_id=7,
@@ -98,27 +105,30 @@ def test_custom_value_caps_matching_currency_returns_custom_no_warning() -> None
 
 
 def test_custom_usd_value_caps_returns_custom_not_default() -> None:
+    """USD-explicit value_caps continues to work end-to-end (multi-currency
+    support preserved after the Phase 6B CAD-default switch)."""
     custom_usd = {"high": 99999.0, "new_user": 50000.0, "medium": 20000.0, "low": 10000.0}
     result = resolve_value_caps(_tc(value_caps={"USD": custom_usd}), "USD")
     assert result == custom_usd
 
 
-def test_default_value_caps_usd_has_all_four_tiers() -> None:
-    assert set(DEFAULT_VALUE_CAPS["USD"].keys()) == {"high", "new_user", "medium", "low"}
+def test_default_value_caps_cad_has_all_four_tiers() -> None:
+    assert set(DEFAULT_VALUE_CAPS["CAD"].keys()) == {"high", "new_user", "medium", "low"}
 
 
 def test_default_value_caps_match_phase_2_thresholds() -> None:
     # These literals must match the 7 currency-implicit rules in app/rules.yaml
     # (Phase 2 thresholds) — 4B.5 rewrites those rules to consult these values.
-    assert DEFAULT_VALUE_CAPS["USD"]["high"] == 10000.0
-    assert DEFAULT_VALUE_CAPS["USD"]["new_user"] == 5000.0
-    assert DEFAULT_VALUE_CAPS["USD"]["medium"] == 2000.0
-    assert DEFAULT_VALUE_CAPS["USD"]["low"] == 1000.0
+    # Phase 6B re-keyed USD → CAD; numeric thresholds unchanged.
+    assert DEFAULT_VALUE_CAPS["CAD"]["high"] == 10000.0
+    assert DEFAULT_VALUE_CAPS["CAD"]["new_user"] == 5000.0
+    assert DEFAULT_VALUE_CAPS["CAD"]["medium"] == 2000.0
+    assert DEFAULT_VALUE_CAPS["CAD"]["low"] == 1000.0
 
 
 def test_returned_dict_for_default_is_default_reference() -> None:
-    # The helper returns DEFAULT_VALUE_CAPS["USD"] directly on fallback.
+    # The helper returns DEFAULT_VALUE_CAPS["CAD"] directly on fallback.
     # Callers MUST NOT mutate. Phase 4B+ consumers (4B.4 context derivations)
     # only read the dict.
-    result = resolve_value_caps(_tc(value_caps=None), "USD")
-    assert result is DEFAULT_VALUE_CAPS["USD"]
+    result = resolve_value_caps(_tc(value_caps=None), "CAD")
+    assert result is DEFAULT_VALUE_CAPS["CAD"]

@@ -120,14 +120,14 @@ async def test_maturity_age_days_override_makes_younger_customer_mature(
     threshold also satisfied). Compare via score for same-shape input."""
     # Tenant A: default
     tenant_a: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"mat-a-{secrets.token_hex(3)}",
     )
     # Tenant B: maturity_age_days=90
     tenant_b: int = await db_conn.fetchval(
         "INSERT INTO tenants (name, config) VALUES ($1, $2::jsonb) RETURNING id",
         f"mat-b-{secrets.token_hex(3)}",
-        json.dumps({"maturity_age_days": 90}),
+        json.dumps({"maturity_age_days": 90, "allowed_currencies": ["USD", "CAD"]}),
     )
     try:
         await set_test_tenant_id(db_conn, tenant_a)
@@ -161,13 +161,13 @@ async def test_maturity_shipments_override_reduces_threshold(
     """Tenant_b sets maturity_shipments=10. A customer with 10 shipments
     reaches m=1.0 under tenant_b but 0.2 under default."""
     tenant_a: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"matsh-a-{secrets.token_hex(3)}",
     )
     tenant_b: int = await db_conn.fetchval(
         "INSERT INTO tenants (name, config) VALUES ($1, $2::jsonb) RETURNING id",
         f"matsh-b-{secrets.token_hex(3)}",
-        json.dumps({"maturity_shipments": 10}),
+        json.dumps({"maturity_shipments": 10, "allowed_currencies": ["USD", "CAD"]}),
     )
     try:
         await set_test_tenant_id(db_conn, tenant_a)
@@ -207,6 +207,7 @@ async def test_combined_overrides_score_matches_expected(
                 "maturity_age_days": 90,
                 "maturity_shipments": 20,
                 "maturity_k": 0.10,
+                "allowed_currencies": ["USD", "CAD"],
             }
         ),
     )
@@ -235,13 +236,20 @@ async def test_overrides_do_not_affect_layer_1_block(
     consulted. Compare a default tenant and an extreme-override tenant —
     both BLOCK with score=1.0."""
     tenant_default: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"mat-l1-default-{secrets.token_hex(3)}",
     )
     tenant_extreme: int = await db_conn.fetchval(
         "INSERT INTO tenants (name, config) VALUES ($1, $2::jsonb) RETURNING id",
         f"mat-l1-extreme-{secrets.token_hex(3)}",
-        json.dumps({"maturity_age_days": 1, "maturity_shipments": 1, "maturity_k": 0.99}),
+        json.dumps(
+            {
+                "maturity_age_days": 1,
+                "maturity_shipments": 1,
+                "maturity_k": 0.99,
+                "allowed_currencies": ["USD", "CAD"],
+            }
+        ),
     )
     test_ip = "192.0.2.81"
     await db_conn.execute(

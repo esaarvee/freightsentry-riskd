@@ -141,7 +141,7 @@ async def test_admin_decision_cross_tenant_returns_404(
 ) -> None:
     """Tenant_a admin looking up tenant_b's request_id → 404 (hides existence)."""
     other_tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"adm-other-{secrets.token_hex(3)}",
     )
     try:
@@ -211,7 +211,7 @@ async def test_admin_customer_baseline_cross_tenant_404(
 ) -> None:
     """Tenant_a admin looking up tenant_b's customer → 404."""
     other_tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
         f"adm-other-c-{secrets.token_hex(3)}",
     )
     try:

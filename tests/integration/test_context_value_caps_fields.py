@@ -166,15 +166,19 @@ async def test_custom_cad_caps_used_when_payload_is_cad(
     assert ctx["shipment_value_threshold_low"] == 1250.0
 
 
-async def test_currency_with_no_caps_falls_back_to_usd_default_with_warning(
+async def test_currency_with_no_caps_falls_back_to_cad_default_with_warning(
     db_conn: asyncpg.Connection, seeded_tenant: int
 ) -> None:
-    """Operator misconfig: USD-only value_caps but payload currency is CAD.
-    resolve_value_caps falls back to DEFAULT_VALUE_CAPS["USD"] AND emits a
-    `tenant_config.value_caps.fallback` warning with metric=True."""
+    """Operator misconfig: CAD-only value_caps but payload currency is USD.
+    resolve_value_caps falls back to DEFAULT_VALUE_CAPS["CAD"] AND emits a
+    `tenant_config.value_caps.fallback` warning with metric=True.
+
+    Phase 6B: the fallback target was DEFAULT_VALUE_CAPS["USD"] before
+    the CAD-default switch; this test now exercises the symmetric
+    CAD-fallback path."""
     cust_id, row = await _seed_minimal_customer_and_baseline(db_conn, seeded_tenant, "vc-4")
-    only_usd = {"USD": {"high": 1.0, "new_user": 2.0, "medium": 3.0, "low": 4.0}}
-    payload = _make_payload(currency="CAD")
+    only_cad = {"CAD": {"high": 1.0, "new_user": 2.0, "medium": 3.0, "low": 4.0}}
+    payload = _make_payload(currency="USD")
     dest_hmac = hmac_hex("2 Park Ave", b"secret")
     with patch("app.tenant_config._log") as mock_log:
         ctx, _b, _e = await build_context(
@@ -185,27 +189,32 @@ async def test_currency_with_no_caps_falls_back_to_usd_default_with_warning(
             enricher=_enricher_stub(EnrichmentRow.empty("192.0.2.50")),
             payload=payload,
             destination_hmac=dest_hmac,
-            tenant_config=_tc(value_caps=only_usd),
+            tenant_config=_tc(value_caps=only_cad),
         )
-    assert ctx["shipment_currency"] == "CAD"
-    # USD-default fallback values, NOT the custom USD ones (which would
-    # apply if currency were USD).
-    assert ctx["shipment_value_threshold_high"] == DEFAULT_VALUE_CAPS["USD"]["high"]
+    assert ctx["shipment_currency"] == "USD"
+    # CAD-default fallback values, NOT the custom CAD ones (which would
+    # apply if currency were CAD).
+    assert ctx["shipment_value_threshold_high"] == DEFAULT_VALUE_CAPS["CAD"]["high"]
     # Warning emission pins the misconfig signal so it can't silently regress.
     mock_log.warning.assert_called_once()
     call_args = mock_log.warning.call_args
     assert call_args.args[0] == "tenant_config.value_caps.fallback"
-    assert call_args.kwargs["currency"] == "CAD"
+    assert call_args.kwargs["currency"] == "USD"
     assert call_args.kwargs["metric"] is True
 
 
-@pytest.mark.parametrize("currency", ["USD", "EUR"])
+@pytest.mark.parametrize("currency", ["CAD", "EUR"])
 async def test_currency_round_trip_with_fallback_thresholds(
     db_conn: asyncpg.Connection, seeded_tenant: int, currency: str
 ) -> None:
-    """With value_caps=None the resolver falls back to USD-default thresholds
+    """With value_caps=None the resolver falls back to CAD-default thresholds
     for ANY currency. Assert both the currency round-trip AND the resolved
-    threshold values to make the test meaningful."""
+    threshold values to make the test meaningful.
+
+    Phase 6B: parametrize was ["USD", "EUR"] → ["CAD", "EUR"] because
+    the fallback target is now CAD-default (was USD); the USD-keyed
+    fallback would be self-referential under the old USD-only setup.
+    """
     cust_id, row = await _seed_minimal_customer_and_baseline(
         db_conn, seeded_tenant, f"vc-rt-{currency}"
     )
@@ -222,9 +231,9 @@ async def test_currency_round_trip_with_fallback_thresholds(
         tenant_config=_tc(value_caps=None),
     )
     assert ctx["shipment_currency"] == currency
-    # value_caps=None means USD-default is used regardless of payload currency
-    assert ctx["shipment_value_threshold_high"] == DEFAULT_VALUE_CAPS["USD"]["high"]
-    assert ctx["shipment_value_threshold_low"] == DEFAULT_VALUE_CAPS["USD"]["low"]
+    # value_caps=None means CAD-default is used regardless of payload currency
+    assert ctx["shipment_value_threshold_high"] == DEFAULT_VALUE_CAPS["CAD"]["high"]
+    assert ctx["shipment_value_threshold_low"] == DEFAULT_VALUE_CAPS["CAD"]["low"]
 
 
 async def test_modification_synthetic_booking_uses_modifications_currency(

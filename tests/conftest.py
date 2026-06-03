@@ -58,7 +58,15 @@ async def seed_tenant_created_days_ago(
     which measures the grace window from `tenants.created_at`. Returns
     the new tenant_id. Caller is responsible for cleanup (typically via
     _cleanup_tenant).
+
+    Phase 6B: auto-injects allowed_currencies = ["USD", "CAD"] unless
+    the caller's config explicitly overrides — matches the
+    seeded_tenant fixture default so integration tests POSTing USD
+    payloads continue to work post-6B without per-test edits.
     """
+    merged = {"allowed_currencies": ["USD", "CAD"]}
+    if config:
+        merged.update(config)
     tenant_id: int = await db_conn.fetchval(
         """
         INSERT INTO tenants (name, config, created_at, updated_at)
@@ -71,7 +79,7 @@ async def seed_tenant_created_days_ago(
         RETURNING id
         """,
         f"test-tenant-grace-{secrets.token_hex(4)}",
-        json.dumps(config or {}),
+        json.dumps(merged),
         days_ago,
     )
     return tenant_id
@@ -224,13 +232,29 @@ async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
     set `app.tenant_id` session-scoped to the new id so subsequent
     INSERTs on tenant-scoped tables succeed under RLS WITH CHECK.
 
+    Phase 6B: seeds `allowed_currencies = ["USD", "CAD"]` so the
+    project-default-CAD switch (6B.1) does NOT break the ~20 test
+    files that POST USD payloads against a default-configured
+    tenant. Tests that explicitly want a single-currency tenant
+    override via `_set_allowed_currencies` (test_currency_validation
+    pattern). Value-caps are not seeded — `resolve_value_caps`
+    falls back to `DEFAULT_VALUE_CAPS["CAD"]` for both currencies,
+    which is correct for tests that don't exercise currency-specific
+    thresholds. Tests that DO exercise currency-specific value_caps
+    seed `tenants.config` explicitly.
+
     FKs are non-CASCADE in the migration (deliberate — prevents
     accidental bulk deletes in production). The fixture compensates
     by deleting in reverse-FK order so tests don't have to.
     """
     tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        """
+        INSERT INTO tenants (name, config)
+        VALUES ($1, $2::jsonb)
+        RETURNING id
+        """,
         f"test-tenant-{secrets.token_hex(4)}",
+        '{"allowed_currencies": ["USD", "CAD"]}',
     )
     await set_test_tenant_id(db_conn, tenant_id)
     yield tenant_id
@@ -489,9 +513,17 @@ async def create_tenant_with_token(
     """
     prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
     prev_int = int(prev_raw) if prev_raw else 0
+    # Phase 6B: seed allowed_currencies = ["USD", "CAD"] to match the
+    # seeded_tenant fixture default; cross-tenant tests don't care
+    # about currency, just isolation.
     tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        """
+        INSERT INTO tenants (name, config)
+        VALUES ($1, $2::jsonb)
+        RETURNING id
+        """,
         f"test-tenant-{secrets.token_hex(4)}",
+        '{"allowed_currencies": ["USD", "CAD"]}',
     )
     await set_test_tenant_id(db_conn, tenant_id)
     plaintext = secrets.token_urlsafe(24)
@@ -525,9 +557,17 @@ async def create_extra_tenant(
     """
     prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
     prev_int = int(prev_raw) if prev_raw else 0
+    # Phase 6B: seed allowed_currencies = ["USD", "CAD"] to match the
+    # seeded_tenant fixture default; multi-tenant tests don't care
+    # about currency.
     tenant_id: int = await db_conn.fetchval(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING id",
+        """
+        INSERT INTO tenants (name, config)
+        VALUES ($1, $2::jsonb)
+        RETURNING id
+        """,
         f"{name_prefix}-{secrets.token_hex(4)}",
+        '{"allowed_currencies": ["USD", "CAD"]}',
     )
     await set_test_tenant_id(db_conn, tenant_id)
     try:
