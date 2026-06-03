@@ -1,0 +1,69 @@
+{
+  "family": "freightsentry-riskd",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/freightsentry-riskd-task-exec",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/freightsentry-riskd-task",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "X86_64"
+  },
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "ECR_URL:IMAGE_TAG",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "LOG_LEVEL", "value": "INFO"},
+        {"name": "AUTH_ENABLED", "value": "true"},
+        {"name": "API_TOKEN_PREFIX", "value": "rsk_"},
+        {"name": "ENRICHMENT_DATA_DIR", "value": "/app/data/enrichment"}
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/DATABASE_URL"
+        },
+        {
+          "name": "HMAC_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/HMAC_SECRET"
+        },
+        {
+          "name": "MAXMIND_LICENSE_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/MAXMIND_LICENSE_KEY"
+        },
+        {
+          "name": "IP2PROXY_DOWNLOAD_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/IP2PROXY_DOWNLOAD_TOKEN"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=3)\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/freightsentry-riskd",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "app",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}
