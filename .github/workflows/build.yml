@@ -1,0 +1,57 @@
+# Phase 6D.7 — Level 2 CI workflow (Docker build + ECR push).
+#
+# Runs on push to main. Builds the multi-stage runtime image
+# (Dockerfile from 6D.1) and pushes it to ECR tagged
+# `dev-<short_sha>` so operators have a buildable artifact for
+# staging-environment testing between tagged releases.
+#
+# This workflow is NOT the production deploy path — that's 6D.8
+# (deploy.yml on tag push). Level 2 produces dev/staging images;
+# Level 3 produces production tagged-release images.
+#
+# AWS auth via GitHub OIDC; no long-lived access keys. The deploy
+# role's trust policy must permit the `repo:<org>/<repo>:ref:refs/
+# heads/main` sub-claim — see infra/iam-policies/README.md and
+# docs/aws-deploy-runbook.md A.7.3.
+
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+
+# Workflow-level least-privilege baseline. id-token: write is
+# required for GitHub OIDC → AWS STS AssumeRoleWithWebIdentity.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-push:
+    name: Build Docker image + push to ECR (dev-<short_sha>)
+    runs-on: ubuntu-24.04
+    # Bound the blast radius of a hung Docker build or ECR push.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push dev image
+        env:
+          ECR_URL: ${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          docker build -t "$ECR_URL:dev-$SHORT_SHA" .
+          docker push "$ECR_URL:dev-$SHORT_SHA"
+          echo "pushed: $ECR_URL:dev-$SHORT_SHA"
