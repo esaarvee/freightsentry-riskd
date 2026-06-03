@@ -29,6 +29,7 @@ from app.scoring import CustomerState, score
 from app.services.entity_upsert import upsert_customer, upsert_user
 from app.signal_helpers import email_domain, hmac_hex, netblock_24
 from app.tenant_config_cache import load_tenant_config_cached
+from app.tenant_route_baselines import update_tenant_route_baseline
 
 _log = structlog.get_logger(__name__)
 
@@ -288,6 +289,18 @@ async def evaluate_booking(
             """,
             customer_id,
             auth.tenant_id,
+        )
+
+        # Phase 6A.7 — case-3b population baseline UPSERT. Same
+        # transaction as the booking commit; failure rolls the booking
+        # back. No-op when any country is None (corpora without
+        # ground-truth structured data don't pollute the baseline).
+        await update_tenant_route_baseline(
+            conn,
+            auth.tenant_id,
+            payload.customer.registered_country,
+            payload.shipment.origin.country,
+            payload.shipment.destination.country,
         )
 
     _log.info(

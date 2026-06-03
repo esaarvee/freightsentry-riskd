@@ -88,6 +88,10 @@ _TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "decisions",
     "customer_baselines",
     "shipments",
+    # Phase 6A.6 — RLS-enabled, no FKs back to other tenant-scoped
+    # tables, so position is arbitrary among the leaves; placed before
+    # users/customers for explicit ordering.
+    "tenant_route_baselines",
     "users",
     "customers",
     "enterprises",

@@ -63,22 +63,28 @@ async def upsert_customer(
         enterprise_id = await upsert_enterprise(conn, tenant_id, payload.enterprise.external_id)
 
     c = payload.customer
+    # Phase 6A.7: registered_country joins the COALESCE-on-update set so
+    # that a payload supplying None does NOT overwrite an existing
+    # operator-supplied (or earlier-payload-supplied) value. ISO 3166-1
+    # alpha-2 validation is enforced at the Pydantic layer by
+    # CustomerData.registered_country (Phase 6A.5).
     row = await conn.fetchrow(
         """
         INSERT INTO customers (
             tenant_id, enterprise_id, external_id,
             registered_address, business_name, is_api_partner,
-            first_seen
+            registered_country, first_seen
         )
         VALUES (
             $1, $2, $3, $4, $5, COALESCE($6, false),
-            COALESCE($7, now())
+            $7, COALESCE($8, now())
         )
         ON CONFLICT (tenant_id, external_id) DO UPDATE SET
             enterprise_id      = COALESCE(EXCLUDED.enterprise_id, customers.enterprise_id),
             registered_address = COALESCE(EXCLUDED.registered_address, customers.registered_address),
             business_name      = COALESCE(EXCLUDED.business_name, customers.business_name),
-            is_api_partner     = COALESCE(EXCLUDED.is_api_partner, customers.is_api_partner)
+            is_api_partner     = COALESCE(EXCLUDED.is_api_partner, customers.is_api_partner),
+            registered_country = COALESCE(EXCLUDED.registered_country, customers.registered_country)
         RETURNING id
         """,
         tenant_id,
@@ -87,6 +93,7 @@ async def upsert_customer(
         c.registered_address,
         c.business_name,
         c.is_api_partner,
+        c.registered_country,
         c.first_seen_at,
     )
     if row is None:
