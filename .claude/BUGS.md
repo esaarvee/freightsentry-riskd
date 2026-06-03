@@ -111,6 +111,10 @@ localhost form still forces an explicit `DATABASE_URL=...` override
 when running `docker compose up -d`. Production uses Secrets Manager
 and never reads `.env`, so this is dev-host-only. Carry-forward in
 docs/security-audit-rls-phase-5.md Phase 6 item #7.
+DEFERRED to Phase 7: dev-host-only UX issue; production uses ECS
++ Secrets Manager (never reads .env). Not pulled into Phase 6
+scope (Phase 6 focused on production deploy artifacts, not
+local-dev UX cleanup).
 
 ## 2026-06-02 — Dockerfile pip install failed (pytricia sdist + missing build deps)
 
@@ -130,6 +134,10 @@ included in runtime image). The build-tools-in-runtime hardening
 regression (gcc/make/libc-dev now ship to production) is deferred to
 Phase 6 multi-stage. Re-check at Phase 6 plan time as a hard prerequisite
 for production deploy.
+RESOLVED: 6D.1 (multi-stage Dockerfile — builder stage installs
+build-essential + pip-installs deps into /install; runtime stage
+copies only site-packages onto clean python:3.13-slim with no
+build toolchain).
 
 ## 2026-06-02 — Redundant index ix_api_tokens_tenant after 0006 lands
 
@@ -148,6 +156,8 @@ migration. Not done in 5A.6 because that commit's framing is "purely
 additive index" and removing the legacy would muddy review. Safe to defer
 indefinitely — write amplification on api_tokens is negligible (low row
 churn) — but worth a cleanup commit in Phase 6 or a later hardening pass.
+DEFERRED to Phase 7 cleanup: not pulled into Phase 6 scope; safe to
+defer indefinitely (write amplification negligible).
 
 ## 2026-06-02 — UniqueViolation 409 catch in booking/modification is unreachable in serial tests
 
@@ -166,6 +176,8 @@ request-id same-type payloads concurrently and asserts one returns 200
 to Phase 5B or a dedicated concurrency-test commit. Not urgent — the
 catch is small, the path is straightforward, and the failure mode (500
 without the catch) would be loud in production logs.
+DEFERRED to Phase 7: defense-in-depth code with low failure-mode
+risk; not pulled into Phase 6 scope.
 
 ## 2026-06-02 — _assert_decisions_equivalent duplicated across two test files
 
@@ -180,6 +192,7 @@ or extend the `db` fixture so the comparison is invoked via a fixture
 method. Two copies WILL drift over time.
 Suggested action: lift in a Phase 5B or 5C cleanup commit. Not urgent —
 both copies are byte-identical today and the helper is small.
+DEFERRED to Phase 7: cleanup not pulled into Phase 6 scope.
 
 ## 2026-06-03 — Missing ALTER DEFAULT PRIVILEGES means each new tenant-scoped table needs an explicit GRANT to riskd_app
 
@@ -207,3 +220,8 @@ land `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT,
 UPDATE, DELETE ON TABLES TO riskd_app` (one statement; permanent for
 the schema; eliminates this whole failure class). Reasonable Phase
 6B/6C cleanup commit or a dedicated 6A.10 polish item.
+DEFERRED to Phase 7: explicit-GRANT discipline enforced by
+reviewer panel for the remainder of Phase 6 (worked correctly for
+0011 and would catch any future new-table migration). The durable
+ALTER DEFAULT PRIVILEGES fix is a one-statement schema-level
+hardening migration deferred to Phase 7.

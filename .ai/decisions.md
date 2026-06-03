@@ -1281,6 +1281,45 @@ logs is non-trivial.
 
 ---
 
+## Phase 6 closeout (2026-06-03)
+
+Phase 6 (Week 6) is complete on `feat/refactor`. The architectural
+decisions added during the phase are captured in the dated
+amendment sections above:
+
+- **Case-3 detection capability (Phase 6A)** — case-3a / case-3b
+  distinction, three new rules, structured-field pattern, population
+  baseline subsystem, latency budget bookkeeping, Phase 7+
+  trust-suppression architectural concerns.
+- **Phase 4B currency-default switch (Phase 6B amendment)** — CAD
+  default; multi-currency tenant support preserved.
+- **Phase 6C replay-validation findings + calibration backlog seed**
+  — strict 10K+500+95 enumeration; 0/95 case-3b cluster detection
+  diagnosed; 8 calibration items seeded.
+- **Phase 6D deployment artifacts** — multi-stage Dockerfile, ECS
+  Fargate, no-IaC v1 posture, three-level GitHub Actions trust-
+  boundary separation, OIDC over static keys, manual rollback,
+  Snyk over SonarCloud, single-tool substitution lesson.
+
+The phase produced 29 commits across 5 batches; reviewer-panel
+discipline held at every standard-path commit (no panel-skip
+events). Phase deliverables aggregated in `REPORT_PHASE_6.md`.
+
+Hand-off to post-launch: see `docs/calibration-backlog.md` (the
+15-item post-launch tuning checklist) and
+`docs/production-launch-checklist.md` (the operator-executable
+launch sequence Phase A through Phase I). Operator drives the
+merge-to-main + tag v1.0.0 + 5-month observation window timeline
+separately.
+
+Phase 7+ scope (auto-rollback, multi-environment Actions
+promotions, IaC migration, trust-suppression architectural
+workstream, additional case-N detection sub-classes) is documented
+in the launch checklist Phase I and in the calibration backlog
+item 7.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
