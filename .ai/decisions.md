@@ -356,10 +356,70 @@ Implemented per the deferral plan:
 
 1. `BookingRequest.shipment.currency` and `ModificationRequest.currency` added as optional `str` fields with `"USD"` default. Validation: 3-letter uppercase ISO 4217 shape at the Pydantic layer; allowed-list check at request time against `tenant_config.allowed_currencies` (400 if not in list).
 2. `TenantConfig.value_caps: dict[str, dict[str, float]] | None` carries per-currency-per-tier thresholds. 4-tier scheme: `high / new_user / medium / low` matches the 4 distinct thresholds in the 7 rewritten rules.
-3. `DEFAULT_VALUE_CAPS = {"USD": {"high": 10000, "new_user": 5000, "medium": 2000, "low": 1000}}` (`app/tenant_config.py`) matches Phase 2 hardcoded thresholds. USD-default tenants see zero behavioral change.
-4. `resolve_value_caps(tenant_config, currency)` resolves per-request, falling back to USD defaults with a `tenant_config.value_caps.fallback` structured warning (metric=True for Phase 5 EMF) if the tenant has an allowed currency without a matching value_caps entry.
+3. `DEFAULT_VALUE_CAPS = {"USD": {"high": 10000, "new_user": 5000, "medium": 2000, "low": 1000}}` (`app/tenant_config.py`) matches Phase 2 hardcoded thresholds. USD-default tenants see zero behavioral change. **AMENDED 2026-06-03 (Phase 6B): re-keyed `"USD"` → `"CAD"` with same numeric thresholds. See Phase 6B amendment below.**
+4. `resolve_value_caps(tenant_config, currency)` resolves per-request, falling back to USD defaults with a `tenant_config.value_caps.fallback` structured warning (metric=True for Phase 5 EMF) if the tenant has an allowed currency without a matching value_caps entry. **AMENDED 2026-06-03 (Phase 6B): fallback now returns `DEFAULT_VALUE_CAPS["CAD"]`.**
 5. The 7 rules in `app/rules.yaml` were rewritten to consult `shipment_value_threshold_<tier>` Context fields populated in `build_context`. Weights and maturity-sensitive flags unchanged. Modification rule 1 (`modification_within_30_min_value_increase`) was NOT rewritten — its `modification_magnitude > 0.2` is a fraction, currency-independent.
-6. **Case-1 (dashboard ATO) and case-2 (API ATO) regression assertions pass unchanged with USD-default tenants** (the surgical invariance check for the rewrite).
+6. **Case-1 (dashboard ATO) and case-2 (API ATO) regression assertions pass unchanged with USD-default tenants** (the surgical invariance check for the rewrite). **AMENDED 2026-06-03 (Phase 6B): case-1 + case-2 also pass under CAD-default (numeric thresholds unchanged; behavior is identical at the rule-evaluation layer).**
+
+### Phase 6B amendment — CAD-default switch (2026-06-03)
+
+The project is a Canadian freight aggregator; CAD is the operational
+currency. USD was a placeholder default during Phase 4B build-out and
+is now switched to CAD. Phase 4B RESOLVED status persists; this is an
+amendment within scope, not a reopened decision.
+
+Changes (single point of behavior shift):
+- `DEFAULT_VALUE_CAPS` dict re-keyed `"USD"` → `"CAD"` with same
+  numeric thresholds (10000 / 5000 / 2000 / 1000). No data migration
+  (no production tenants exist; all current tenants are dev/test
+  fixtures).
+- `DEFAULT_ALLOWED_CURRENCIES` and `TenantConfig.allowed_currencies`
+  default re-keyed `["USD"]` → `["CAD"]`.
+- `resolve_value_caps` fallback target re-keyed.
+
+Unchanged (intentional):
+- `ShipmentData.currency` / `ModificationRequest.currency` Pydantic
+  field defaults stay `"USD"`. This preserves payload-shape backward-
+  compat with Phase 1-3 requests that omit the currency field; the
+  tenant-config layer is what shifts to CAD-default.
+- Numeric thresholds (10000 / 5000 / 2000 / 1000) unchanged. The 4-
+  tier scheme + 7 rewritten rules carry forward identically.
+- Multi-currency support fully preserved end-to-end. Tenants
+  configured with `allowed_currencies` including USD continue to
+  work; the test suite preserves a USD-keyed value_caps unit test
+  as a regression guard against accidental USD-support removal.
+
+Why this is not "tuning" (which Phase 6 forbids):
+- Numeric thresholds unchanged. Switching the dict key from USD to
+  CAD does not change rule-firing semantics on any payload that
+  reaches the rule evaluator.
+- The change shifts the DEFAULT operational currency for new tenants
+  + the fallback target inside `resolve_value_caps`. Tenants with
+  explicit `value_caps` for USD/CAD/EUR/etc. continue to use those
+  values. No rule weight, threshold value, or maturity parameter
+  changed.
+
+Test infrastructure deviation (recorded in
+`.claude/STATUS.md` row 2026-06-03 | 6B.2):
+- Plan 6B.2 estimated ~30 edited lines across 6 test files; actual
+  blast radius was 126 failures across 26 files. Mid-execution the
+  strategy pivoted from per-test mechanical edits to a fixture-
+  centric approach: the shared tenant fixtures in `tests/conftest.py`
+  (`seeded_tenant`, `create_tenant_with_token`, `create_extra_tenant`,
+  `seed_tenant_created_days_ago`) now seed
+  `allowed_currencies = ["USD", "CAD"]` by default. The shift means
+  "the default test tenant" is now multi-currency. The CAD-default
+  switch is still exercised via the value_caps fallback unit tests
+  in `test_value_caps_resolution.py`.
+- Code-flow reviewer surfaced a D3 candidate: the
+  `'{"allowed_currencies": ["USD", "CAD"]}'::jsonb` literal appears
+  in 7+ test sites. Deferred to a tidy-up commit (extract a shared
+  `_DEFAULT_TEST_TENANT_CONFIG_JSONB` constant in `tests/conftest.py`).
+
+Phase 6A's structured-field architectural pattern (Customer.registered_country
+ISO 3166-1 alpha-2; Address.country ISO validation extension; case-3
+detection signals) is independent of currency defaults and applies
+uniformly across USD-configured and CAD-configured tenants.
 
 ### Currency conversion via rates table — explicitly rejected
 
