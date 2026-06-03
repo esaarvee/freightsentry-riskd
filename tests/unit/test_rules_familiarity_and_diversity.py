@@ -168,8 +168,9 @@ def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
     3B.5 previously-rejected rules:               +4 =  79
     6A.3 case_3_compound:                         +1 =  80
     6A.5 cold_start_country_triangle:             +1 =  81
+    6A.9 cold_start_population_baseline_rare:     +1 =  82
     """
-    assert len(ruleset.rules) == 81
+    assert len(ruleset.rules) == 82
 
 
 def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:

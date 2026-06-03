@@ -610,3 +610,46 @@ rules:
     condition: "customer_country_triangle_mismatch AND origin_via_carrier_dropoff AND customer_observations < 10"
     weight: 0.65
     maturity_sensitive: false
+
+  # =====================================================================
+  # Phase 6A.9 — case-3b sophisticated compound. The companion to the
+  # 6A.5 simple country-triangle compound. Same threat shape (brand-new-
+  # customer fraud) but uses the TENANT'S population baseline rather
+  # than a fixed country-equality heuristic to decide whether the
+  # current route is anomalous. More accurate against tenants whose
+  # legitimate customer base ships across many country combinations
+  # (cross-border freight forwarders, multi-region logistics operators).
+  #
+  # Predicates:
+  # - shipment_route_rare_for_tenant: (customer_country, origin_country,
+  #   destination_country) triple is <2% of the tenant's historical
+  #   population AND the tenant has accumulated >=100 observations.
+  #   Derived in app/context.py via app/tenant_route_baselines.py
+  #   derive_route_rarity (6A.8). Cold-start tenants whose baseline
+  #   is too sparse to be statistically meaningful return False here,
+  #   so this rule does not fire on freshly-onboarded production
+  #   tenants — operationally graceful.
+  # - origin_via_carrier_dropoff: structured-field passthrough from
+  #   payload (case-3 attack-shape signal).
+  # - customer_observations < 10: cold-start customer gate (the simple
+  #   compound covers the same gate; both rules co-fire on case-3b
+  #   transactions where they apply).
+  #
+  # Weight 0.70 is slightly higher than the simple compound's 0.65
+  # because the tenant-population-derived signal is more specific
+  # (anchored in the tenant's actual customer behavior rather than
+  # a fixed country-equality heuristic). Both compounds compose via
+  # noisy-OR when they co-fire; the noisy-OR combination plus
+  # supporting cold-start rules (IP-quality, value-tier) reach BLOCK
+  # band for transactions where both fire.
+  #
+  # maturity_sensitive: false because the cold-start gate is inside
+  # the condition — maturity downweighting would suppress the signal
+  # we use to flag the threat.
+  # =====================================================================
+
+  - name: cold_start_population_baseline_rare_with_carrier_dropoff
+    description: "Case-3b sophisticated — brand-new customer (< 10 obs) shipping a route the tenant's population rarely sees (<2% with >=100-observation tenant baseline) AND carrier-dropoff origin handoff. Tenant-population-derived; co-fires with the simple country-triangle compound when both apply."
+    condition: "shipment_route_rare_for_tenant AND origin_via_carrier_dropoff AND customer_observations < 10"
+    weight: 0.70
+    maturity_sensitive: false
