@@ -1077,6 +1077,210 @@ backlog with confidence.
 
 ---
 
+## Phase 6D deployment artifacts (2026-06-03)
+
+Phase 6D produced the deployment-ready artifact set: a multi-stage
+Dockerfile, an ECS task-definition template, three IAM policy
+JSONs + README, an AWS GUI runbook, a smoke-test script, and three
+GitHub Actions workflows. The decisions below frame the rationale
+for posture choices that may otherwise read as inflexibility or
+under-engineering.
+
+### Multi-stage Dockerfile (build vs runtime separation)
+
+The builder stage installs `build-essential` and pip-installs
+dependencies into `/install`; the runtime stage copies only the
+installed site-packages + entrypoints + application source onto a
+clean `python:3.13-slim`. No build toolchain in the runtime image
+shrinks the attack surface and the image size.
+
+**Why structural separation over a single-stage image:** Phase 5
+BUGS carried forward a request to drop `build-essential` from
+runtime — single-stage images leak the C compiler chain into
+production. Multi-stage is the durable fix; the size win is
+secondary.
+
+**Dependency install via tomllib extraction:** the builder reads
+`pyproject.toml` with stdlib `tomllib` and writes a `requirements.txt`
+from `[project].dependencies`, then `pip install --prefix=/install`.
+This avoids `pip install .` (which would require copying the `app/`
+source into the builder before deps were resolved — fragile if the
+project metadata loaders read source files) and avoids relying on
+`fastapi[standard]` extras pulling httpx as a transitive
+(brittle across fastapi minor versions). The HEALTHCHECK uses
+stdlib `urllib.request` for the same reason.
+
+### ECS Fargate as the orchestrator; no production docker-compose
+
+`docker-compose.production.yml` is NOT produced. ECS is the
+production runtime; docker-compose remains a local-development
+convenience only. Producing a production-compose artifact would
+duplicate the task-definition's role + scaling + secret-injection
+contracts in a divergent format that nobody runs.
+
+**Why ECS Fargate over self-managed EC2 or EKS:** Fargate
+eliminates the EC2 patching and node-pool management surface for a
+v1 single-tenant SaaS. EKS is overkill for a one-service workload.
+Fargate's per-task IAM roles + Secrets Manager integration align
+with the project's existing role-based posture.
+
+### AWS GUI runbook (no IaC for v1)
+
+`docs/aws-deploy-runbook.md` is the operator's source of truth for
+provisioning the AWS-side infrastructure: VPC + subnets + ALB + ECS
+cluster + RDS + Secrets Manager + IAM roles. No Terraform, no
+CloudFormation, no CDK.
+
+**Why no IaC for v1:** the AWS infrastructure is provisioned once
+per environment (dev + production), then iterated rarely. IaC's
+value compounds when infrastructure churns; for a single-tenant
+v1 with a fixed topology, the GUI runbook gives operator velocity
+without the maintenance overhead of a parallel HCL/YAML codebase.
+Phase 7+ can introduce Terraform if multi-region or multi-tenant
+infrastructure replication becomes the bottleneck.
+
+**Risk acknowledged:** GUI provisioning is non-reproducible — the
+runbook captures the steps but not the resulting resource graph. A
+production-environment loss would require re-execution under
+operator pressure. Mitigation: the runbook is testable end-to-end
+in a fresh AWS account, and IAM policy JSONs + ECS task definition
+JSON ARE checked in — those carry the security-load-bearing
+contracts independently of the runbook.
+
+### Three-level GitHub Actions (test / build / deploy)
+
+| Workflow | Trigger | Job | Artifact |
+|----------|---------|-----|----------|
+| `test.yml` | PR to `main` / `release/*` | ruff + mypy + pytest unit + Snyk dep scan | none |
+| `build.yml` | push to `main` | Docker build + ECR push | `dev-<short_sha>` image |
+| `deploy.yml` | tag push `v*` | fresh build + ECR push + ECS task-def register + service update + smoke | `<version>` + `<short_sha>` image (same digest) |
+
+**Why three workflows, not one:** separation of concerns aligns
+each workflow with a distinct trust boundary. `test.yml` runs on
+PRs (untrusted code, no AWS access). `build.yml` runs on `main`
+push (post-merge, AWS push-only access). `deploy.yml` runs on tag
+push (post-merge, AWS deploy access). A unified workflow gating on
+the trigger would conflate the trust boundaries.
+
+**Why tag-push triggers `deploy.yml` (not push to a release
+branch):** tags are immutable references in git; a tag pinned to a
+SHA is a permanent record of what was deployed when. Branch-push
+triggers couple deploy state to the moving HEAD of a branch, which
+makes rollback ambiguous ("revert main? rebase? force-push?").
+
+### Dual-tag-on-same-digest image strategy
+
+`deploy.yml` builds once and pushes two tags pointing at the same
+image digest: `<version>` (e.g. `v1.0.0` — operator-readable for
+rollback) and `<short_sha>` (forensic traceability to the exact
+commit). ECR resolves the two tags to one underlying digest; no
+double upload.
+
+**Why both tags:** the version tag is what an operator types when
+selecting a rollback target ("roll back to v1.0.0"); the SHA is
+what an incident-response audit traces back to source. Each is
+load-bearing for a different audience.
+
+### Manual rollback for v1; NO auto-rollback
+
+`deploy.yml` does NOT include rollback logic. On smoke failure or
+ECS task-launch failure, the deploy workflow exits non-zero; the
+operator triggers rollback manually via the ECS console per the
+runbook's "Rollback" section (update-service back to the prior
+task-definition revision).
+
+**Why no auto-rollback for v1:** auto-rollback at single-tenant
+pre-launch scale adds workflow complexity (state machines for
+"prior known-good" tracking, ALB health-check tuning, partial-
+rollout handling) without proportional risk reduction. Manual
+rollback is one operator step; the v1 deploy cadence is "per tag",
+which keeps human-in-the-loop tolerable. Phase 7+ revisits when
+deploy frequency or tenant count justifies the complexity.
+
+### Snyk over SonarCloud
+
+`test.yml` runs Snyk on every PR with `--severity-threshold=high`
+(workflow fails on critical/high; medium/low surface as warnings).
+
+**Why Snyk:** the threat model is Python-dependency vulnerabilities
+(transitive PyPI compromise being the highest-impact realistic
+attack vector for a small Python service). Snyk's Python dep-vuln
+database is the depth match. SonarCloud's strength is code-smell
+and bug-pattern detection, which the project already covers via
+ruff (style + bugbear) and mypy (typing). Adding SonarCloud would
+duplicate gates without closing a new threat-model gap.
+
+### OIDC over long-lived AWS access keys
+
+Both `build.yml` and `deploy.yml` use `aws-actions/configure-aws-credentials@v4`
+with `role-to-assume` (OIDC), NOT `AWS_ACCESS_KEY_ID` /
+`AWS_SECRET_ACCESS_KEY`. The deploy role's IAM trust policy gates
+on `token.actions.githubusercontent.com:sub` matching
+`repo:<org>/<repo>:ref:refs/heads/main` (build) or
+`repo:<org>/<repo>:ref:refs/tags/v*` (deploy).
+
+**Why OIDC:** long-lived access keys in GitHub Secrets are a
+persistent credential — rotation is operator work, compromise is
+hard to detect. OIDC short-lived STS credentials are scoped to the
+workflow run, expire automatically, and the trust-policy gate on
+the `sub` claim ensures only the named branch/tag patterns can
+assume the role. The IAM policy posture (least-privilege ECR push +
+ECS update-service on specific cluster + Secrets Manager read on
+specific ARN prefix) compounds the OIDC layer.
+
+### Migrations as a one-off ECS task
+
+The `deploy.yml` workflow does NOT run `alembic upgrade head`
+automatically as part of rollout. The runbook documents migrations
+as a separate operator-triggered ECS run-task invocation using the
+same task-definition with an overridden command.
+
+**Why decouple migration from deploy:** code-deploy and schema-
+migration have different failure modes, different rollback paths,
+and different blast radii. Coupling them means a migration failure
+aborts a code deploy that was otherwise safe; a code deploy bug
+forces a schema rollback. Decoupling lets the operator order the
+two appropriately for each release (forward-compatible migrations
+ahead of code; code ahead of forward-incompatible migrations with
+the appropriate blast-radius procedure).
+
+**Risk acknowledged:** the operator must remember to run the
+migration. The runbook makes this explicit in the deploy checklist;
+the smoke test catches any schema-vs-code mismatch (e.g. a code
+deploy referencing a column the un-applied migration would add).
+
+### Substitution pipeline (ecs-task-definition.json)
+
+`deploy.yml`'s "Register new ECS task definition revision" step
+uses a single `envsubst '${ACCOUNT_ID} ${REGION} ${IMAGE_URI}'`
+call against `infra/ecs-task-definition.json`. The JSON template
+uses `${VAR}` form throughout for all three placeholders.
+
+**Why single-tool substitution (not envsubst + sed):** an earlier
+draft mixed envsubst (for some vars) and sed (for the image URI).
+Because envsubst only expands `${VAR}` syntax and the JSON used
+bare identifiers, the envsubst step silently no-op'd on most
+placeholders — `register-task-definition` would have failed on the
+first real deploy with literal "ACCOUNT_ID" strings in ARN
+positions. Aligning the template to `${VAR}` form and consolidating
+to one substitution tool eliminates the split-brain.
+
+### `update-service --task-definition $REVISION_ARN`
+
+`deploy.yml` pins `update-service` to the exact revision ARN
+returned by `register-task-definition` (rather than passing the
+family name and relying on ECS to default to the latest ACTIVE
+revision). Family-default-to-latest is correct for serial deploys
+but races against any concurrent registration.
+
+**Why pin the ARN:** explicit-revision-pinning is one-line cheaper
+than the implicit-default behavior and immune to the race. Tag-
+push deploys are nominally serial (one tag pushed at a time), but
+the cost of the safer pattern is zero and the disambiguation in
+logs is non-trivial.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
