@@ -59,6 +59,15 @@ class ShipmentData(BaseModel):
     # at request time in app/api/booking.py (4B.3) — Pydantic enforces shape
     # only.
     currency: str = Field(default="USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    # Phase 6A.1: case-3 fraud signal. True when the shipment was dropped at
+    # a carrier facility rather than picked up from the origin address. The
+    # case-3 attack pattern spoofs the customer's real address as ship-from
+    # for credibility but cannot have a carrier pick up there, so the
+    # attacker drops at the carrier facility. Defaults False so existing
+    # Phase 1-5 payloads are accepted unchanged; platform integration ships
+    # the structured signal post-Phase-6 (see docs/production-launch-checklist.md
+    # Phase B).
+    origin_via_carrier_dropoff: bool = False
 
 
 class ContactData(BaseModel):
