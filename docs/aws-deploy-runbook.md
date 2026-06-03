@@ -275,7 +275,6 @@ Secrets and variables → Actions**:
 - [ ] `ECR_REPOSITORY` — `freightsentry-riskd`
 - [ ] `ECS_CLUSTER` — `freightsentry-riskd-cluster`
 - [ ] `ECS_SERVICE` — `freightsentry-riskd-service`
-- [ ] `ECS_TASK_DEFINITION_FAMILY` — `freightsentry-riskd`
 - [ ] `SNYK_TOKEN` — from snyk.io (free for OSS; required for the
       test.yml Snyk dependency-scan step)
 - [ ] `SMOKE_TEST_URL` — `https://<your-alb-dns-or-domain>`

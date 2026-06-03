@@ -4,8 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "1024",
   "memory": "2048",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/freightsentry-riskd-task-exec",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/freightsentry-riskd-task",
+  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-exec",
+  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task",
   "runtimePlatform": {
     "operatingSystemFamily": "LINUX",
     "cpuArchitecture": "X86_64"
@@ -13,7 +13,7 @@
   "containerDefinitions": [
     {
       "name": "app",
-      "image": "ECR_URL:IMAGE_TAG",
+      "image": "${IMAGE_URI}",
       "essential": true,
       "portMappings": [
         {
@@ -30,19 +30,19 @@
       "secrets": [
         {
           "name": "DATABASE_URL",
-          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/DATABASE_URL"
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/DATABASE_URL"
         },
         {
           "name": "HMAC_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/HMAC_SECRET"
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/HMAC_SECRET"
         },
         {
           "name": "MAXMIND_LICENSE_KEY",
-          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/MAXMIND_LICENSE_KEY"
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/MAXMIND_LICENSE_KEY"
         },
         {
           "name": "IP2PROXY_DOWNLOAD_TOKEN",
-          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/IP2PROXY_DOWNLOAD_TOKEN"
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/IP2PROXY_DOWNLOAD_TOKEN"
         }
       ],
       "healthCheck": {
@@ -59,7 +59,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/freightsentry-riskd",
-          "awslogs-region": "REGION",
+          "awslogs-region": "${REGION}",
           "awslogs-stream-prefix": "app",
           "awslogs-create-group": "true"
         }
