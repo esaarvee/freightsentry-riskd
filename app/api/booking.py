@@ -177,6 +177,10 @@ async def evaluate_booking(
         )
 
         # Fold THIS booking into the baseline (positive observation).
+        # Phase 6A.2 — shipment country pair is passed through from the
+        # structured Address.country field (NOT the IP country) so the
+        # case-3a route-baseline histogram tracks customer-shipment
+        # routes, not IP geolocation.
         baseline.add_observation(
             ts=payload.booking_ts,
             ip=str(payload.source_ip),
@@ -190,6 +194,8 @@ async def evaluate_booking(
             destination=payload.shipment.destination.address,
             channel=payload.shipment.channel,
             value=float(payload.shipment.value),
+            shipment_origin_country=payload.shipment.origin.country,
+            shipment_destination_country=payload.shipment.destination.country,
             email_hmac=email_hmac,
             phone_hmac=phone_hmac,
             email_domain=email_domain_val,

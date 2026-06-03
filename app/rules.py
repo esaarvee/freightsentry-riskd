@@ -113,6 +113,12 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "shipment_value_threshold_new_user",  # float — caps[currency]["new_user"]
         "shipment_value_threshold_medium",  # float — caps[currency]["medium"]
         "shipment_value_threshold_low",  # float — caps[currency]["low"]
+        # Phase 6A.2 — case-3a signals. origin_via_carrier_dropoff is a
+        # passthrough from payload.shipment; shipment_route_unfamiliar_for_customer
+        # is derived from baseline.country_route_stats via
+        # _derive_route_unfamiliar in app/context.py.
+        "origin_via_carrier_dropoff",
+        "shipment_route_unfamiliar_for_customer",
     }
 )
 

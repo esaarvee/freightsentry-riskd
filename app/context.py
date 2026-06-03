@@ -64,6 +64,60 @@ from app.velocity import (
     count_user_modifications_24h,
 )
 
+# Phase 6A.2 — case-3a route-unfamiliar derivation parameters.
+# Top-N covers ≥80% of historical observations; signal fires when the
+# current (origin_country, destination_country) pair is NOT in that
+# top-N prefix. Maturity gate (customer_observations >= 10) ensures the
+# signal does not fire on cold-start customers whose baseline has no
+# meaningful route history.
+_ROUTE_UNFAMILIAR_COVERAGE_THRESHOLD = 0.80
+_ROUTE_UNFAMILIAR_MATURITY_THRESHOLD = 10.0
+
+
+def _derive_route_unfamiliar(
+    country_route_stats: dict[str, dict[str, Any]],
+    current_origin_country: str | None,
+    current_destination_country: str | None,
+    customer_observations: float,
+) -> bool:
+    """Return True iff the current country-pair is NOT in the customer's
+    top-N route prefix covering ≥80% of historical observations.
+
+    Safety properties:
+    - Cold-start customers (customer_observations < 10): always False.
+      The maturity gate prevents the signal from firing before the
+      customer has accumulated meaningful history.
+    - Missing country data: False (no signal without ground-truth data).
+    - Empty histogram (mature customer with no recorded routes — unusual
+      but possible if all prior bookings lacked structured country):
+      False. Cold-start safe.
+    """
+    if customer_observations < _ROUTE_UNFAMILIAR_MATURITY_THRESHOLD:
+        return False
+    if not current_origin_country or not current_destination_country:
+        return False
+    if not country_route_stats:
+        return False
+
+    current_key = f"{current_origin_country}||{current_destination_country}"
+    pairs = sorted(
+        ((k, float(v.get("n", 0.0))) for k, v in country_route_stats.items()),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    total = sum(count for _, count in pairs)
+    if total <= 0:
+        return False
+    coverage_target = total * _ROUTE_UNFAMILIAR_COVERAGE_THRESHOLD
+    cumulative = 0.0
+    top_n_keys: set[str] = set()
+    for key, count in pairs:
+        top_n_keys.add(key)
+        cumulative += count
+        if cumulative >= coverage_target:
+            break
+    return current_key not in top_n_keys
+
 
 async def build_context(
     conn: asyncpg.Connection,
@@ -113,6 +167,13 @@ async def build_context(
 
     origin = payload.shipment.origin.address
     destination = payload.shipment.destination.address
+    # Phase 6A.2 — shipment country intermediates (Pydantic Address.country
+    # structured-field passthrough). Used by route-unfamiliar derivation
+    # below. Intentionally NOT added to ctx — never referenced by rule
+    # conditions directly. The triangle-mismatch derivation (Phase 6A.5)
+    # also reads from these intermediates.
+    shipment_origin_country = payload.shipment.origin.country
+    shipment_destination_country = payload.shipment.destination.country
     netblock = netblock_24(str(source_ip))
     familiarity = baseline.ip_familiarity_tier(str(source_ip), netblock, enrichment.asn_org)
     age_days = (today - customer_row["first_seen"].date()).days
@@ -197,6 +258,14 @@ async def build_context(
         "destination_address_familiar": destination in baseline.dest_stats,
         "origin_ip_country_familiar": (
             f"{origin}||{enrichment.country or ''}" in baseline.origin_ip_country_stats
+        ),
+        # Phase 6A.2 — case-3a signals
+        "origin_via_carrier_dropoff": payload.shipment.origin_via_carrier_dropoff,
+        "shipment_route_unfamiliar_for_customer": _derive_route_unfamiliar(
+            baseline.country_route_stats,
+            shipment_origin_country,
+            shipment_destination_country,
+            baseline.effective_observations,
         ),
         # Velocity
         "velocity_user_hourly": vel_uh,

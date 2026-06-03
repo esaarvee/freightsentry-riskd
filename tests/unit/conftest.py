@@ -115,6 +115,12 @@ def base_ctx() -> dict[str, Any]:
         "shipment_value_threshold_new_user": 5000.0,
         "shipment_value_threshold_medium": 2000.0,
         "shipment_value_threshold_low": 1000.0,
+        # Phase 6A.2 — case-3a signals. Defaults are neutral (False) so
+        # rules predating Phase 6A behave identically. case-3a rule
+        # tests override origin_via_carrier_dropoff +
+        # shipment_route_unfamiliar_for_customer explicitly.
+        "origin_via_carrier_dropoff": False,
+        "shipment_route_unfamiliar_for_customer": False,
         # Modification (3A) — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum

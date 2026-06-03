@@ -47,6 +47,14 @@ IP_TYPE_CLOUD = "cloud"
 IP_TYPE_DC = "dc"
 IP_TYPE_RESIDENTIAL = "residential"
 
+# Phase 6A.2 — cap on country_route_stats distinct (origin, destination)
+# country pairs per customer baseline. Real customers ship across <50
+# country combinations; the cap is a defense-in-depth bound against
+# adversarial flooding (carrier API ATO pattern with rapidly varying
+# spoofed destination countries). Beyond this cap, new pairs are
+# silently dropped while existing keys continue to bump.
+COUNTRY_ROUTE_STATS_CAP = 256
+
 
 def classify_ip_type(enrichment: object) -> str | None:
     """Map an EnrichmentRow to the baseline ip_type tag.
@@ -114,6 +122,10 @@ class CustomerBaseline:
     ip_asn_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     country_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     origin_ip_country_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Phase 6A.2 — case-3a route-baseline histogram. Key:
+    # f"{origin_country}||{destination_country}". Populated by
+    # add_observation when both shipment countries are non-null.
+    country_route_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     email_hmacs: dict[str, dict[str, Any]] = field(default_factory=dict)
     phone_hmacs: dict[str, dict[str, Any]] = field(default_factory=dict)
     rejected_email_hmacs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -257,6 +269,7 @@ class CustomerBaseline:
             ip_asn_stats=_decode_jsonb(row["ip_asn_stats"]),
             country_stats=_decode_jsonb(row["country_stats"]),
             origin_ip_country_stats=_decode_jsonb(row["origin_ip_country_stats"]),
+            country_route_stats=_decode_jsonb(row["country_route_stats"]),
             email_hmacs=_decode_jsonb(row["email_hmacs"]),
             phone_hmacs=_decode_jsonb(row["phone_hmacs"]),
             rejected_email_hmacs=_decode_jsonb(row["rejected_email_hmacs"]),
@@ -322,6 +335,7 @@ class CustomerBaseline:
             self.ip_asn_stats,
             self.country_stats,
             self.origin_ip_country_stats,
+            self.country_route_stats,
             self.email_hmacs,
             self.phone_hmacs,
             self.rejected_email_hmacs,
@@ -364,6 +378,8 @@ class CustomerBaseline:
         destination: str,
         channel: str,
         value: float,
+        shipment_origin_country: str | None = None,
+        shipment_destination_country: str | None = None,
         email_hmac: str | None = None,
         phone_hmac: str | None = None,
         email_domain: str | None = None,
@@ -371,7 +387,15 @@ class CustomerBaseline:
     ) -> None:
         """Fold a positive (approved) observation. Bumps `n` in every
         relevant stat-dict, updates flat histograms, updates Welford for
-        value + cadence-hours, advances last-booking pointers."""
+        value + cadence-hours, advances last-booking pointers.
+
+        `shipment_origin_country` / `shipment_destination_country` are the
+        Pydantic Address.country structured-field passthroughs (NOT the IP
+        country). When both are non-null, the (origin, destination)
+        country pair is bumped in country_route_stats — bounded at
+        COUNTRY_ROUTE_STATS_CAP keys to prevent adversarial jsonb bloat
+        (Phase 6A.2).
+        """
         today_iso = ts.date().isoformat()
 
         self._bump_ip(ip, ip_type, today_iso)
@@ -385,6 +409,21 @@ class CustomerBaseline:
         self._bump(self.origin_stats, origin, today_iso)
         self._bump(self.dest_stats, destination, today_iso)
         self._bump(self.lane_stats, f"{origin}||{destination}", today_iso)
+
+        # Phase 6A.2 — shipment country-pair histogram (case-3a route
+        # baseline). Bump only when BOTH countries non-null. Cap at
+        # COUNTRY_ROUTE_STATS_CAP distinct pairs: existing keys always
+        # bump; new keys are added only while under cap. Beyond cap,
+        # subsequent novel pairs are silently dropped (the customer is
+        # already extremely route-diverse and route-unfamiliar signal
+        # would not be meaningful anyway).
+        if shipment_origin_country and shipment_destination_country:
+            route_key = f"{shipment_origin_country}||{shipment_destination_country}"
+            if (
+                route_key in self.country_route_stats
+                or len(self.country_route_stats) < COUNTRY_ROUTE_STATS_CAP
+            ):
+                self._bump(self.country_route_stats, route_key, today_iso)
 
         if email_hmac:
             self._bump(self.email_hmacs, email_hmac, today_iso)
@@ -490,7 +529,8 @@ class CustomerBaseline:
                 tenant_id, customer_id,
                 origin_stats, dest_stats, lane_stats, ip_stats,
                 ip_netblock_stats, ip_asn_stats, country_stats,
-                origin_ip_country_stats, email_hmacs, phone_hmacs,
+                origin_ip_country_stats, country_route_stats,
+                email_hmacs, phone_hmacs,
                 rejected_email_hmacs, rejected_phone_hmacs,
                 email_domain_stats, phone_prefix_stats,
                 ip_type_hist, hour_hist, weekday_hist, channel_hist,
@@ -503,14 +543,15 @@ class CustomerBaseline:
                 $1, $2,
                 $3::jsonb, $4::jsonb, $5::jsonb, $6::jsonb,
                 $7::jsonb, $8::jsonb, $9::jsonb,
-                $10::jsonb, $11::jsonb, $12::jsonb,
-                $13::jsonb, $14::jsonb,
-                $15::jsonb, $16::jsonb,
-                $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
-                $21, $22, $23,
-                $24, $25, $26,
-                $27, $28, $29,
-                $30, $31, now()
+                $10::jsonb, $11::jsonb,
+                $12::jsonb, $13::jsonb,
+                $14::jsonb, $15::jsonb,
+                $16::jsonb, $17::jsonb,
+                $18::jsonb, $19::jsonb, $20::jsonb, $21::jsonb,
+                $22, $23, $24,
+                $25, $26, $27,
+                $28, $29, $30,
+                $31, $32, now()
             )
             ON CONFLICT (tenant_id, customer_id) DO UPDATE SET
                 origin_stats             = EXCLUDED.origin_stats,
@@ -521,6 +562,7 @@ class CustomerBaseline:
                 ip_asn_stats             = EXCLUDED.ip_asn_stats,
                 country_stats            = EXCLUDED.country_stats,
                 origin_ip_country_stats  = EXCLUDED.origin_ip_country_stats,
+                country_route_stats      = EXCLUDED.country_route_stats,
                 email_hmacs              = EXCLUDED.email_hmacs,
                 phone_hmacs              = EXCLUDED.phone_hmacs,
                 rejected_email_hmacs     = EXCLUDED.rejected_email_hmacs,
@@ -555,6 +597,7 @@ class CustomerBaseline:
             json.dumps(self.ip_asn_stats),
             json.dumps(self.country_stats),
             json.dumps(self.origin_ip_country_stats),
+            json.dumps(self.country_route_stats),
             json.dumps(self.email_hmacs),
             json.dumps(self.phone_hmacs),
             json.dumps(self.rejected_email_hmacs),
