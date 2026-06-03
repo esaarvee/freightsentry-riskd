@@ -372,10 +372,12 @@ async def build_context(
     }
 
     # Phase 4B.4: 5 currency-normalized threshold fields. payload.shipment.
-    # currency defaults to "USD" per BookingRequest.ShipmentData (4B.1).
+    # currency defaults to "USD" per BookingRequest.ShipmentData (4B.1)
+    # for payload-shape backward-compat with Phase 1-3 requests.
     # resolve_value_caps returns the 4-tier dict, falling back to
-    # DEFAULT_VALUE_CAPS["USD"] (with warning) if the tenant hasn't
-    # configured the requested currency. Allowed-list check ran at the
+    # DEFAULT_VALUE_CAPS["CAD"] (with warning) if the tenant hasn't
+    # configured the requested currency — Phase 6B switched the project
+    # default key from USD to CAD. Allowed-list check ran at the
     # endpoint layer (4B.3) — currency reaching here is always permitted.
     currency = payload.shipment.currency
     caps = resolve_value_caps(tenant_config, currency)

@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _log = structlog.get_logger(__name__)
 
-DEFAULT_ALLOWED_CURRENCIES: list[str] = ["USD"]
+DEFAULT_ALLOWED_CURRENCIES: list[str] = ["CAD"]
 DEFAULT_COLD_START_GRACE_DAYS: int = 0
 
 # Project-default per-currency value caps (Phase 4B).
@@ -42,14 +42,17 @@ DEFAULT_COLD_START_GRACE_DAYS: int = 0
 #                         ip2p_threat_high_value)
 #   - low      = 1000    (low_trust_high_value, vpn_high_value)
 #
-# USD-implicit. Tenants that need non-USD pricing populate
+# Phase 6B: CAD-default. The project is a Canadian freight aggregator;
+# CAD is the operational currency. Numeric thresholds UNCHANGED from
+# the prior USD-implicit defaults — interpret as CAD, no exchange-rate
+# conversion. Tenants that need non-CAD pricing populate
 # tenant_config.value_caps with per-currency overrides. Empty/None
-# value_caps means "use these defaults". If a tenant adds a non-USD
+# value_caps means "use these defaults". If a tenant adds a non-CAD
 # currency to allowed_currencies but doesn't provide a matching
-# value_caps[currency], resolve_value_caps falls back to USD-default and
+# value_caps[currency], resolve_value_caps falls back to CAD-default and
 # emits a warning log.
 DEFAULT_VALUE_CAPS: dict[str, dict[str, float]] = {
-    "USD": {
+    "CAD": {
         "high": 10000.0,
         "new_user": 5000.0,
         "medium": 2000.0,
@@ -73,13 +76,15 @@ class TenantConfig(BaseModel):
       maturity_k: float | None — overrides MATURITY_K (default 0.30)
       value_caps: dict[str, dict[str, float]] | None — per-currency-per-tier
         thresholds; shape {currency: {tier: threshold}} where tier ∈
-        {high, new_user, medium, low}. Currency-implicit-USD default
-        applied at the consumer (4B) when this field is None.
+        {high, new_user, medium, low}. Currency-implicit-CAD default
+        applied at the consumer (4B) when this field is None (Phase 6B
+        switched the default key from USD to CAD).
 
     Optional fields with non-None defaults (always set on load):
-      allowed_currencies: list[str] = ["USD"] — currencies this tenant
+      allowed_currencies: list[str] = ["CAD"] — currencies this tenant
         accepts. 4B validates BookingRequest.shipment.currency at request
-        time against this list; 400 if not in.
+        time against this list; 400 if not in. Phase 6B switched the
+        default from USD to CAD.
       cold_start_grace_days: int = 0 — days post-tenant-onboarding during
         which scoring applies a 0.5x multiplier on the maturity formula
         (softer maturity-sensitive rule firing for newly-onboarded
@@ -273,9 +278,10 @@ def resolve_value_caps(
     Resolution priority:
       1. tenant_config.value_caps[currency] if both the dict and the
          currency key are present.
-      2. DEFAULT_VALUE_CAPS["USD"] as a safety fallback. Logs a
-         `tenant_config.value_caps.fallback` warning with the tenant_id
-         and currency so operators can spot the misconfiguration.
+      2. DEFAULT_VALUE_CAPS["CAD"] as a safety fallback (Phase 6B —
+         was USD prior). Logs a `tenant_config.value_caps.fallback`
+         warning with the tenant_id and currency so operators can
+         spot the misconfiguration.
 
     Currency is validated at request time before this helper runs (4B.3)
     — so a currency reaching this helper is always in
@@ -291,4 +297,4 @@ def resolve_value_caps(
         currency=currency,
         metric=True,
     )
-    return DEFAULT_VALUE_CAPS["USD"]
+    return DEFAULT_VALUE_CAPS["CAD"]
