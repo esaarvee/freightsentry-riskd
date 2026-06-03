@@ -180,3 +180,30 @@ or extend the `db` fixture so the comparison is invoked via a fixture
 method. Two copies WILL drift over time.
 Suggested action: lift in a Phase 5B or 5C cleanup commit. Not urgent —
 both copies are byte-identical today and the helper is small.
+
+## 2026-06-03 — Missing ALTER DEFAULT PRIVILEGES means each new tenant-scoped table needs an explicit GRANT to riskd_app
+
+Discovered by: db-reviewer during PLAN_PHASE_6A.md 6A.6 cycle 1
+Location: alembic/versions/0001_initial.py:324-326 (one-shot grant);
+absence anywhere else in the chain
+Severity: medium
+Observation: Migration 0001 ran `GRANT SELECT, INSERT, UPDATE, DELETE
+ON ALL TABLES IN SCHEMA public TO riskd_app` once. There is no
+`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ... TO riskd_app`
+anywhere in the chain, so tables created by later migrations are NOT
+automatically granted. 6A.6 cycle 1 missed adding an explicit grant on
+the new `tenant_route_baselines` table; under riskd_app_login the
+runtime role hit `permission denied for table tenant_route_baselines`
+(verified empirically). Cycle 2 fixed the immediate symptom in 0011
+with `GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_route_baselines
+TO riskd_app;` + matching `REVOKE` in downgrade. The structural fix
+— landing `ALTER DEFAULT PRIVILEGES` so every future table gets the
+grant automatically — was deferred so the migration scope stayed
+narrow.
+Suggested action: future plan time for any commit that adds a new
+tenant-scoped table MUST include an explicit GRANT to riskd_app in
+the UPGRADE_SQL. As a hardening pass, a follow-up migration could
+land `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT,
+UPDATE, DELETE ON TABLES TO riskd_app` (one statement; permanent for
+the schema; eliminates this whole failure class). Reasonable Phase
+6B/6C cleanup commit or a dedicated 6A.10 polish item.

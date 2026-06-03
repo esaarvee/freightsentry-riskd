@@ -347,6 +347,9 @@ async def test_rls_policies_exist_on_tenant_scoped_tables(
         "decisions",
         "feedback",
         "customer_baselines",
+        # Phase 6A.6 — migration 0011 adds tenant_route_baselines with
+        # tenant_isolation RLS for case-3b population baseline subsystem.
+        "tenant_route_baselines",
     }
     rows = await db_conn.fetch(
         """
