@@ -105,6 +105,12 @@ document the two-file workflow. Address before Phase 6 production deploy
 (production won't have this confusion since it uses Secrets Manager) and
 ideally before 5D.2's role transition (which already touches `DATABASE_URL`
 and adds `ALEMBIC_DATABASE_URL`).
+DEFERRED to Phase 6: 5D.2 retro added ALEMBIC_DATABASE_URL to the
+docker-compose.yml app.environment block, but the host `.env`
+localhost form still forces an explicit `DATABASE_URL=...` override
+when running `docker compose up -d`. Production uses Secrets Manager
+and never reads `.env`, so this is dev-host-only. Carry-forward in
+docs/security-audit-rls-phase-5.md Phase 6 item #7.
 
 ## 2026-06-02 — Dockerfile pip install failed (pytricia sdist + missing build deps)
 
