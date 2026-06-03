@@ -670,6 +670,189 @@ The CloudWatch Logs agent on the production ECS task ingests stdout JSON; lines 
 
 ---
 
+## Case-3 detection capability (Phase 6A — 2026-06-03)
+
+### Threat-model distinction (case-3a vs case-3b)
+
+Two distinct threat shapes share the "case-3" name. Phase 6A ships rule
+coverage for each, with measurement deferred to 6C replay (case-3b) and
+post-launch real-data observation (case-3a):
+
+- **Case-3a** (established-customer compromise). An existing customer
+  with a legitimate transaction baseline gets compromised; attacker
+  uses stolen credentials to ship under the customer's identity to a
+  fraud destination via carrier-facility dropoff. The customer's own
+  history is the deviation anchor — the attacker ships from
+  carrier-dropoff origin AND through a route the customer does not
+  normally use AND from a previously-unseen IP. Detected by
+  `case_3_compound` (weight 0.70, maturity_sensitive).
+- **Case-3b** (brand-new-customer fraud). The customer is itself
+  fraudulent from the first booking; no legitimate prior history.
+  Per-customer route baseline cannot serve as the deviation anchor
+  because every transaction is fraud. The Roulottes Lupien 95-record
+  cluster is case-3b. Detected by two complementary compounds:
+  - `cold_start_country_triangle_with_carrier_dropoff` (simple;
+    weight 0.65; brand-new customer ships outside their declared
+    country in BOTH origin AND destination with carrier-dropoff)
+  - `cold_start_population_baseline_rare_with_carrier_dropoff`
+    (sophisticated; weight 0.70; brand-new customer ships a route
+    rare in the tenant's customer-base population with carrier
+    dropoff)
+
+The two threat models are distinct; each rule covers its class. The
+case_3_compound rule is NOT expected to fire on the case-3b Roulottes
+Lupien census in 6C replay — its maturity gate excludes brand-new
+customers by design. Its empirical validation waits until case-3a
+fraud (established-customer compromise with the structured signals
+present in the payload) is observed in production.
+
+### Structured-field architectural pattern
+
+Two structured signals supply the case-3 detection inputs from the
+booking platform:
+
+- `BookingRequest.shipment.origin_via_carrier_dropoff: bool` — booking
+  payload field indicating the shipment was dropped at a carrier
+  facility rather than picked up from the origin address.
+- `BookingRequest.customer.registered_country: str | None` — the
+  customer's declared country (ISO 3166-1 alpha-2). The platform
+  integration supplies this at booking time; the field validates
+  `^[A-Z]{2}$` at the Pydantic layer. The same validation extends to
+  `Address.country` so the
+  `f"{origin_country}||{destination_country}"` composite-key pattern
+  in `lane_stats` / `country_route_stats` cannot collide via crafted
+  `||`-containing country strings.
+
+**Rejected: address-string parsing.** A regex/split parser on
+`customer.registered_address` was considered (the cheap path; no
+schema change). Rejected for the same reasons address-string-matching
+signals were earlier dropped: format variation across users / forms /
+platforms makes parsers silently unreliable. Structured field is the
+principled fix.
+
+For replay validation (6C), corpora inject ground truth where known:
+the 95-record case-3b census hardcodes `customer.registered_country:
+"CA"` and `origin_via_carrier_dropoff: true` per operator-supplied
+fraud-investigation evidence. Case-2 and approved corpora set null /
+false respectively. Signals defaulting None / False ensure corpora
+without ground truth cannot trigger case-3 rules accidentally.
+
+### Five new Context fields (71 → 76)
+
+- `origin_via_carrier_dropoff` (Phase 6A.2 — passthrough from payload)
+- `shipment_route_unfamiliar_for_customer` (Phase 6A.2 — derived in
+  build_context from `customer_baselines.country_route_stats`)
+- `customer_registered_country` (Phase 6A.5 — structured-field
+  passthrough)
+- `customer_country_triangle_mismatch` (Phase 6A.5 — derived via
+  `_triangle_mismatch` helper in `app/context.py`)
+- `shipment_route_rare_for_tenant` (Phase 6A.8 — derived via
+  `derive_route_rarity` querying `tenant_route_baselines`)
+
+`shipment_origin_country` and `shipment_destination_country` are
+Python intermediates inside `build_context` (Pydantic
+`Address.country` passthrough). They are NOT in
+`ALLOWED_CONTEXT_FIELDS` because no rule condition references them
+directly — only the derived `customer_country_triangle_mismatch` and
+`shipment_route_*_for_*` consumers.
+
+### Three new rules
+
+Catalogue progression: 79 → 80 (after 6A.3) → 81 (after 6A.5) → 82
+(after 6A.9). All three rules contribute to the noisy-OR signal
+score; none are hard-block (`action: ""`).
+
+- `case_3_compound` (case-3a; weight 0.70; maturity_sensitive)
+- `cold_start_country_triangle_with_carrier_dropoff` (case-3b simple;
+  weight 0.65; maturity_sensitive=false because cold-start gate is
+  in-condition)
+- `cold_start_population_baseline_rare_with_carrier_dropoff`
+  (case-3b sophisticated; weight 0.70; maturity_sensitive=false)
+
+### Tenant route population baseline subsystem (Phase 6A.6/6A.7/6A.8)
+
+New table `tenant_route_baselines` with composite PK
+`(tenant_id, customer_country, origin_country, destination_country)`
+and `observation_count bigint` + `last_updated timestamptz`. RLS
+policy `tenant_isolation` USING
+`(tenant_id = current_setting('app.tenant_id')::int)` active under
+`riskd_app_login` per the Phase 5D role transition. The PK's
+leading-column tenant_id provides the prefix scan for both the
+6A.7 UPSERT and the 6A.8 tenant-wide SUM aggregation — no separate
+single-column index.
+
+GRANT to `riskd_app` is explicit in migration 0011. Migration 0001's
+"ON ALL TABLES IN SCHEMA" grant is a one-shot at that point in time;
+without ALTER DEFAULT PRIVILEGES, each new tenant-scoped table needs
+its own explicit grant. See `.claude/BUGS.md` 2026-06-03 entry for
+the project-wide hardening backlog item.
+
+Writer: `app/tenant_route_baselines.update_tenant_route_baseline`
+UPSERTs the triple count after every booking commit, inside the same
+transaction (failure rolls the booking back). Bounded UPSERT cost
+~1ms p95.
+
+Reader: `app/tenant_route_baselines.derive_route_rarity` single-CTE
+round-trip — composite PK probe for the triple count + leading-column
+prefix scan for the tenant-wide SUM. Strict-less-than cold-start
+gate (`total_count < 100` → False; the 100th observation passes the
+gate) and strict-less-than rarity threshold (`share < 0.02` → False;
+exactly 2% is NOT rare). Initial thresholds documented for post-launch
+calibration — `RARITY_MIN_OBSERVATIONS = 100` and `RARITY_THRESHOLD =
+0.02` are carried to `docs/calibration-backlog.md` in Phase 6E as
+post-launch tuning candidates.
+
+### Customer upsert COALESCE preservation
+
+Phase 6A.7 extends `app/services/entity_upsert.upsert_customer` so
+`registered_country` joins the existing COALESCE-on-update pattern:
+`registered_country = COALESCE(EXCLUDED.registered_country,
+customers.registered_country)`. Payload nulls do NOT overwrite
+operator-supplied (or earlier-payload-supplied) values. Matches the
+established pattern for `enterprise_id` / `registered_address` /
+`business_name` / `is_api_partner`.
+
+### Signals NOT added (operator decisions, Phase 6 prompt)
+
+- **IP-country-unfamiliar signal** — dropped. False-positive risk on
+  traveling legitimate customers (legitimate customer books from
+  foreign IP but ships normally) outweighs detection benefit. The
+  route-baseline signals cover the case-3 pattern without this FP
+  class.
+- **Customer-static-IP-set declaration mechanism** — dropped.
+  Existing learn-from-observation IP familiarity rules
+  (`ip_fully_new_for_customer`, `ip_seen_count`) already cover
+  customers with narrow IP patterns.
+- **Address-string-matching signals** (e.g.
+  `ship_from_matches_customer_billing_address`) — dropped.
+  String-matching unreliable due to format variation.
+- **Address-string parsing for country extraction** — dropped (Phase
+  6A.5). Same family of problem as address-string-matching. Structured
+  field is the principled fix.
+
+### Latency budget impact
+
+6A.7 UPSERT (~1ms) + 6A.8 single-CTE SELECT (~1ms) = ~4ms combined
+p95 added to the booking commit path (the original ~2ms estimate was
+conservative; effective overhead during the integration suite is
+within budget). Phase 5 load-test baseline at ~12ms p95 + 4ms case-3
+overhead = ~16ms post-amendment baseline. Comfortably within the
+200ms ceiling; the launch checklist (Phase 6E) instructs operators
+to watch for trend past 50ms (yellow) or 195ms (red — calibration
+backlog action before ceiling breach).
+
+### Phase 7+ architectural concerns documented for post-launch
+
+- **Trust-suppression on mature accounts.** A mature legitimate
+  customer has low `account_prior`; if compromised, signals fire but
+  combined score may not reach BLOCK. Architectural workstream for
+  Phase 7+: capability-based trust (per-dimension trust), session-
+  anomaly signals (device/location change indicators), asymmetric
+  trust freeze (rapid trust erosion on first anomaly). Carried to
+  `docs/calibration-backlog.md` in Phase 6E.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
