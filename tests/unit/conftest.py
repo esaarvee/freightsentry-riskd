@@ -128,6 +128,10 @@ def base_ctx() -> dict[str, Any]:
         # preserves prior-phase regression.
         "customer_registered_country": None,
         "customer_country_triangle_mismatch": False,
+        # Phase 6A.8 — case-3b sophisticated signal. Default False so
+        # rules predating Phase 6A behave identically; case-3b
+        # sophisticated rule tests (6A.9) override explicitly.
+        "shipment_route_rare_for_tenant": False,
         # Modification (3A) — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum

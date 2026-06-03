@@ -126,6 +126,14 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         # declared country in BOTH origin and destination.
         "customer_registered_country",
         "customer_country_triangle_mismatch",
+        # Phase 6A.8 — case-3b sophisticated signal. Derived from
+        # tenant_route_baselines via derive_route_rarity. True iff the
+        # current (customer_country, origin_country, destination_country)
+        # triple is <2% of the tenant's population AND tenant has
+        # >=100 observations across all triples. Feeds the case-3b
+        # cold_start_population_baseline_rare_with_carrier_dropoff
+        # rule (6A.9).
+        "shipment_route_rare_for_tenant",
     }
 )
 

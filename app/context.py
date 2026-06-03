@@ -51,6 +51,7 @@ from app.signal_helpers import (
     netblock_24,
 )
 from app.tenant_config import TenantConfig, resolve_value_caps
+from app.tenant_route_baselines import derive_route_rarity
 from app.trust import compute_trust_score
 from app.velocity import (
     count_ip_daily,
@@ -186,6 +187,17 @@ async def build_context(
     vel_id = await count_ip_daily(conn, tenant_id, source_ip)
     vel_distinct_ips = await count_user_distinct_ips_30d(conn, tenant_id, customer_id)
     vel_recipient = await count_recipient_distinct_customers_30d(conn, tenant_id, destination_hmac)
+    # Phase 6A.8 — case-3b tenant population baseline rarity. The DB
+    # query is bounded by the composite PK's leading-column prefix
+    # scan; adds ~1ms p95 per booking. Cold-start tenants (<100
+    # observations) return False without firing the rule.
+    route_rare = await derive_route_rarity(
+        conn,
+        tenant_id,
+        payload.customer.registered_country,
+        payload.shipment.origin.country,
+        payload.shipment.destination.country,
+    )
 
     baseline.decay_to(today)
 
@@ -306,6 +318,10 @@ async def build_context(
             shipment_origin_country,
             shipment_destination_country,
         ),
+        # Phase 6A.8 — tenant population baseline rarity (DB-backed,
+        # computed above before baseline.decay_to to keep the awaits
+        # grouped). Drives the case-3b sophisticated compound rule.
+        "shipment_route_rare_for_tenant": route_rare,
         # Velocity
         "velocity_user_hourly": vel_uh,
         "velocity_user_daily": vel_ud,
