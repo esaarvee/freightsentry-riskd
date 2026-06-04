@@ -49,3 +49,14 @@ data/maxmind/
 # Local-only scripts / fixtures with seed data — broad to catch any future
 # fixture file that might embed real customer / enterprise IDs
 local-dev/scripts/*.sql
+
+# Phase 7 — freight_risk-derived measurement data must never enter the repo.
+# scripts/replay/ and docs/replay-results/ were scrubbed from history in 7A.0
+# via git-filter-repo; these entries are defense-in-depth against accidental
+# re-introduction. scripts/calibration/ is Phase 7 ephemera tracked during
+# Phase 7 only (use git add -f to stage); deleted entirely in 7E.3, after
+# which this entry blocks any future drive-by re-creation.
+/tmp/riskd-replay/
+scripts/calibration/
+scripts/replay/data/
+docs/replay-results/

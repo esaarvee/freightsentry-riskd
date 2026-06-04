@@ -225,3 +225,32 @@ reviewer panel for the remainder of Phase 6 (worked correctly for
 0011 and would catch any future new-table migration). The durable
 ALTER DEFAULT PRIVILEGES fix is a one-statement schema-level
 hardening migration deferred to Phase 7.
+
+## 2026-06-04 — .pre-commit-config.yaml stale 8000KB cap + comment
+
+Discovered by: senior-engineer reviewer during PLAN_PHASE_7A.md 7A.0 panel
+Location: .pre-commit-config.yaml ~lines 56-62
+Severity: low
+Observation: The --maxkb=8000 cap on check-added-large-files was raised
+in 6C.1 to accommodate scripts/replay/data/ NDJSON corpora. Those files
+are now scrubbed from history and gitignored; the cap rationale is gone
+and the inline comment references scripts/replay/data/ which no longer
+exists.
+Suggested action: at Phase 7E or Phase 8 closeout, either (a) tighten
+cap back toward 500KB now that the large-file justification is gone, or
+(b) update the comment to reflect scripts/calibration/ ephemera context.
+
+## 2026-06-04 — /tmp/riskd-replay/ gitignore entry semantics observation
+
+Discovered by: doc-reviewer during PLAN_PHASE_7A.md 7A.0 panel
+Location: .gitignore line 59
+Severity: low
+Observation: The /tmp/riskd-replay/ entry has a leading slash so it is
+anchored to repo root; it ignores <repo>/tmp/riskd-replay/, NOT the
+absolute filesystem path /tmp/riskd-replay/ where 7A.2's export script
+writes corpora. The script writes outside the repo so gitignore can
+never see those files. The entry is harmless and defensive (against
+an accidental <repo>/tmp/ directory ever appearing) but the rationale
+differs from the other three entries.
+Suggested action: optional — Phase 8 doc consolidation could note this
+distinction explicitly. No production-correctness concern.
