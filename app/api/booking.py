@@ -177,31 +177,54 @@ async def evaluate_booking(
             ruleset, context_env, customer_state=customer_state, tenant_config=tenant_config
         )
 
-        # Fold THIS booking into the baseline (positive observation).
-        # Phase 6A.2 — shipment country pair is passed through from the
-        # structured Address.country field (NOT the IP country) so the
-        # case-3a route-baseline histogram tracks customer-shipment
-        # routes, not IP geolocation.
-        baseline.add_observation(
-            ts=payload.booking_ts,
-            ip=str(payload.source_ip),
-            ip_type=classify_ip_type(enrichment),
-            ip_netblock=netblock_24(str(payload.source_ip)),
-            ip_asn=enrichment.asn_org,
-            ip_country=enrichment.country,
-            ip_lat=enrichment.lat,
-            ip_lon=enrichment.lon,
-            origin=payload.shipment.origin.address,
-            destination=payload.shipment.destination.address,
-            channel=payload.shipment.channel,
-            value=float(payload.shipment.value),
-            shipment_origin_country=payload.shipment.origin.country,
-            shipment_destination_country=payload.shipment.destination.country,
-            email_hmac=email_hmac,
-            phone_hmac=phone_hmac,
-            email_domain=email_domain_val,
-        )
-        await baseline.save(conn)
+        # Phase 7C.11 — fold THIS booking into the customer baseline
+        # ONLY when the decision lands in ALLOW band. REVIEW/BLOCK
+        # bookings are HELD in pending state: no baseline mutation
+        # (ip/netblock/asn stats, value/cadence Welford accumulators,
+        # last_booking_*, channel_hist, country/origin/dest/lane stats,
+        # email/phone hmacs are all untouched). When operator feedback
+        # later marks a held booking as `approved`, the feedback
+        # endpoint folds the deferred observation then (see
+        # app/api/feedback.py).
+        #
+        # Motivating finding (7D measurement 2026-06-04): case-2
+        # customer baselines had accumulated 32 distinct ASNs each —
+        # including the residential Canadian ISPs the attacks used —
+        # because every booking polluted the baseline. The ASN-
+        # deviation rule could not discriminate. Root cause was
+        # baseline pollution, not rule design. Gating on ALLOW makes
+        # the baseline a record of operator-confirmed legitimate
+        # behavior, not a record of all evaluated bookings.
+        #
+        # Side effect: velocity counts (SQL-based on the shipments
+        # table) are UNAFFECTED — those still count REVIEW/BLOCK
+        # bookings. Only per-customer baseline state is gated.
+        #
+        # Phase 6A.2 — shipment country pair is passed through from
+        # the structured Address.country field (NOT the IP country)
+        # so the case-3a route-baseline histogram tracks customer-
+        # shipment routes, not IP geolocation.
+        if result.decision == "ALLOW":
+            baseline.add_observation(
+                ts=payload.booking_ts,
+                ip=str(payload.source_ip),
+                ip_type=classify_ip_type(enrichment),
+                ip_netblock=netblock_24(str(payload.source_ip)),
+                ip_asn=enrichment.asn_org,
+                ip_country=enrichment.country,
+                ip_lat=enrichment.lat,
+                ip_lon=enrichment.lon,
+                origin=payload.shipment.origin.address,
+                destination=payload.shipment.destination.address,
+                channel=payload.shipment.channel,
+                value=float(payload.shipment.value),
+                shipment_origin_country=payload.shipment.origin.country,
+                shipment_destination_country=payload.shipment.destination.country,
+                email_hmac=email_hmac,
+                phone_hmac=phone_hmac,
+                email_domain=email_domain_val,
+            )
+            await baseline.save(conn)
 
         # Persist shipment. email_hmac and phone_hmac (added in 3B.1)
         # land on the shipments row so the 3B.3 feedback endpoint can

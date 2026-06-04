@@ -15,12 +15,31 @@ Customer counter deltas are computed by `_compute_counter_deltas` so the
 transition matrix is exhaustively testable. The endpoint persists in
 a single transaction: feedback INSERT + baseline UPDATE (FOR UPDATE
 lock) + customer counter UPDATE. Mirrors booking discipline.
+
+Phase 7C.11 — deferred-observation fold on `approved` feedback. When
+the booking endpoint declines to fold a REVIEW/BLOCK booking into the
+customer baseline (baseline gated on ALLOW per the case-2 baseline-
+pollution finding), a later `approved` feedback against that booking
+triggers the fold here. The fold uses enrichment data FRESH at
+feedback time — not booking time — because the booking-time snapshot
+is not persisted. For stable IP→ASN/country attribution, this is
+acceptable on the operator-feedback timescale (30-180 day typical
+operator lag). Stronger-guarantee alternatives (persisted booking-
+time enrichment snapshot in the decisions row) are deferred design.
+
+Idempotency on the fold path is carried by the existing label-
+monotonicity gate: a second `approved` against the same target is
+not stronger than the first; the gate short-circuits before the
+fold ever runs. An ALLOW-band booking followed by `approved`
+feedback is also short-circuited (the new branch checks the prior
+decision band and skips the fold when it was already ALLOW).
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
+from ipaddress import IPv4Address
 from typing import Annotated, Any, cast
 
 import asyncpg
@@ -28,9 +47,12 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import AuthContext, require_api_token
-from app.baseline import CustomerBaseline
+from app.baseline import CustomerBaseline, classify_ip_type
 from app.db import get_conn, set_tenant_id
-from app.models import FeedbackLabel, FeedbackRequest, FeedbackResponse
+from app.enrich import Enricher
+from app.models import Address, FeedbackLabel, FeedbackRequest, FeedbackResponse
+from app.runtime import get_enricher
+from app.signal_helpers import netblock_24
 from app.tenant_config_cache import load_tenant_config_cached
 
 _log = structlog.get_logger(__name__)
@@ -103,6 +125,7 @@ def _address_from_jsonb(value: Any) -> str:
 async def submit_feedback(
     payload: FeedbackRequest,
     auth: Annotated[AuthContext, Depends(require_api_token)],
+    enricher: Annotated[Enricher, Depends(get_enricher)],
 ) -> FeedbackResponse:
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
@@ -142,15 +165,23 @@ async def submit_feedback(
 
         # Resolve target_request_id -> prior decision + shipment + customer.
         # Dual tenant_id filters on every JOIN leg per .ai/conventions.md.
+        #
+        # Phase 7C.11 — additional columns (`d.decision`, `s.value`,
+        # `s.channel`, `s.booking_ts`) needed by the fold-on-approved
+        # path. Cheap column-level additions; no schema change.
         prior = await conn.fetchrow(
             """
             SELECT
                 d.id            AS decision_id,
+                d.decision      AS decision_band,
                 s.id            AS shipment_id,
                 s.customer_id   AS customer_id,
                 s.source_ip     AS source_ip,
                 s.origin        AS origin,
                 s.destination   AS destination,
+                s.value         AS shipment_value,
+                s.channel       AS shipment_channel,
+                s.booking_ts    AS booking_ts,
                 s.email_hmac    AS email_hmac,
                 s.phone_hmac    AS phone_hmac
               FROM decisions d
@@ -271,6 +302,162 @@ async def submit_feedback(
                 ts=payload.feedback_ts,
             )
             await baseline.save(conn)
+        elif payload.label == "approved" and prior["decision_band"] != "ALLOW":
+            # Phase 7C.11 — fold-deferred-observation on positive
+            # feedback. The booking endpoint deferred this observation
+            # (decision was REVIEW or BLOCK; baseline gated on ALLOW).
+            # Operator has now confirmed the booking as legitimate;
+            # fold the deferred observation into the customer baseline
+            # so subsequent bookings reflect the confirmed history.
+            #
+            # Idempotency: a second `approved` against the same target
+            # is not stronger than the first (rank ordering: approved
+            # = 0); the label-monotonicity gate above short-circuits
+            # before this branch ever runs again. An ALLOW-band
+            # booking followed by `approved` feedback also short-
+            # circuits here (the elif's `decision_band != "ALLOW"`
+            # check is the second guard).
+            #
+            # Concurrency: mirrors the rejected branch's post-FOR-
+            # UPDATE-lock monotonicity re-read. Without it, two
+            # concurrent `approved` POSTs with different request_ids
+            # targeting the same target could both pass the pre-lock
+            # monotonicity SELECT (prior=None for both), then
+            # serialize on the FOR UPDATE lock — the second commit
+            # would double-fold the baseline. The re-read under lock
+            # catches the now-committed first `approved` and skips
+            # the duplicate fold.
+            #
+            # Enrichment data is fresh at feedback time (cache hit on
+            # ip_enrichment row written during booking-time evaluation;
+            # MaxMind re-lookup only on cache miss). For stable
+            # IP→ASN/country attribution this is acceptable on the
+            # operator-feedback timescale.
+            #
+            # Decay vs observation timestamp: `decay_to(feedback_ts)`
+            # advances the baseline's decay anchor to feedback time so
+            # subsequent reads are aligned with current time. The
+            # observation's `ts=booking_ts` records the historical
+            # event date so per-stat `last` markers honestly reflect
+            # when the activity occurred. Welford cadence: when
+            # booking_ts < current last_booking_ts (out-of-order fold),
+            # `_welford_cadence` short-circuits the negative-hours
+            # case at `add_observation`'s if-hours-positive guard, so
+            # the fold contributes no cadence sample (acceptable).
+            #
+            # email_domain side-effect drop: the booking-time
+            # add_observation populates email_domain_stats from a
+            # derived value not stored on the shipments row. The
+            # fold path passes only email_hmac/phone_hmac (the
+            # HMAC'd dimensions that ARE on the shipments row);
+            # email_domain_stats is not bumped by the fold. Minor
+            # accuracy loss; documented for future audit.
+            baseline = await CustomerBaseline.load(
+                conn, auth.tenant_id, prior["customer_id"], for_update=True
+            )
+            # Post-lock monotonicity re-read — concurrency defense.
+            prior_label_row = await conn.fetchrow(
+                """
+                SELECT label
+                  FROM feedback
+                 WHERE tenant_id = $1 AND target_request_id = $2
+                 ORDER BY feedback_ts DESC, created_at DESC
+                 LIMIT 1
+                """,
+                auth.tenant_id,
+                payload.target_request_id,
+            )
+            prior_label_under_lock = (
+                prior_label_row["label"] if prior_label_row is not None else None
+            )
+            if not _label_stronger(new=payload.label, prior=prior_label_under_lock):
+                # Concurrent winner committed first; skip the fold.
+                # Audit row still gets INSERT'd below.
+                try:
+                    await _insert_feedback_row(conn, auth.tenant_id, payload)
+                except asyncpg.UniqueViolationError as exc:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="request_id already used for another feedback in this tenant",
+                    ) from exc
+                _log.info(
+                    "feedback.fold_monotonicity_skip_post_lock",
+                    metric=True,
+                    tenant_id=auth.tenant_id,
+                    request_id=payload.request_id,
+                    new_label=payload.label,
+                    prior_label=prior_label_under_lock,
+                )
+                return FeedbackResponse(
+                    applied=False,
+                    previous_label=cast(FeedbackLabel | None, prior_label_under_lock),
+                    target_request_id=payload.target_request_id,
+                )
+
+            source_ip = IPv4Address(str(prior["source_ip"]))
+            enrichment = await enricher.enrich(conn, source_ip)
+            origin_address = Address.model_validate(
+                json.loads(prior["origin"]) if isinstance(prior["origin"], str) else prior["origin"]
+            )
+            destination_address = Address.model_validate(
+                json.loads(prior["destination"])
+                if isinstance(prior["destination"], str)
+                else prior["destination"]
+            )
+            baseline.decay_to(payload.feedback_ts.date())
+            # Preserve current last_booking_* before add_observation
+            # writes them. Out-of-order fold (booking_ts older than
+            # current last_booking_ts) would otherwise REGRESS the
+            # customer's last-known activity timestamp + location to
+            # historical values, silently breaking cadence z-score,
+            # recency rules, and last-known-location signals on
+            # subsequent bookings. We restore the preserved values
+            # post-add when the historical fold is older.
+            preserved_last_ts = baseline.last_booking_ts
+            preserved_last_lat = baseline.last_booking_lat
+            preserved_last_lon = baseline.last_booking_lon
+            preserved_last_country = baseline.last_booking_country
+            baseline.add_observation(
+                ts=prior["booking_ts"],
+                ip=str(source_ip),
+                ip_type=classify_ip_type(enrichment),
+                ip_netblock=netblock_24(str(source_ip)),
+                ip_asn=enrichment.asn_org,
+                ip_country=enrichment.country,
+                ip_lat=enrichment.lat,
+                ip_lon=enrichment.lon,
+                origin=origin_address.address,
+                destination=destination_address.address,
+                channel=prior["shipment_channel"],
+                value=float(prior["shipment_value"]),
+                shipment_origin_country=origin_address.country,
+                shipment_destination_country=destination_address.country,
+                email_hmac=prior["email_hmac"],
+                phone_hmac=prior["phone_hmac"],
+            )
+            if preserved_last_ts is not None and prior["booking_ts"] < preserved_last_ts:
+                # Out-of-order fold detected — restore the more-recent
+                # last_booking_* values that add_observation just
+                # overwrote.
+                baseline.last_booking_ts = preserved_last_ts
+                baseline.last_booking_lat = preserved_last_lat
+                baseline.last_booking_lon = preserved_last_lon
+                baseline.last_booking_country = preserved_last_country
+            await baseline.save(conn)
+            # Enumerate dimensions actually touched by the fold so
+            # structured-log consumers see a comparable shape to the
+            # rejected path's dimension list.
+            dimensions_written = [
+                "ip_stats",
+                "ip_netblock_stats",
+                "ip_asn_stats",
+                "origin_stats",
+                "dest_stats",
+                "lane_stats",
+                "value",
+                "channel_hist",
+                "country_route_stats",
+            ]
         else:
             dimensions_written = []
 

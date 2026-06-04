@@ -322,6 +322,73 @@ guarantees during bulk-load, and decision-cache implications
 
 ---
 
+## 18. Cold-start ramp lengthening under 7C.11 baseline gating
+
+**Status**: introduced by Phase 7C.11; ongoing post-launch
+observation.
+
+**Context**: Phase 7C.11 gates customer baseline accumulation on
+ALLOW band — REVIEW/BLOCK bookings no longer contribute to
+`ip_asn_stats`, `ip_stats`, Welford accumulators (and therefore
+`effective_observations`). Cold-start customers reach the >=10
+maturity gate slower than under the pre-7C.11 behavior; the
+delta is approximately the per-customer REVIEW band rate.
+
+For tenants with naturally clean traffic (most bookings → ALLOW),
+the ramp lengthening is minimal (<5%). For tenants whose
+infrastructure or customer mix produces high pre-launch REVIEW
+rates (mature anti-fraud platforms catching real attacks, OR
+high-FPR tenants whose calibration needs work), the ramp can
+lengthen meaningfully — empirical 5-15% range expected.
+
+**Deferred action**: monitor `customer_baselines.value_n` growth
+trajectory per tenant during Day 1-30 (production launch checklist
+Phase E). If a tenant's customers consistently take >2x longer
+than the legacy baseline to cross >=10 observations, that's a
+calibration signal — either (a) the tenant's REVIEW rate is high
+and the upstream rule catalogue needs review, or (b) the cold-
+start gate threshold should be relaxed for that tenant.
+
+Items 1, 2 (pair-novelty rule fire rates) cross-reference: 7C.11
+reduces these rules' fire rates indirectly because cold-start
+customers (below the >=10 maturity gate) bypass them entirely.
+The 7D re-measurement after 7C.11 commits reflects the combined
+7C.7 + 7C.8 + 7C.11 impact on FPR.
+
+---
+
+## 19. Force-fold admin endpoint (Phase 7C.11 edge case)
+
+**Status**: deferred to post-launch architectural workstream.
+
+**Context**: Phase 7C.11 holds REVIEW/BLOCK bookings in pending
+state until operator feedback arrives. Edge case: feedback never
+comes. Reasons could include operator forgot, feedback workflow
+outage, or operator team rotated and lost context. The booking
+stays held indefinitely, never folding to the customer baseline.
+
+This is acceptable for v1 — operators typically catch up via
+normal workflow. The held-booking population is queryable
+(launch checklist Phase F runbook entry); if it grows
+operationally, an admin endpoint could be added.
+
+**Deferred action**: post-launch operator-experience observation.
+If the held-booking backlog accumulates persistently:
+
+1. Add a `POST /admin/feedback/force-fold` endpoint that takes
+   a target_request_id and applies an `approved` feedback
+   server-side (e.g., scheduled batch-fold after N days of no
+   feedback).
+2. OR: add an auto-approve grace period (e.g., 90 days post-
+   booking without feedback → automatic fold).
+3. OR: keep the held state indefinitely and add an operational
+   alert when the backlog exceeds a per-tenant threshold.
+
+Decision deferred — operator preference depends on observed
+production patterns.
+
+---
+
 ## Phase-by-phase post-launch tuning timeline
 
 Cross-reference: `docs/production-launch-checklist.md`.

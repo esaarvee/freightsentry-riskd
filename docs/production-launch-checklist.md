@@ -151,6 +151,37 @@
       - If the ramp is slower than expected (e.g., low-volume
         tenants), surface to calibration-backlog item 16 for
         post-launch evaluation.
+- [ ] **Held-booking backlog** (Phase 7C.11): REVIEW/BLOCK bookings
+      are now HELD in pending state until operator feedback arrives.
+      Operators may want visibility into the backlog size.
+      - Query to track:
+        ```sql
+        SELECT COUNT(*) AS held_count
+          FROM decisions d
+          LEFT JOIN feedback f
+            ON d.tenant_id = f.tenant_id
+           AND d.request_id = f.target_request_id
+         WHERE d.tenant_id = $1
+           AND d.decision IN ('REVIEW', 'BLOCK')
+           AND f.id IS NULL;
+        ```
+      - Expect non-zero from Day 1; growth depends on per-tenant
+        REVIEW/BLOCK rate and operator-feedback cadence. Steady-
+        state held_count should plateau (new holds ≈ feedback
+        completions).
+      - If held_count grows persistently (e.g., 30+ days of
+        feedback never arriving), surface to calibration-backlog
+        item 19 for post-launch architectural decision (force-
+        fold admin endpoint or grace-period auto-fold).
+- [ ] **Cold-start ramp under 7C.11 gating**: customer baseline
+      accumulation now requires ALLOW bookings (or operator-
+      approved feedback on REVIEW/BLOCK bookings). Expect ~5-15%
+      longer cold-start window vs the legacy "all bookings
+      populate baseline" behavior. Tenants with high pre-launch
+      REVIEW rates see longer ramps. Compare per-tenant
+      `customer_baselines.value_n` growth trajectory across
+      Days 1-30 against the expected ALLOW-rate × bookings-rate
+      product.
 
 ---
 

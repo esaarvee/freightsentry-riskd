@@ -1674,6 +1674,152 @@ any, iteration policy from PLAN_PHASE_7D.md applies.
 
 ---
 
+## Phase 7C.11 — Baseline accumulation gated on operator-confirmed observations (2026-06-04 amendment)
+
+7D measurement against the freight_risk corpus (with MaxMind ASN
+data provisioned) surfaced a root-cause finding that motivated this
+additional architectural change.
+
+### Motivating finding
+
+The case-2 ASN-deviation rule (7C.7) fired on 0 of 500 case-2
+attack records — a complete miss vs the design intent. Investigation
+of the two compromised customers' actual `customer_baselines.ip_asn_stats`
+post-replay revealed why:
+
+- **Customer gPYG** (804 total shipments): 32 distinct ASNs accumulated,
+  including 438 Google LLC + 122 Bell Canada + 57 Rogers Communications
+  + 26 Videotron + 22 Cogeco + 18 Shaw + ~24 other Canadian residential
+  ISPs.
+- **Customer nD7** (135 total shipments): 13 distinct ASNs, NO Google;
+  baseline entirely Canadian residential ISPs (Bell, Videotron, SOGETEL,
+  Altima, etc.).
+
+The customer's "baseline" was a record of every IP/ASN they had EVER
+booked from — including the fraud-attack bookings themselves. Attack
+ASNs were already "familiar" in the baseline (the attacks polluted
+the very baseline they were supposed to evade). The 7C.7 rule
+condition `asn_org NOT IN baseline.ip_asn_stats` returned False on
+every attack record because the attack ASN had been added to the
+baseline during the attack itself.
+
+Pre-Phase-7C.11 booking-time behavior:
+```python
+baseline.add_observation(ip=..., ip_asn=enrichment.asn_org, ...)
+await baseline.save(conn)
+```
+ran on EVERY decision band — ALLOW, REVIEW, BLOCK. The baseline
+recorded all evaluated bookings without quality discrimination.
+
+### Architectural decision
+
+Customer baseline = record of operator-confirmed legitimate behavior,
+NOT record of all evaluated bookings.
+
+**Booking endpoint** (`app/api/booking.py`): wrap
+`baseline.add_observation()` + `baseline.save()` in
+`if result.decision == "ALLOW":`. REVIEW/BLOCK bookings are HELD in
+pending state — baseline state unchanged (all stat-dicts, Welford
+accumulators, last_booking_*, histograms).
+
+**Feedback endpoint** (`app/api/feedback.py`): when operator submits
+`approved` feedback AND the booking's prior decision was REVIEW or
+BLOCK, fold the deferred observation into the baseline NOW. Same
+`add_observation` shape as booking time; re-enrich source_ip via
+the cached `ip_enrichment` row.
+
+The deferred fold provides operator-driven baseline curation: each
+ASN/IP enters the baseline only after operator confirmation. Attack
+bookings stay OUT of the baseline forever (because they're never
+operator-approved). Future attack records from the same ASN remain
+"unfamiliar" and trip the case-2 rule correctly.
+
+### Operational implications
+
+1. **Cold-start ramp lengthens by ~5-15%**: new customers' baseline
+   accumulation slows because REVIEW bookings no longer contribute.
+   Customers reach `effective_observations >= 10` later; maturity-
+   gated rules (IPC pair-novelty, DEST pair-novelty,
+   ip_fully_new_for_customer, etc.) come online later. Tenants with
+   high pre-launch FPR rates see longer cold-start windows than
+   tenants with naturally clean traffic shapes.
+
+2. **Velocity counts unaffected**: `velocity_user_hourly`,
+   `velocity_user_daily`, `velocity_ip_*` are SQL-based queries on
+   the shipments table, not baseline state. They count all bookings
+   regardless of decision band. The customer's baseline state
+   diverges from their booking history; this is correct (the
+   baseline is a quality signal, not a frequency signal).
+
+3. **Operator-feedback latency carries baseline lag**: production
+   operator feedback typically lands 30-180 days after booking
+   evaluation. During that window, the customer's baseline reflects
+   their OLDER confirmed-legitimate behavior, not the current
+   booking. Subsequent bookings during the lag window evaluate
+   against the older baseline. Acceptable for stable IP/ASN
+   attribution; documented as the operational contract.
+
+### Enrichment freshness contract
+
+The feedback fold uses enrichment data FRESH at feedback time, not
+booking time. The booking-time enrichment row is cached in the
+`ip_enrichment` table; the fold re-reads it (cache hit on stable
+IPs; MaxMind re-lookup only on cache miss). For stable IP→ASN/
+country attribution this is acceptable on the operator-feedback
+timescale (ASNs rarely change ownership; countries effectively
+never change for stable IPs).
+
+Stronger guarantee (persisted booking-time enrichment snapshot in
+the decisions row) is deferred design. Adds storage cost
+proportional to decisions volume; adds code complexity; not
+justified for v1.
+
+### Measurement methodology shift — Phase 7B vs 7D non-comparability
+
+Phase 7B variant comparison measurements were obtained under
+"every booking populates baseline" semantics. Phase 7D re-measurement
+post-7C.11 uses "only ALLOW populates" semantics. **The two are NOT
+directly comparable** — the rule fire rates and decision-band
+shares reflect different architectural states.
+
+The Phase 7B section in `docs/replay-validation.md` stays as the
+historical record of the pre-7C.11 architectural state. Phase 7D
+measurement is the source-of-truth for the post-7C.11 catalogue.
+
+### Calibration-backlog impact
+
+- **Items 1, 2** (pair-novelty rule fire rates): unchanged status
+  (PARTIAL). 7C.11 reduces these rules' fire rates indirectly
+  because cold-start customers (below the >=10 maturity gate) bypass
+  them entirely. 7D re-measurement reflects the combined 7C.7 + 7C.8
+  + 7C.11 impact.
+- **NEW item 18** (cold-start ramp lengthening per 7C.11): documented
+  for post-launch tracking.
+- **NEW item 19** (force-fold admin endpoint): edge case where a held
+  booking's feedback never arrives. Deferred to post-launch.
+
+### Test coverage
+
+`tests/integration/test_baseline_gating.py` (NEW; 5 tests):
+- REVIEW-no-fold: REVIEW booking does not mutate baseline.
+- approve-then-fold: REVIEW + approved feedback DOES fold.
+- ALLOW-no-double-add: ALLOW + approved feedback does NOT re-fold
+  (the `decision_band != "ALLOW"` guard).
+- monotonicity-skip: REVIEW + rejected + later approved → approved
+  is monotonicity-skipped; baseline never folded positively.
+- rejected-on-non-folded: REVIEW + rejected → `add_rejected_observation`
+  creates fresh entries with r_n=1, n=0 even when keys missing pre-feedback.
+
+### Phase 7 outcome (final after 7C.11)
+
+The fundamental case-2 case is now architecturally addressed by the
+combination of 7C.7 (ASN-deviation rule), 7C.8 (pair-novelty weight
+reduction), 7C.9 (warmup methodology), and 7C.11 (baseline-pollution
+prevention). 7D re-measurement after 7C.11 commits validates the
+combined impact empirically.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
