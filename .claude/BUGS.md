@@ -283,3 +283,31 @@ recall change, per-rule fire rate change". Operator can compute the
 3 decision-band deltas by inspection.
 Suggested action: when 7B variants finalize, optionally add a
 decision_distribution_delta_pp block to compare_results output.
+
+## 2026-06-04 — replay orchestrator warmup-phase test gaps
+
+Discovered by: test-reviewer during PLAN_PHASE_7A.md / 7C.9 amendment
+Location: scripts/replay_validation.py (Phase 7C.9 warmup/measurement
+methodology)
+Severity: low (calibration tooling; not production code path)
+Observation: Three orchestrator-side correctness invariants from 7C.9
+are exercised end-to-end (via the 7D measurement run) but lack
+explicit unit tests:
+1. Phase barrier: warmup tasks must FULLY complete (gather()) before
+   any measurement task starts. A test with httpx.MockTransport
+   recording POST timestamps + asserting max(warmup_ts) <
+   min(measurement_ts) would lock the barrier.
+2. _replay_role strip at POST egress: _post_one strips _-prefixed
+   metadata before POST. A mock-transport test asserting the POST
+   body does NOT contain "_replay_role" would catch accidental
+   future regressions (BookingRequest is extra="forbid"; a leak
+   422s every request).
+3. Per-customer chronological warmup ordering: the SQL ORDER BY
+   customer_id, target_date ASC contract is documented but not
+   tested. A test with non-chronological insert order asserting
+   chronological output would catch SQL ORDER BY regressions.
+
+Suggested action: defer to Phase 8 test-suite audit or open as a
+post-launch follow-up. scripts/calibration/ is deleted in 7E.3;
+these tests would land in scripts/replay_validation.py's existing
+test_replay_validation.py if added.

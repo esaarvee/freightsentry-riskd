@@ -90,6 +90,18 @@ class CorpusSpec:
     where_clause: str
     sample_size: int | None  # None = full census
     case3_overrides: bool
+    # Phase 7C.9: warmup-vs-measurement methodology. When True, the
+    # exporter emits K=WARMUP_K pre-March-31 legitimate bookings per
+    # measurement customer BEFORE the measurement records, so the
+    # customer's accumulated baseline (and the new ASN rule's
+    # cold-start gate) reflects production-realistic conditions
+    # during replay. Case-3 disabled because the 95-record Roulottes
+    # Lupien census is brand-new-customer fraud — by definition no
+    # pre-fraud history to warm with.
+    warmup_enabled: bool = True
+
+
+WARMUP_K = 100
 
 
 _CORPORA: tuple[CorpusSpec, ...] = (
@@ -101,6 +113,7 @@ _CORPORA: tuple[CorpusSpec, ...] = (
         ),
         sample_size=10_000,
         case3_overrides=False,
+        warmup_enabled=True,
     ),
     CorpusSpec(
         slug="case2",
@@ -108,6 +121,7 @@ _CORPORA: tuple[CorpusSpec, ...] = (
         where_clause="f.feedback='reject' AND f.notes='gobolt-non-34x-api'",
         sample_size=500,
         case3_overrides=False,
+        warmup_enabled=True,
     ),
     CorpusSpec(
         slug="case3",
@@ -119,6 +133,7 @@ _CORPORA: tuple[CorpusSpec, ...] = (
         ),
         sample_size=None,  # full census
         case3_overrides=True,
+        warmup_enabled=False,
     ),
 )
 
@@ -270,9 +285,15 @@ def _row_to_payload(
     idx: int,
     maxmind: _MaxMindReader,
     tiers: TierCounts,
+    replay_role: str = "measurement",
 ) -> dict[str, Any]:
     customer_id = row["customer_id"]
-    if corpus.case3_overrides:
+    # case3 overrides ONLY apply to measurement records (case-3 census
+    # is brand-new-customer fraud; no warmup branch reaches case-3).
+    # Warmup records get tier-derived customer_country and
+    # origin_via_carrier_dropoff=False unconditionally (warmup is
+    # legitimate pre-fraud history).
+    if corpus.case3_overrides and replay_role == "measurement":
         customer_country: str | None = "CA"
         tiers.case3_override += 1
         origin_via_carrier_dropoff = True
@@ -290,7 +311,8 @@ def _row_to_payload(
     destination_country = _derive_country_tier_2(row["destination_address"])
 
     return {
-        "request_id": f"replay-{corpus.slug}-{idx}",
+        "request_id": f"replay-{corpus.slug}-{replay_role}-{idx}",
+        "_replay_role": replay_role,
         "customer": {
             "external_id": customer_id,
             "registered_address": row["customer_registered_address"],
@@ -314,6 +336,67 @@ def _row_to_payload(
         },
         "booking_ts": _parse_booking_ts(row["booking_started_at"]),
     }
+
+
+def _fetch_warmup_rows(
+    db: sqlite3.Connection,
+    customer_ids: list[str],
+    k: int = WARMUP_K,
+) -> list[sqlite3.Row]:
+    """Fetch up to K most-recent legitimate pre-March-31 bookings per
+    customer_id. Used by 7C.9 warmup methodology: each customer's
+    accumulated baseline is populated by these bookings BEFORE the
+    measurement records arrive, so the new ASN rule's cold-start
+    gate reflects production-realistic conditions during replay.
+
+    Returns rows ordered by (customer_id, target_date ASC, shipment_id
+    ASC) so warmups per customer arrive chronologically. The
+    orchestrator processes the NDJSON in order; warmup records hit
+    the booking endpoint and populate customer_baselines before any
+    measurement records for the same customer.
+    """
+    if not customer_ids:
+        return []
+    # SQLite parameter substitution for the IN clause.
+    placeholders = ",".join("?" * len(customer_ids))
+    sql = f"""
+        WITH ranked AS (
+            SELECT
+                s.shipment_id,
+                s.target_date,
+                s.source,
+                s.customer_id,
+                s.customer_registered_address,
+                s.origin_address,
+                s.destination_address,
+                s.total,
+                s.source_ip,
+                s.booking_started_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY s.customer_id
+                    ORDER BY s.target_date DESC, s.shipment_id DESC
+                ) AS rn
+            FROM shipment_feedback f
+            INNER JOIN shipments s ON f.shipment_id = s.shipment_id
+            WHERE s.customer_id IN ({placeholders})
+                AND f.feedback = 'approve'
+                AND s.target_date < '2026-03-31'
+                AND s.source_ip IS NOT NULL
+                AND s.origin_address IS NOT NULL
+                AND s.destination_address IS NOT NULL
+                AND s.booking_started_at IS NOT NULL
+                AND s.total IS NOT NULL
+        )
+        SELECT
+            shipment_id, target_date, source, customer_id,
+            customer_registered_address, origin_address,
+            destination_address, total, source_ip, booking_started_at
+        FROM ranked
+        WHERE rn <= ?
+        ORDER BY customer_id, target_date ASC, shipment_id ASC
+    """
+    cur = db.execute(sql, [*customer_ids, k])
+    return cur.fetchall()
 
 
 def _fetch_corpus_rows(
@@ -366,12 +449,47 @@ def _write_corpus_file(
     rng: random.Random,
     maxmind: _MaxMindReader,
     tiers: TierCounts,
-) -> int:
-    rows = _fetch_corpus_rows(db, corpus, rng)
+) -> tuple[int, int]:
+    """Emit warmup records (if enabled) FIRST per-customer, then
+    measurement records. Returns (warmup_count, measurement_count).
+
+    Warmup ordering: rows arrive grouped by customer_id and
+    chronological within each customer (oldest first), so each
+    customer's baseline accumulates in time-order before any later
+    record for that customer is evaluated.
+    """
+    measurement_rows = _fetch_corpus_rows(db, corpus, rng)
     out_path = out_dir / corpus.filename
-    written = 0
+    warmup_count = 0
+    measurement_count = 0
     with out_path.open("w", encoding="utf-8") as fh:
-        for idx, row in enumerate(rows):
+        # Warmup phase: emit per-customer historical records first.
+        if corpus.warmup_enabled and measurement_rows:
+            # Unique customer_ids in this measurement set, preserving
+            # set semantics (order doesn't matter — warmup query
+            # groups by customer_id internally).
+            measurement_customer_ids = sorted({row["customer_id"] for row in measurement_rows})
+            warmup_rows = _fetch_warmup_rows(db, measurement_customer_ids)
+            for idx, row in enumerate(warmup_rows):
+                payload = _row_to_payload(
+                    db=db,
+                    row=row,
+                    corpus=corpus,
+                    idx=idx,
+                    maxmind=maxmind,
+                    tiers=tiers,
+                    replay_role="warmup",
+                )
+                if idx % _SCHEMA_VALIDATION_STRIDE == 0:
+                    # Strip _replay_role metadata before Pydantic
+                    # validation; BookingRequest is extra="forbid".
+                    BookingRequest.model_validate(
+                        {k: v for k, v in payload.items() if not k.startswith("_")}
+                    )
+                fh.write(json.dumps(payload) + "\n")
+                warmup_count += 1
+        # Measurement phase.
+        for idx, row in enumerate(measurement_rows):
             payload = _row_to_payload(
                 db=db,
                 row=row,
@@ -379,15 +497,20 @@ def _write_corpus_file(
                 idx=idx,
                 maxmind=maxmind,
                 tiers=tiers,
+                replay_role="measurement",
             )
             # Schema validation on a strided subset; full validation
             # would slow the export without additional coverage value
             # (the same transformation produces every row).
             if idx % _SCHEMA_VALIDATION_STRIDE == 0:
-                BookingRequest.model_validate(payload)
+                # Strip _replay_role metadata before Pydantic validation;
+                # BookingRequest is extra="forbid".
+                BookingRequest.model_validate(
+                    {k: v for k, v in payload.items() if not k.startswith("_")}
+                )
             fh.write(json.dumps(payload) + "\n")
-            written += 1
-    return written
+            measurement_count += 1
+    return warmup_count, measurement_count
 
 
 def export(
@@ -396,13 +519,13 @@ def export(
     out_dir: Path,
     seed: int,
     corpora: Iterable[CorpusSpec] = _CORPORA,
-) -> dict[str, int]:
+) -> dict[str, dict[str, int]]:
     """Write the three NDJSON corpora to out_dir.
 
-    Returns a dict mapping corpus slug → written record count.
+    Returns a dict mapping corpus slug -> {"warmup": int, "measurement": int}.
     Raises FileNotFoundError on missing db, OSError on out_dir write
     failure. Caller is responsible for sequencing (typically:
-    export → orchestrator runs against out_dir).
+    export -> orchestrator runs against out_dir).
     """
     if not db_path.exists():
         msg = f"freight_risk DB not found: {db_path}"
@@ -413,10 +536,10 @@ def export(
     rng = random.Random(seed)
     tiers = TierCounts()
     maxmind = _MaxMindReader.open()
-    counts: dict[str, int] = {}
+    counts: dict[str, dict[str, int]] = {}
     try:
         for corpus in corpora:
-            count = _write_corpus_file(
+            warmup_count, measurement_count = _write_corpus_file(
                 db=db,
                 corpus=corpus,
                 out_dir=out_dir,
@@ -424,7 +547,10 @@ def export(
                 maxmind=maxmind,
                 tiers=tiers,
             )
-            counts[corpus.slug] = count
+            counts[corpus.slug] = {
+                "warmup": warmup_count,
+                "measurement": measurement_count,
+            }
     finally:
         db.close()
         if maxmind.reader is not None:
@@ -474,8 +600,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     for slug, count in counts.items():
+        filename = next(c.filename for c in _CORPORA if c.slug == slug)
+        warmup = count["warmup"]
+        measurement = count["measurement"]
+        total = warmup + measurement
         print(
-            f"  {slug}: {count} records → {args.out_dir / next(c.filename for c in _CORPORA if c.slug == slug)}",
+            f"  {slug}: {measurement} measurement + {warmup} warmup = "
+            f"{total} records -> {args.out_dir / filename}",
             file=sys.stderr,
         )
     return 0

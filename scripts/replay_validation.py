@@ -112,6 +112,16 @@ class ReplayResults:
     errors: int = 0
     transactions: list[TransactionResult] = field(default_factory=list)
     error_details: list[dict[str, Any]] = field(default_factory=list)
+    # Phase 7C.9 warmup-vs-measurement split. Warmup decisions are
+    # recorded but EXCLUDED from decision_distribution / per_rule
+    # _fire_counts / latency_summary — those aggregates reflect
+    # measurement-only outcomes. Warmup's side-effect (baseline
+    # population) is the load-bearing operation for warmup; its
+    # decision data is captured here for diagnostic completeness.
+    warmup_requested: int = 0
+    warmup_responses_200: int = 0
+    warmup_errors: int = 0
+    warmup_transactions: list[TransactionResult] = field(default_factory=list)
 
     def decision_distribution(self) -> dict[str, int]:
         counter: Counter[str] = Counter()
@@ -141,6 +151,12 @@ class ReplayResults:
             "mean": statistics.fmean(latencies),
         }
 
+    def warmup_decision_distribution(self) -> dict[str, int]:
+        counter: Counter[str] = Counter()
+        for t in self.warmup_transactions:
+            counter[t.decision] += 1
+        return {band: counter.get(band, 0) for band in ("ALLOW", "REVIEW", "BLOCK")}
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "corpus": self.corpus,
@@ -156,6 +172,14 @@ class ReplayResults:
             "decision_distribution": self.decision_distribution(),
             "per_rule_fire_counts": self.per_rule_fire_counts(),
             "latency_ms": self.latency_summary(),
+            # Phase 7C.9 warmup summary. Aggregate decision counts on
+            # warmup records (excluded from the primary aggregates).
+            "warmup_summary": {
+                "requested": self.warmup_requested,
+                "responses_200": self.warmup_responses_200,
+                "errors": self.warmup_errors,
+                "decision_distribution": self.warmup_decision_distribution(),
+            },
             "error_details": self.error_details,
         }
 
@@ -219,22 +243,32 @@ async def _post_one(
     index: int,
     payload: dict[str, Any],
     results: ReplayResults,
+    *,
+    is_warmup: bool = False,
 ) -> None:
+    # Phase 7C.9: strip orchestrator-internal metadata fields
+    # (prefixed with `_`) before POSTing. BookingRequest is
+    # extra="forbid"; sending `_replay_role` would 422 the request.
+    booking_payload = {k: v for k, v in payload.items() if not k.startswith("_")}
     async with sem:
         start = time.monotonic()
         try:
             response = await client.post(
                 f"{base_url}/api/v1/shipments/booking/evaluate",
-                json=payload,
+                json=booking_payload,
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=10.0,
             )
         except (httpx.HTTPError, OSError) as exc:
             elapsed_ms = (time.monotonic() - start) * 1000
-            results.errors += 1
+            if is_warmup:
+                results.warmup_errors += 1
+            else:
+                results.errors += 1
             results.error_details.append(
                 {
                     "index": index,
+                    "role": "warmup" if is_warmup else "measurement",
                     "status_code": None,
                     "body_snippet": "",
                     "latency_ms": round(elapsed_ms, 3),
@@ -244,10 +278,14 @@ async def _post_one(
             return
     elapsed_ms = (time.monotonic() - start) * 1000
     if response.status_code != 200:
-        results.errors += 1
+        if is_warmup:
+            results.warmup_errors += 1
+        else:
+            results.errors += 1
         results.error_details.append(
             {
                 "index": index,
+                "role": "warmup" if is_warmup else "measurement",
                 "status_code": response.status_code,
                 "body_snippet": response.text[:500],
                 "latency_ms": round(elapsed_ms, 3),
@@ -256,17 +294,20 @@ async def _post_one(
         )
         return
     body = response.json()
-    results.responses_200 += 1
-    results.transactions.append(
-        TransactionResult(
-            request_id=body["request_id"],
-            decision=body["decision"],
-            score=float(body["score"]),
-            classification=body["classification"],
-            triggered_rules=list(body.get("triggered_rules", [])),
-            latency_ms=round(elapsed_ms, 3),
-        )
+    txn = TransactionResult(
+        request_id=body["request_id"],
+        decision=body["decision"],
+        score=float(body["score"]),
+        classification=body["classification"],
+        triggered_rules=list(body.get("triggered_rules", [])),
+        latency_ms=round(elapsed_ms, 3),
     )
+    if is_warmup:
+        results.warmup_responses_200 += 1
+        results.warmup_transactions.append(txn)
+    else:
+        results.responses_200 += 1
+        results.transactions.append(txn)
 
 
 async def run_replay(
@@ -286,9 +327,37 @@ async def run_replay(
         rules_file_recorded=rules_path_recorded,
     )
     sem = asyncio.Semaphore(concurrency)
+    # Phase 7C.9: split warmup and measurement records, process warmup
+    # FIRST and wait for completion before any measurement records hit
+    # the booking endpoint. Warmup's purpose is to populate the
+    # customer baseline before measurement evaluates against it; the
+    # phase barrier ensures correctness.
+    warmup_payloads: list[dict[str, Any]] = []
+    measurement_payloads: list[dict[str, Any]] = []
+    for payload in load_corpus(corpus, corpus_dir, limit=limit):
+        role = payload.get("_replay_role", "measurement")
+        if role == "warmup":
+            warmup_payloads.append(payload)
+        else:
+            measurement_payloads.append(payload)
+
     async with httpx.AsyncClient() as client:
+        # Warmup phase — complete fully before measurement starts.
+        if warmup_payloads:
+            warmup_tasks: list[asyncio.Task[None]] = []
+            for idx, payload in enumerate(warmup_payloads):
+                results.warmup_requested += 1
+                warmup_tasks.append(
+                    asyncio.create_task(
+                        _post_one(
+                            client, sem, base_url, token, idx, payload, results, is_warmup=True
+                        )
+                    )
+                )
+            await asyncio.gather(*warmup_tasks)
+        # Measurement phase.
         tasks: list[asyncio.Task[None]] = []
-        for idx, payload in enumerate(load_corpus(corpus, corpus_dir, limit=limit)):
+        for idx, payload in enumerate(measurement_payloads):
             results.requested += 1
             tasks.append(
                 asyncio.create_task(_post_one(client, sem, base_url, token, idx, payload, results))

@@ -323,9 +323,12 @@ def test_export_produces_three_ndjson_files(tmp_path: Path) -> None:
     assert (out_dir / "approved_jan_mar.ndjson").exists()
     assert (out_dir / "case2_sample.ndjson").exists()
     assert (out_dir / "case3_census.ndjson").exists()
-    assert counts["approved"] == 12
-    assert counts["case2"] == 8
-    assert counts["case3"] == 95
+    # Phase 7C.9 split: counts now per-corpus dict {warmup, measurement}.
+    assert counts["approved"]["measurement"] == 12
+    assert counts["case2"]["measurement"] == 8
+    assert counts["case3"]["measurement"] == 95
+    # Case-3 has warmup_enabled=False per CorpusSpec.
+    assert counts["case3"]["warmup"] == 0
 
 
 def test_export_approved_corpus_respects_sample_size(tmp_path: Path) -> None:
@@ -335,14 +338,15 @@ def test_export_approved_corpus_respects_sample_size(tmp_path: Path) -> None:
     out_dir = tmp_path / "out"
     _build_synthetic_db(db_path, approved_count=5, case2_count=8, case3_count=95)
     counts = export(db_path=db_path, out_dir=out_dir, seed=42)
-    assert counts["approved"] == 5
+    assert counts["approved"]["measurement"] == 5
 
 
 def test_export_case3_records_have_hardcoded_overrides(tmp_path: Path) -> None:
     """case-3 records must carry customer_registered_country='CA' and
     shipment.origin_via_carrier_dropoff=True regardless of the row's
-    actual customer_registered_address (which would otherwise tier-2
-    to 'CA' as well, but the property is contractual)."""
+    actual customer_registered_address. case-3 has warmup_enabled=
+    False (Phase 7C.9) — every record in the case3 file is a
+    measurement record."""
     db_path = tmp_path / "fr.db"
     out_dir = tmp_path / "out"
     _build_synthetic_db(db_path, approved_count=5, case2_count=5, case3_count=10)
@@ -350,6 +354,7 @@ def test_export_case3_records_have_hardcoded_overrides(tmp_path: Path) -> None:
     case3_lines = (out_dir / "case3_census.ndjson").read_text().splitlines()
     for line in case3_lines:
         payload = json.loads(line)
+        assert payload["_replay_role"] == "measurement"
         assert payload["customer"]["registered_country"] == "CA"
         assert payload["shipment"]["origin_via_carrier_dropoff"] is True
 
@@ -387,25 +392,94 @@ def test_export_currency_is_cad_on_every_record(tmp_path: Path) -> None:
             assert payload["shipment"]["currency"] == "CAD"
 
 
-def test_export_request_id_pattern_is_deterministic(tmp_path: Path) -> None:
+def test_export_request_id_pattern_includes_replay_role(tmp_path: Path) -> None:
+    """Phase 7C.9 update: request_id format is
+    `replay-{slug}-{role}-{idx}` where role is 'warmup' or
+    'measurement'. The role token preserves the
+    role-distinguishing semantics in the deterministic id."""
     db_path = tmp_path / "fr.db"
     out_dir = tmp_path / "out"
     _build_synthetic_db(db_path, approved_count=5, case2_count=5, case3_count=5)
     export(db_path=db_path, out_dir=out_dir, seed=42)
-    for slug, filename in (
-        ("approved", "approved_jan_mar.ndjson"),
-        ("case2", "case2_sample.ndjson"),
-        ("case3", "case3_census.ndjson"),
-    ):
-        for idx, line in enumerate((out_dir / filename).read_text().splitlines()):
-            assert json.loads(line)["request_id"] == f"replay-{slug}-{idx}"
+    for filename in ("approved_jan_mar.ndjson", "case2_sample.ndjson", "case3_census.ndjson"):
+        for line in (out_dir / filename).read_text().splitlines():
+            payload = json.loads(line)
+            role = payload["_replay_role"]
+            assert role in ("warmup", "measurement")
+            assert payload["request_id"].startswith("replay-")
+            # Format check: role token is present in request_id.
+            assert f"-{role}-" in payload["request_id"]
+
+
+def test_export_warmup_emitted_before_measurement_per_customer(tmp_path: Path) -> None:
+    """Phase 7C.9 warmup ordering contract: per-customer warmup records
+    appear BEFORE that customer's measurement record in the output
+    NDJSON. The orchestrator processes records in file order, so
+    warmups populate the customer baseline before measurement
+    records hit the booking endpoint."""
+    db_path = tmp_path / "fr.db"
+    out_dir = tmp_path / "out"
+    # Build a DB where case-2 fixture customers (case2-cust-N) ALSO
+    # have pre-March-31 approved bookings (warmup pool). The
+    # synthetic _build_synthetic_db doesn't do this by default;
+    # add approved rows that share customer_ids with case-2 rows.
+    _build_synthetic_db(db_path, approved_count=0, case2_count=3, case3_count=2)
+    import sqlite3 as _sqlite3
+
+    conn = _sqlite3.connect(db_path)
+    for cust_idx in range(3):  # case2-cust-0, -1, -2
+        for warmup_idx in range(2):  # 2 warmup records per customer
+            sid = f"warmup-{cust_idx}-{warmup_idx}"
+            conn.execute(
+                "INSERT INTO shipments (shipment_id, transaction_number, "
+                "booking_started_at, target_date, source, customer_id, "
+                "customer_registered_address, origin_address, destination_address, "
+                "total, source_ip, ingested_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    sid,
+                    f"tx-{sid}",
+                    f"2025-1{warmup_idx}-01 12:00:00",
+                    f"2025-1{warmup_idx}-01",  # pre-March-31 2026
+                    "api",
+                    f"case2-cust-{cust_idx}",
+                    "1 King St, Toronto, ON, M5H 2N2, CA",
+                    "1 King St, Toronto, ON, CA",
+                    "2 Bay St, Toronto, ON, CA",
+                    150.0,
+                    "203.0.113.10",
+                    "2025-10-01T12:00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO shipment_feedback VALUES (?,?,?,?)",
+                (sid, "approve", "2025-10-01T14:00:00", "auto-approved"),
+            )
+    conn.commit()
+    conn.close()
+
+    counts = export(db_path=db_path, out_dir=out_dir, seed=42)
+    assert counts["case2"]["measurement"] == 3
+    # Each case-2 customer has 2 warmup records -> 6 total warmup.
+    assert counts["case2"]["warmup"] == 6
+
+    # Verify ordering: in the case2 file, all warmup records appear
+    # before measurement records for each customer. The simpler
+    # contract: ALL warmup records appear before ALL measurement
+    # records (which the writer enforces by writing the warmup phase
+    # first).
+    case2_lines = (out_dir / "case2_sample.ndjson").read_text().splitlines()
+    roles = [json.loads(line)["_replay_role"] for line in case2_lines]
+    # All warmups come first, then all measurements.
+    assert roles == ["warmup"] * 6 + ["measurement"] * 3
 
 
 def test_export_payloads_validate_against_booking_request(tmp_path: Path) -> None:
     """The strided in-export validation runs every 100 records on the
     output. This test runs FULL validation across every emitted record
     as a stronger contract — catches schema drift between the export
-    shape and the consuming Pydantic model."""
+    shape and the consuming Pydantic model. The orchestrator-side
+    `_replay_role` metadata field is stripped before validation
+    (BookingRequest is extra='forbid')."""
     from app.models import BookingRequest
 
     db_path = tmp_path / "fr.db"
@@ -414,7 +488,12 @@ def test_export_payloads_validate_against_booking_request(tmp_path: Path) -> Non
     export(db_path=db_path, out_dir=out_dir, seed=42)
     for filename in ("approved_jan_mar.ndjson", "case2_sample.ndjson", "case3_census.ndjson"):
         for line in (out_dir / filename).read_text().splitlines():
-            BookingRequest.model_validate(json.loads(line))
+            payload = json.loads(line)
+            # Replay-metadata fields (prefixed with _) are stripped
+            # before the orchestrator POSTs to the production booking
+            # endpoint, which validates against BookingRequest.
+            booking_only = {k: v for k, v in payload.items() if not k.startswith("_")}
+            BookingRequest.model_validate(booking_only)
 
 
 def test_export_seed_determinism(tmp_path: Path) -> None:
