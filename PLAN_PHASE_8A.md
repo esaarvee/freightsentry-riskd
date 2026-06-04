@@ -166,7 +166,42 @@ Pre-flight checks passed: clean tree, `feat/refactor` branch, 30+ unpushed commi
 
 ## Notes for downstream batches
 
-- **8B**: V-4 found no `test_phase_*.py` files. The prompt's "milestone-numbered count tests by filename" pattern doesn't apply. 8B's actual surface area is milestone-count assertions WITHIN test bodies (`assert len(X) == N` for known field/rule lists). 8B.0 needs a content-based grep, not a filename-based one. Coverage tooling installed in 8A.0 supports the coverage-non-regression gate.
+- **8B**: V-4 found no `test_phase_*.py` files. The prompt's "milestone-numbered count tests by filename" pattern doesn't apply. 8B's actual surface area is phase-named test functions (13 found across 7 files) + milestone-count assertions in test bodies (`assert len(ALLOWED_CONTEXT_FIELDS) == 77`, `ruleset.rules == 81`, etc.). Coverage tooling installed in 8A.0 supports the coverage-non-regression gate.
 - **8C**: Note that `tests/integration/test_schema_golden.py` (added in 8A.0) serves as the long-term schema anti-drift gate. 8C.2's schema.md rewrite can reference this as the operational verification mechanism.
 - **8C**: MASTER_PLAN.md exists at repo root (361 lines; not in prompt). Handle in 8C alongside PLAN_PHASE_*.md and REPORT_PHASE_*.md deletions.
 - **8C**: REPORT_PHASE_7.md is missing. Per operator decision, 8C will generate it as part of the doc batch.
+
+---
+
+## Execution record
+
+### 8A.0 — golden schema baseline + anti-drift test gate (commit 41c3d90)
+- Venv set up at `.venv/`; project + test/dev extras installed via `pip install -e '.[test,dev]'`.
+- Postgres 16-alpine container reset; alembic upgrade head against the 11-migration chain succeeded.
+- `tests/golden/schema.sql` committed: 422 lines (down from ~1278 raw pg_dump) under the canonical normalizer (drop blank/comment/psql-metacommand lines, sort).
+- `tests/integration/test_schema_golden.py` committed: dual-path pg_dump capture (host binary preferred, docker compose exec fallback, skip otherwise), Python normalizer matching the spec, unified-diff failure output with regeneration instructions in the module docstring.
+- Reviewer panel cleanest tier: senior-engineer (SHIP IT) + code-flow (CLEAN) + test-reviewer (ACTUALLY GOOD). First-pass clean.
+
+### 8A.1 — atomic migration squash 11 → 5 (commit 4fec9bb)
+- 11 old migrations deleted; 5 new migrations added.
+- Schema-equivalence verified empirically: `pytest tests/integration/test_schema_golden.py` passes against fresh Postgres after `alembic upgrade head` against the new chain.
+- Round-trip verified: `alembic downgrade base && alembic upgrade head` succeeds on a fresh DB with no errors.
+- Net diff: +812 / -1117 lines (17 files changed).
+- Pre-existing test failure surfaced and logged to `.claude/BUGS.md` (medium severity): `tests/integration/test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2` asserts 2 baseline-dependent rules that don't fire at HEAD. Verified via `git stash --include-untracked` + run against the 11-migration chain — fails identically. NOT caused by the squash.
+- Reviewer panel cleanest tier: db-reviewer (SHIP IT) + senior-engineer (SHIP IT) + security-auditor (LOW RISK / CLEAN) + code-flow (CLEAN). First-pass clean.
+
+### 8A.2 — migration revision-ID sweep (this commit)
+- `grep -rn '"0001"|"0002"|...|"0011"|alembic_command|command\.upgrade|command\.downgrade' app/ tests/ scripts/` returned **zero matches**.
+- V-5 prediction (test sweep would be a no-op) confirmed: no test or app code references the old revision IDs by literal string.
+- Migration round-trip tests use `head` and relative pointers (no hardcoded revision IDs to update).
+
+### 8A.3 — batch close (this commit)
+- All acceptance criteria met:
+  1. 5 alembic migration files in `alembic/versions/`; 0 of the original 11 remaining. ✓
+  2. `alembic upgrade head` against fresh Postgres succeeds. ✓
+  3. `tests/integration/test_schema_golden.py` passes (byte-equivalent under canonical normalizer). ✓
+  4. `alembic downgrade base && alembic upgrade head` succeeds. ✓
+  5. `pytest tests/` returns 1118 passes + 1 pre-existing fail (logged to BUGS.md, not caused by squash). Net test count delta: +1 (test_schema_golden added in 8A.0). ✓
+  6. `tests/golden/schema.sql` committed; reflects post-squash schema. ✓
+- Carry-forward to 8B: test_case_2 failure investigation (or post-launch defer); coverage baseline capture in 8B.0; phase-named function renames across 13 functions in 7 files.
+- Carry-forward to 8C: tests/integration/test_schema_golden.py as the schema anti-drift gate; tests/coverage_baseline.txt (TBD in 8B.0) as the coverage anti-drift anchor. Both surface in 8C.4 system-status.md "Anti-drift gates" section.
