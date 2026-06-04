@@ -1,39 +1,55 @@
 #!/usr/bin/env python3
-"""Phase 6C replay-validation orchestrator.
+"""Replay-validation orchestrator (Phase 7A.1 rewrite).
 
-Reads a corpus NDJSON file from scripts/replay/data/, POSTs each
-payload to the local freightsentry-riskd booking endpoint, captures
-the decision + score + triggered_rules + latency, and writes
-aggregated results to a JSON file. Throttled at 50 concurrent
-in-flight requests (5x pool max 10; matches Phase 5 load-test
-cadence).
+Reads a corpus NDJSON file from an operator-supplied directory, POSTs
+each payload to the local freightsentry-riskd booking endpoint, captures
+the decision + score + triggered_rules + latency, and writes AGGREGATE
+results (decision counts, per-rule fire counts, latency percentiles) to
+a JSON file. Throttled at 50 concurrent in-flight requests by default.
 
-The corpus files are NDJSON (one BookingRequest payload per line) —
-chosen over JSON-array in 6C.1 to stay under the pre-commit large-
-files cap (approved corpus is 5.8 MB compact). Read line by line
-via `for line in f`, NOT json.load.
+Per Phase 7's "aggregate stats only" policy, this orchestrator does NOT
+emit per-record content in the output JSON. Per-record content (request
+id, triggered_rules list per booking) stays in memory during the run
+and is summarized into aggregates before serialization.
+
+The corpus files are NDJSON (one BookingRequest payload per line). The
+corpus directory is supplied via --corpus-dir (no hardcoded path).
+Operator typically populates the directory via the Phase 7 export
+script (scripts/calibration/export_from_freight_risk.py) writing to
+/tmp/riskd-replay/.
 
 Idempotency: request_id is deterministic per-corpus per-index
 (replay-{corpus}-{idx}), so a second run against the same tenant
-returns the cached decision via the Phase 5 idempotency-replay
-path. Re-runs are non-destructive.
+returns the cached decision via the existing idempotency-replay path.
+Re-runs are non-destructive.
 
-Usage:
-    docker compose up -d
+Usage (single replay):
     python scripts/replay_validation.py \\
         --corpus {approved|case2|case3} \\
-        --base-url http://localhost:8000 \\
+        --corpus-dir /tmp/riskd-replay/ \\
         --tenant-token $REPLAY_TENANT_TOKEN \\
-        --out docs/replay-results-{corpus}.json \\
+        --out /tmp/result.json \\
+        [--rules app/rules.yaml] \\
+        [--base-url http://localhost:8000] \\
         [--concurrency 50] \\
         [--limit N]
 
-Output JSON shape (consumed by 6C.4 docs/replay-validation.md):
+Usage (compare two pre-computed result files):
+    python scripts/replay_validation.py --compare RESULT_A.json RESULT_B.json
+
+--rules records WHICH rule file the operator believes the server has
+loaded; it is NOT a runtime swap (the FastAPI app loads rules at
+lifespan startup). Variant orchestration (Phase 7B run_variants.py)
+restarts the app between variants and passes the variant path via
+--rules so the output JSON carries the variant identity for audit.
+
+Output JSON shape (aggregate-only):
     {
         "corpus": str,
         "started_at": iso8601 str,
         "finished_at": iso8601 str,
         "throttle_concurrency": int,
+        "rules_file_recorded": str,
         "totals": {
             "requested": int,
             "responses_200": int,
@@ -42,24 +58,12 @@ Output JSON shape (consumed by 6C.4 docs/replay-validation.md):
         "decision_distribution": {"ALLOW": int, "REVIEW": int, "BLOCK": int},
         "per_rule_fire_counts": {rule_name: int, ...},
         "latency_ms": {"p50": float, "p95": float, "p99": float, "mean": float},
-        "per_transaction": [
-            {
-                "request_id": str,
-                "decision": str,
-                "score": float,
-                "classification": str,
-                "triggered_rules": [str, ...],
-                "latency_ms": float,
-            },
+        "error_details": [
+            {"index": int, "status_code": int | null, "body_snippet": str,
+             "latency_ms": float, "error": str | null},
             ...
         ]
     }
-
-The per_transaction array is retained for the approved corpus
-specifically (FPR breakdown enumerates contributing rules per
-record per the Phase 6 prompt's strict-reading methodology). For
-case-2 / case-3 the array is also retained — orchestrator does NOT
-prune; downstream 6C.4 markdown can summarize.
 """
 
 from __future__ import annotations
@@ -79,8 +83,6 @@ from typing import Any
 
 import httpx
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_CORPUS_DIR = _REPO_ROOT / "scripts" / "replay" / "data"
 _CORPUS_FILES: dict[str, str] = {
     "approved": "approved_jan_mar.ndjson",
     "case2": "case2_sample.ndjson",
@@ -104,6 +106,7 @@ class ReplayResults:
     started_at: str
     finished_at: str = ""
     throttle_concurrency: int = 50
+    rules_file_recorded: str = ""
     requested: int = 0
     responses_200: int = 0
     errors: int = 0
@@ -114,7 +117,6 @@ class ReplayResults:
         counter: Counter[str] = Counter()
         for t in self.transactions:
             counter[t.decision] += 1
-        # Ensure all three bands are present even when zero.
         return {band: counter.get(band, 0) for band in ("ALLOW", "REVIEW", "BLOCK")}
 
     def per_rule_fire_counts(self) -> dict[str, int]:
@@ -145,6 +147,7 @@ class ReplayResults:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "throttle_concurrency": self.throttle_concurrency,
+            "rules_file_recorded": self.rules_file_recorded,
             "totals": {
                 "requested": self.requested,
                 "responses_200": self.responses_200,
@@ -153,17 +156,6 @@ class ReplayResults:
             "decision_distribution": self.decision_distribution(),
             "per_rule_fire_counts": self.per_rule_fire_counts(),
             "latency_ms": self.latency_summary(),
-            "per_transaction": [
-                {
-                    "request_id": t.request_id,
-                    "decision": t.decision,
-                    "score": t.score,
-                    "classification": t.classification,
-                    "triggered_rules": t.triggered_rules,
-                    "latency_ms": t.latency_ms,
-                }
-                for t in self.transactions
-            ],
             "error_details": self.error_details,
         }
 
@@ -175,15 +167,17 @@ def _percentile(sorted_samples: list[float], p: float) -> float:
     return sorted_samples[k]
 
 
-def load_corpus(corpus: str, limit: int | None = None) -> Iterator[dict[str, Any]]:
+def load_corpus(
+    corpus: str, corpus_dir: Path, limit: int | None = None
+) -> Iterator[dict[str, Any]]:
     """Yield BookingRequest payloads line-by-line from the NDJSON corpus
-    file. Does NOT use json.load (which would parse the whole stream as
-    a single JSON document)."""
+    file located at `corpus_dir / _CORPUS_FILES[corpus]`. Streams via
+    `for line in f`; does NOT use json.load on the whole file."""
     filename = _CORPUS_FILES.get(corpus)
     if filename is None:
         msg = f"unknown corpus {corpus!r}; expected one of {sorted(_CORPUS_FILES)}"
         raise ValueError(msg)
-    path = _CORPUS_DIR / filename
+    path = corpus_dir / filename
     if not path.exists():
         msg = f"corpus file missing: {path} — run the freight_risk export script first"
         raise FileNotFoundError(msg)
@@ -199,11 +193,30 @@ def load_corpus(corpus: str, limit: int | None = None) -> Iterator[dict[str, Any
                 return
 
 
+def _verify_corpus_dir(corpus_dir: Path) -> None:
+    """Fail-fast if `corpus_dir` does not exist or any of the three
+    expected NDJSON files is missing. Raises FileNotFoundError with a
+    per-file message so the operator can fix the export step."""
+    if not corpus_dir.is_dir():
+        msg = f"--corpus-dir does not exist or is not a directory: {corpus_dir}"
+        raise FileNotFoundError(msg)
+    missing = [
+        filename for filename in _CORPUS_FILES.values() if not (corpus_dir / filename).exists()
+    ]
+    if missing:
+        msg = (
+            f"--corpus-dir {corpus_dir} missing files: {missing}. "
+            "Run scripts/calibration/export_from_freight_risk.py to populate."
+        )
+        raise FileNotFoundError(msg)
+
+
 async def _post_one(
     client: httpx.AsyncClient,
     sem: asyncio.Semaphore,
     base_url: str,
     token: str,
+    index: int,
     payload: dict[str, Any],
     results: ReplayResults,
 ) -> None:
@@ -221,9 +234,11 @@ async def _post_one(
             results.errors += 1
             results.error_details.append(
                 {
-                    "request_id": payload.get("request_id", "unknown"),
-                    "error": f"{type(exc).__name__}: {exc}",
+                    "index": index,
+                    "status_code": None,
+                    "body_snippet": "",
                     "latency_ms": round(elapsed_ms, 3),
+                    "error": f"{type(exc).__name__}: {exc}",
                 }
             )
             return
@@ -232,10 +247,11 @@ async def _post_one(
         results.errors += 1
         results.error_details.append(
             {
-                "request_id": payload.get("request_id", "unknown"),
+                "index": index,
                 "status_code": response.status_code,
-                "body": response.text[:500],
+                "body_snippet": response.text[:500],
                 "latency_ms": round(elapsed_ms, 3),
+                "error": None,
             }
         )
         return
@@ -256,6 +272,8 @@ async def _post_one(
 async def run_replay(
     *,
     corpus: str,
+    corpus_dir: Path,
+    rules_path_recorded: str,
     base_url: str,
     token: str,
     concurrency: int,
@@ -265,26 +283,100 @@ async def run_replay(
         corpus=corpus,
         started_at=datetime.now(UTC).isoformat(),
         throttle_concurrency=concurrency,
+        rules_file_recorded=rules_path_recorded,
     )
     sem = asyncio.Semaphore(concurrency)
     async with httpx.AsyncClient() as client:
         tasks: list[asyncio.Task[None]] = []
-        for payload in load_corpus(corpus, limit=limit):
+        for idx, payload in enumerate(load_corpus(corpus, corpus_dir, limit=limit)):
             results.requested += 1
             tasks.append(
-                asyncio.create_task(_post_one(client, sem, base_url, token, payload, results))
+                asyncio.create_task(_post_one(client, sem, base_url, token, idx, payload, results))
             )
         await asyncio.gather(*tasks)
     results.finished_at = datetime.now(UTC).isoformat()
     return results
 
 
+def _format_pct(num: float, denom: int) -> str:
+    if denom <= 0:
+        return "n/a"
+    return f"{(num / denom) * 100:.2f}%"
+
+
+def compare_results(path_a: Path, path_b: Path) -> dict[str, Any]:
+    """Compute a delta report between two pre-computed result files.
+
+    Emits per-band share deltas, per-rule fire-rate deltas, and a one-
+    line headline summary. Does NOT run any new replays.
+    """
+    a = json.loads(path_a.read_text(encoding="utf-8"))
+    b = json.loads(path_b.read_text(encoding="utf-8"))
+    requested_a = a["totals"]["requested"]
+    requested_b = b["totals"]["requested"]
+    dist_a = a["decision_distribution"]
+    dist_b = b["decision_distribution"]
+    rules_a = a["per_rule_fire_counts"]
+    rules_b = b["per_rule_fire_counts"]
+    all_rules = sorted(set(rules_a) | set(rules_b))
+    per_rule_delta = []
+    for rule in all_rules:
+        a_count = rules_a.get(rule, 0)
+        b_count = rules_b.get(rule, 0)
+        a_share = (a_count / requested_a) if requested_a > 0 else 0.0
+        b_share = (b_count / requested_b) if requested_b > 0 else 0.0
+        per_rule_delta.append(
+            {
+                "rule": rule,
+                "a_count": a_count,
+                "b_count": b_count,
+                "a_share_pct": round(a_share * 100, 2),
+                "b_share_pct": round(b_share * 100, 2),
+                "delta_pp": round((b_share - a_share) * 100, 2),
+            }
+        )
+    per_rule_delta.sort(key=lambda r: abs(r["delta_pp"]), reverse=True)
+    return {
+        "a": {
+            "path": str(path_a),
+            "corpus": a.get("corpus"),
+            "rules_file_recorded": a.get("rules_file_recorded", ""),
+            "requested": requested_a,
+            "decision_distribution_share": {
+                k: _format_pct(v, requested_a) for k, v in dist_a.items()
+            },
+        },
+        "b": {
+            "path": str(path_b),
+            "corpus": b.get("corpus"),
+            "rules_file_recorded": b.get("rules_file_recorded", ""),
+            "requested": requested_b,
+            "decision_distribution_share": {
+                k: _format_pct(v, requested_b) for k, v in dist_b.items()
+            },
+        },
+        "per_rule_delta": per_rule_delta,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--corpus", required=True, choices=sorted(_CORPUS_FILES))
+    ap.add_argument(
+        "--compare",
+        nargs=2,
+        type=Path,
+        metavar=("RESULT_A", "RESULT_B"),
+        help=(
+            "Compare two pre-computed result JSON files; print a delta report "
+            "to --out (default stdout). When set, no replay runs."
+        ),
+    )
+    ap.add_argument("--corpus", choices=sorted(_CORPUS_FILES))
+    ap.add_argument("--corpus-dir", type=Path)
+    ap.add_argument("--rules", type=Path, default=Path("app/rules.yaml"))
     ap.add_argument("--base-url", default="http://localhost:8000")
-    ap.add_argument("--tenant-token", required=True)
-    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--tenant-token")
+    ap.add_argument("--out", type=Path)
     ap.add_argument("--concurrency", type=int, default=50)
     ap.add_argument(
         "--limit",
@@ -294,14 +386,51 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
+    if args.compare is not None:
+        path_a, path_b = args.compare
+        if not path_a.exists():
+            print(f"--compare: file not found: {path_a}", file=sys.stderr)
+            return 2
+        if not path_b.exists():
+            print(f"--compare: file not found: {path_b}", file=sys.stderr)
+            return 2
+        report = compare_results(path_a, path_b)
+        serialized = json.dumps(report, indent=2)
+        if args.out is not None:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(serialized)
+        else:
+            print(serialized)
+        return 0
+
+    if args.corpus is None:
+        print("--corpus is required when not in --compare mode", file=sys.stderr)
+        return 2
+    if args.corpus_dir is None:
+        print("--corpus-dir is required when not in --compare mode", file=sys.stderr)
+        return 2
+    if args.tenant_token is None:
+        print("--tenant-token is required when not in --compare mode", file=sys.stderr)
+        return 2
+    if args.out is None:
+        print("--out is required when not in --compare mode", file=sys.stderr)
+        return 2
     if args.concurrency <= 0:
         print("--concurrency must be > 0", file=sys.stderr)
-        return 1
+        return 2
+
+    try:
+        _verify_corpus_dir(args.corpus_dir)
+    except FileNotFoundError as exc:
+        print(f"corpus error: {exc}", file=sys.stderr)
+        return 2
 
     try:
         results = asyncio.run(
             run_replay(
                 corpus=args.corpus,
+                corpus_dir=args.corpus_dir,
+                rules_path_recorded=str(args.rules),
                 base_url=args.base_url.rstrip("/"),
                 token=args.tenant_token,
                 concurrency=args.concurrency,

@@ -254,3 +254,32 @@ an accidental <repo>/tmp/ directory ever appearing) but the rationale
 differs from the other three entries.
 Suggested action: optional — Phase 8 doc consolidation could note this
 distinction explicitly. No production-correctness concern.
+
+## 2026-06-04 — replay orchestrator narrow exception handling on success path
+
+Discovered by: senior-engineer + code-flow reviewers during PLAN_PHASE_7A.md 7A.1 panel
+Location: scripts/replay_validation.py _post_one ~lines 245-269
+Severity: low (operational, not correctness)
+Observation: _post_one catches (httpx.HTTPError, OSError) for the
+network request, but the subsequent body.json() + body["request_id"]
+field access path is NOT caught. A malformed 200 response (JSON decode
+error) or unexpected response shape (KeyError on missing field) would
+propagate out of the task and through asyncio.gather, aborting the
+whole replay. Over a 10K-record corpus this is operationally brittle.
+Suggested action: widen the except clause (or add a second one) to
+include json.JSONDecodeError, KeyError, ValueError and route the
+failure into error_details just like the HTTP-error branch. Pure
+operational hardening; no scope creep for 7A.1 contract.
+
+## 2026-06-04 — compare_results emits per-rule delta_pp but not decision-band delta_pp
+
+Discovered by: senior-engineer reviewer during PLAN_PHASE_7A.md 7A.1 panel
+Location: scripts/replay_validation.py compare_results ~lines 307-359
+Severity: low (operator can subtract shares by eye)
+Observation: The per_rule_delta entries carry delta_pp (b_share - a_share)
+in percentage-points, but decision_distribution_share for a/b emit
+percentage strings only — no delta computed. Plan said "FPR change,
+recall change, per-rule fire rate change". Operator can compute the
+3 decision-band deltas by inspection.
+Suggested action: when 7B variants finalize, optionally add a
+decision_distribution_delta_pp block to compare_results output.
