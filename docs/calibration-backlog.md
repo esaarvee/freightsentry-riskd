@@ -28,6 +28,18 @@ pattern persists on real traffic, evaluate (a) weight reduction, or
 (b) compound the trigger with route deviation rather than IP-origin pair
 novelty alone (e.g. require a second signal before the rule contributes).
 
+**PARTIAL** (Phase 7C.8, 2026-06-04): weight reduced 0.30 → 0.15.
+The rule's fire rate is intentionally preserved (Phase 7 amendment
+clarified the rule is pair-novelty on (origin, ip_country) per
+customer; legitimate freight customers' origin expansion is the
+dominant pattern). Its contribution to scoring drops via the
+weight reduction; case-2 detection load shifted to
+`api_booking_from_unfamiliar_asn` (7C.7). Outstanding post-launch
+work: the rule's pair-novelty SEMANTICS may need additional
+refinement (e.g., decouple origin from IP-country; require a
+second signal). Not RESOLVED — semantic refinement still
+deferred to post-launch real-data observation.
+
 ---
 
 ## 2. Approved-corpus FPR — `unknown_destination_address` (65% fire rate)
@@ -40,6 +52,12 @@ fraud and legitimate novel destinations.
 evaluate weight reduction OR compounding with other signals before
 contributing (e.g. only contribute when paired with a value or IP
 anomaly).
+
+**PARTIAL** (Phase 7C.8, 2026-06-04): weight reduced 0.20 → 0.10.
+Same shape as item 1: fire rate preserved; contribution to scoring
+reduced; case-2 detection load shifted to the ASN-deviation rule.
+Semantic refinement (compound with value or IP anomaly) remains
+post-launch work.
 
 ---
 
@@ -247,6 +265,60 @@ Phase E):
   200ms ceiling breach.
 
 **Deferred action**: only intervenes if monitoring thresholds trigger.
+
+---
+
+## 16. Customer baseline cold-start ramp at production launch (Phase 7C.10)
+
+**Status**: documented; ongoing post-launch observation.
+
+**Observation**: At production launch all `customer_baselines` rows
+start empty (`ip_asn_stats == '{}'` etc.). The new
+`api_booking_from_unfamiliar_asn` rule (Phase 7C.7) has a cold-start
+gate `customer_observations >= 10` inside its derivation; the rule
+cannot fire until each customer has accumulated ≥10 bookings. The
+new case-3b asymmetric compound (Phase 7C.2) has the inverse
+relationship (cold-start gate `< 10` inside the derivation) and IS
+expected to fire on brand-new-customer fraud at launch.
+
+Detection ramp for case-2:
+- Day 1: 0% case-2 detection by the new ASN rule.
+- Weeks: partial detection (customers cross the 10-observation
+  gate).
+- Months: full detection (per-customer ASN baselines stable).
+
+**Deferred action**: monitor `customer_baselines` population rate
+during Day 1-30 (production-launch checklist Phase E). If the ramp
+takes longer than expected (e.g., low-volume tenants struggle to
+cross the gate), revisit either (a) lowering the gate to >= 5,
+(b) seeding baselines from prior production observations (no
+freight_risk data — only post-launch production observations), or
+(c) adding a complementary rule that catches case-2-style attacks
+on cold-start customers via different signals.
+
+---
+
+## 17. Tenant-bulk-import of historical bookings into customer_baselines
+
+**Status**: deferred to post-launch architectural workstream;
+explicit operator decision required.
+
+**Context**: Phase 7's no-freight-risk-data-in-the-repo policy
+prohibits embedding historical bookings into the riskd repo. A
+production-tenant onboarding flow that bulk-imports the tenant's
+own historical bookings (from their own systems, not from
+freight_risk) would give Day-1 detection capability — case-2 rule
+fires immediately on established customers — but introduces
+architectural complexity (idempotency, schema mapping, replay-vs-
+real distinction, audit trail).
+
+**Deferred action**: post-launch decision. Without bulk-import,
+case-2 detection capability ramps per item 16 above. With
+bulk-import, the architecture needs design for: tenant data
+ingest format, replay-record vs production-record discrimination
+in audit logs, schema-mapping per-tenant ETL, transactional
+guarantees during bulk-load, and decision-cache implications
+(should bulk-imported bookings populate the decisions table?).
 
 ---
 

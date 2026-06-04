@@ -135,6 +135,22 @@
       calibration backlog.
 - [ ] Calibration-backlog rules' fire rates observed; pattern compared
       to `docs/replay-validation.md` expectations.
+- [ ] **Customer baseline cold-start ramp** (Phase 7C.10): monitor
+      `customer_baselines` ASN-population rate. The new
+      `api_booking_from_unfamiliar_asn` rule (Phase 7C.7) requires
+      per-customer `customer_observations >= 10` to fire; at
+      launch all baselines start empty so case-2 detection
+      capability ramps with booking accumulation. Day-1 case-2
+      detection by this rule will be 0% by design.
+      - Query to track: `SELECT COUNT(*) FROM customer_baselines
+        WHERE ip_asn_stats <> '{}'::jsonb` (number of customers
+        with at least one ASN observation; ip_asn_stats column is
+        jsonb NOT NULL DEFAULT '{}').
+      - Expect 0% at Day 1; growth over Days 1-30 as customers
+        cross the 10-observation gate.
+      - If the ramp is slower than expected (e.g., low-volume
+        tenants), surface to calibration-backlog item 16 for
+        post-launch evaluation.
 
 ---
 

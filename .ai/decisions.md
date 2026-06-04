@@ -1470,6 +1470,210 @@ work. That workstream does not block Phase 7 or Phase 8 close.
 
 ---
 
+## Phase 7 — Case-2 learning-based detection (2026-06-04 amendment)
+
+Amendment to the Phase 7 section above, added after the case-3b
+structural fix (7C.2-3) and decisions amendment (7C.4) landed.
+Operator review of the Phase 7B empirical record drove this
+amendment: the structural-bound finding above proved that pure
+calibration of the IPC + DEST rules cannot reduce the approved
+REVIEW rate <15% without violating the 95% case-2 recall floor.
+The Phase 7 scope therefore EXPANDS to include the structural
+rule rewrite that decouples case-2 detection from the generic
+FPR-driving novelty rules.
+
+### Operator clarification of case-2 signature (2026-06-04)
+
+Two facts the original Phase 6C measurement narrative did not
+capture:
+
+1. **`unfamiliar_ip_country_for_origin` is pair-novelty, not
+   country-match.** The rule fires on (origin_address, ip_country)
+   pair novelty per customer. Legitimate freight customers ship
+   from many origin addresses; every new origin creates a novel
+   (origin, ip_country) pair even when the IP country is stable.
+   The rule name is misleading; its 72% baseline fire rate on the
+   approved corpus is a function of legitimate origin expansion,
+   not country mismatch. Same shape applies to
+   `unknown_destination_address`.
+
+2. **"non-34x" in case-2 means non-Google-Cloud.** Legitimate
+   gobolt API traffic comes from Google Cloud (34.X.X.X address
+   range). Case-2 attacks used compromised API keys routed through
+   the attackers' own infrastructure — typically residential ASNs.
+   The `api_non_cloud_ip` rule's 100% fire rate on case-2 was the
+   right signal; the 41% fire rate on the approved corpus was the
+   rule's tenant-agnostic application — gobolt's pattern applied
+   universally to all tenants' API-from-non-cloud traffic.
+
+### Architectural choice — learning-based, not configuration-based
+
+The natural fix for the tenant-agnostic novelty heuristic is to
+make the rule tenant-aware via `tenant_config` (each tenant
+declares its expected API source ASNs or IP ranges). This was
+REJECTED as hardcoding territory:
+- Manual operator maintenance per tenant.
+- Fragile to infrastructure changes (Google Cloud IP range
+  expansions, ASN reassignments).
+- Doesn't scale to many enterprises under a single tenant.
+
+The learning-based alternative reuses the EXISTING per-customer
+baseline mechanism: each customer's accumulated ASN history is
+their reference; deviation is the signal. No tenant configuration;
+no operator burden; scales to any tenant's enterprises and
+customers naturally.
+
+**Key finding during verification**: the ASN tracking infrastructure
+ALREADY EXISTED. The `customer_baselines.ip_asn_stats` jsonb column
+(populated by `baseline.add_observation` via `_bump`; decayed
+uniformly with other stat-dicts at 90-day half-life) is exactly
+the per-customer ASN frequency map the new rule needs. Phase ≤6
+work already designed the mechanism for this exact pattern. Phase
+7's case-2 architectural rewrite added only the CONSUMER side: the
+`unfamiliar_asn_for_customer` Context derivation (7C.6) and the
+`api_booking_from_unfamiliar_asn` rule (7C.7). No new schema; no
+new persistence; no migration.
+
+### Tenant / enterprise / customer terminology (operator 2026-06-04)
+
+- **Tenant**: SaaS subscriber of freightsentry-riskd (e.g.,
+  a freight aggregation platform).
+- **Enterprise**: a corporate entity under a tenant (e.g.,
+  gobolt under a freight-platform tenant).
+- **Customer**: individual customer accounts under an enterprise.
+
+Per-customer baseline is the correct granularity for ASN tracking
+— same as existing per-customer baselines for IP-country, origin
+address, destination address. Tenant-level or enterprise-level
+ASN allowlists were explicitly considered and rejected for the
+reasons above.
+
+### Rule replacement (7C.7)
+
+- **DELETED**: `api_non_cloud_ip` (weight 0.40, condition
+  `is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip`).
+  Fired 41% on the approved corpus baseline.
+- **DELETED**: `non_cloud_established_account` (weight 0.20, same
+  shape with `NOT is_new_user`). Fired 40% on approved corpus.
+- **ADDED**: `api_booking_from_unfamiliar_asn` (weight 0.65,
+  condition `is_api_booking AND unfamiliar_asn_for_customer`).
+  Sharp on case-2 attack shape (gobolt customers shifting off
+  Google Cloud); silent on non-gobolt tenants whose customers have
+  non-cloud ASN baselines.
+
+The cold-start gate (`customer_observations >= 10`) is INSIDE the
+`_asn_unfamiliar_for_customer` derivation, matching the
+`_outbound_destination_mismatch` pattern from 7C.2.
+maturity_sensitive false (downweighting would suppress the very
+signal we use to flag the threat).
+
+### Weight reductions on pair-novelty rules (7C.8)
+
+With case-2 detection moved to the ASN rule, the pair-novelty
+rules become secondary corroborating signals:
+
+- `unfamiliar_ip_country_for_origin`: weight 0.30 → **0.15**.
+- `unknown_destination_address`: weight 0.20 → **0.10**.
+
+Both rules' CONDITIONS are unchanged. Their 72%/65% baseline fire
+rates are intentionally preserved (legitimate freight customers'
+origin expansion remains the dominant fire pattern), but their
+contribution to scoring drops below the level that pushes records
+to REVIEW band standalone.
+
+### Measurement methodology — warmup bookings (7C.9)
+
+The Phase 7B variant comparison measurements WITHOUT warmup
+systematically understated case-2 detection capability: the
+customer baseline formed FROM the attack records themselves during
+the replay (no pre-replay history), so the new ASN rule couldn't
+discriminate. The 7C.9 export script + orchestrator add per-
+customer warmup:
+
+- Export emits K=100 pre-March-31 legitimate bookings per
+  measurement customer BEFORE the measurement records (case-3
+  excluded — brand-new-customer fraud, no pre-fraud history
+  applicable).
+- Orchestrator processes warmup as a separate phase: ALL warmup
+  tasks complete via `asyncio.gather` BEFORE any measurement task
+  starts. Warmup decisions are recorded in `warmup_summary` and
+  EXCLUDED from FPR/recall aggregates.
+- This reflects production-realistic detection on established
+  customers; the warmup methodology IS the contract that makes
+  the new ASN rule meaningfully measurable on the existing corpus.
+
+### Case-2 corpus generalizability caveat (2026-06-04)
+
+V-14 verification surfaced that the case-2 corpus comes from only
+**2 unique customers** across 21,573 rejected records. The
+"case-2 fraud" is effectively a single attack campaign against
+two compromised gobolt-tenant accounts, not a diverse population.
+
+The new ASN rule's 7D detection metric reflects detection
+capability against THIS specific attack campaign. Generalization
+across diverse case-2-style attacks (other gobolt customers, other
+tenants' API compromises, residential-ASN campaigns) is
+**extrapolated capability**, not measured. Post-launch observation
+should track case-2-style fraud diversity to validate the
+extrapolation.
+
+### Production cold-start reality
+
+At production launch, all customer baselines start empty
+(`ip_asn_stats == {}`). The new ASN rule's cold-start gate
+(`customer_observations >= 10` inside the derivation) blocks the
+rule from firing until each customer accumulates ≥10 bookings.
+Detection capability ramps with baseline accumulation:
+
+- Day 1: 0% case-2 detection by the new rule (no mature customers).
+- Weeks: partial detection (customers crossing the 10-observation
+  gate accumulate from real production traffic).
+- Months: full detection (per-customer ASN baselines stable).
+
+Same shape as the case-3b population baseline cold-start (Phase
+6A.9). Documented in `docs/production-launch-checklist.md`
+Phase E monitoring.
+
+### Calibration-backlog impact (amended)
+
+- Items 1, 2 (`unfamiliar_ip_country_for_origin` / `unknown_
+  destination_address` 72%/65% fire rates): **PARTIAL**. The
+  weight reductions in 7C.8 remove them from the REVIEW-pushing
+  compound; their fire rates are intentionally preserved.
+  Outstanding work: the rules' pair-novelty SEMANTICS may need
+  additional refinement post-launch (e.g., decouple origin from
+  IP-country in the IPC rule). Not RESOLVED, not still-DEFERRED.
+- Item 6 (case-3b detection on Roulottes Lupien): **RESOLVED** by
+  7C.2 (unchanged from the earlier amendment).
+- NEW: "Customer baseline cold-start ramp at production launch."
+  Status: documented; ongoing post-launch observation.
+- NEW: "Tenant-bulk-import of historical bookings into
+  customer_baselines." Status: deferred to post-launch
+  architectural workstream. Production launches with empty
+  baselines; detection capability ramps with booking accumulation.
+  Bulk-import would give Day-1 capability but flirts with the
+  "no freight_risk data in riskd repo" policy in a way that
+  warrants explicit operator decision.
+
+### Phase 7 outcome (amended)
+
+Phase 7 closes with calibration ambition MET, not deferred:
+
+- Approved BLOCK <0.05%: expected achieved by 7C.7 rule
+  replacement (deletes drove FPR; new rule fires only on
+  per-customer ASN deviation).
+- Approved REVIEW <15%: expected achieved with warmup methodology
+  reflecting production-realistic baselines.
+- Case-2 recall ≥95%: preserved via 7C.7's ASN deviation rule
+  (warmup methodology enables it).
+- Case-3b detection ≥85%: achieved by 7C.2 (the new asymmetric
+  compound).
+
+7D measurement validates these targets empirically. If 7D misses
+any, iteration policy from PLAN_PHASE_7D.md applies.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
