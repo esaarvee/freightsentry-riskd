@@ -650,3 +650,52 @@ The reproducibility contract is: re-run
 `scripts/calibration/export_from_freight_risk.py` (deterministic
 under seed=42 against the same freight_risk DB snapshot) + re-run
 `scripts/calibration/run_variants.py`.
+
+---
+
+## Phase 7C rule catalogue state (2026-06-04)
+
+Per the Phase 7B variant-comparison empirical record (above) and
+operator decision: **no FPR-rule calibration lands in 7C.1**. The
+two FPR-driving rules (`unfamiliar_ip_country_for_origin`,
+`unknown_destination_address`) retain their baseline weights and
+conditions. Calibration-backlog items 1 + 2 remain deferred to
+post-launch.
+
+The 7C catalogue work was the case-3b structural fix
+(commit 7C.2-3, atomic per operator's atomic-commit preference):
+
+- **DELETED**: `cold_start_country_triangle_with_carrier_dropoff`
+  (Phase 6A.5 symmetric triangle compound; 0/95 detection on the
+  Roulottes Lupien census per Phase 6C measurement).
+- **ADDED**: `cold_start_outbound_carrier_dropoff` matching the
+  asymmetric attack shape (customer ships FROM declared country
+  TO outside-country via carrier-facility drop-off). Weight 0.65;
+  maturity-insensitive (cold-start gate inside the condition).
+- **NEW derivation**: `_outbound_destination_mismatch` in
+  `app/context.py` with defensive falsy check (None AND empty
+  string both produce False).
+- **Field swap**: `customer_country_triangle_mismatch` removed
+  from ALLOWED_CONTEXT_FIELDS; `customer_destination_country_mismatch_outbound`
+  added. Net count unchanged at 76.
+- **RETAINED unchanged**:
+  `cold_start_population_baseline_rare_with_carrier_dropoff`
+  (Phase 6A.9 sophisticated case-3b compound — different signal
+  class, independent retention).
+
+The structured-field architectural pattern is preserved: the riskd
+app consumes `payload.customer.registered_country` directly and
+never parses address strings in production. The Phase 7 export
+script's 4-tier customer-country derivation is OFFLINE
+corpus-shaping only (lives in `scripts/calibration/`, deleted in
+7E.3).
+
+See `.ai/decisions.md` Phase 7 section for the full architectural
+rationale, the structural-bound argument, and the Phase 7 → Phase
+8 → launch sequencing.
+
+7D measurement of the post-7C catalogue runs next; the case-3b
+detection target (>=85% on the Roulottes Lupien census) is the
+acceptance gate for Phase 7 close. The approved-corpus FPR
+targets are reclassified as "expected unchanged from baseline;
+deferred to post-launch."

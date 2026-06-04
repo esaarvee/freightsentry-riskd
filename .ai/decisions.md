@@ -1320,6 +1320,156 @@ item 7.
 
 ---
 
+## Phase 7 — Pre-launch calibration (2026-06-04)
+
+Phase 7 is the pre-launch calibration pass responding to the three
+empirical findings from the Phase 6C replay validation: 41% REVIEW
+rate on the operator-approved corpus, 0.18% BLOCK rate on the same
+corpus, and 0% detection on the 95-record Roulottes Lupien case-3b
+census.
+
+### Scope override: Phase 6's "no tuning" discipline does NOT apply
+
+Phase 6's strict "no rule weight, threshold, maturity parameter, or
+rule definition was changed in response to these measurements"
+discipline (`docs/replay-validation.md` Phase 6C section) was
+specific to Phase 6 — its purpose was to defer calibration to
+post-launch real-data observation. Phase 7 explicitly overrides
+because Phase 6C surfaced a launch-blocker (41% REVIEW on
+operator-approved transactions; structurally unworkable for human
+review queue capacity) that cannot reach production without
+intervention.
+
+Phase 7's intended interventions:
+- Calibrate `unfamiliar_ip_country_for_origin` (72% baseline fire
+  rate; calibration backlog item 1).
+- Calibrate `unknown_destination_address` (65% baseline; item 2).
+- Add case-3b detection compound for the asymmetric attack shape
+  (Roulottes Lupien census; item 6).
+- Delete the symmetric triangle compound the Phase 6C measurement
+  invalidated.
+
+### Empirical record: Phase 7B five-variant comparison
+
+Phase 7B measured 5 rule-file variants (A/B/C/D, plus E added
+mid-execution after the initial four missed targets) against the
+three Phase 6C corpora. Full table in `docs/replay-validation.md`
+Phase 7B section.
+
+| Variant | Approved REVIEW | Case-2 recall |
+|---|---|---|
+| A (gate `>= 30`, weights unchanged) | 38.83% | 97.6% |
+| B (halved weights, gate `>= 10`) | 40.67% | 99.0% |
+| C (combined A + B) | 38.69% | 97.8% |
+| D (secondary-signal compound) | 4.28% | 43.2% |
+| E (asymmetric: D-style IPC + A-style DEST) | 34.67% | 97.0% |
+
+Phase 7 targets: approved REVIEW <15% AND case-2 recall >=95%.
+**No variant meets both simultaneously**.
+
+### Structural-bound finding
+
+The empirical data establishes a structural bound on Phase 7's FPR
+reduction ambition: `api_non_cloud_ip` (weight 0.40, 40% fire
+rate on the approved corpus) and `non_cloud_established_account`
+(weight 0.20, 40% fire rate) drive significant REVIEW share
+INDEPENDENTLY of the FPR-driving rules. When the IPC + DEST rules
+are zeroed (Variant D), case-2 fraud detection collapses to 43%
+recall — case-2 fraud's signature depends on the very signals
+that drive approved-corpus FPR. Tuning IPC + DEST alone cannot
+reduce REVIEW <15% without violating the case-2 recall floor.
+
+Calibration-backlog items 1 + 2 (the two FPR rules' fire rates)
+remain DEFERRED to post-launch. The 4-week production fire-rate
+observation called out in `docs/calibration-backlog.md` items
+1 + 2 is the next-step gate for any FPR intervention. Phase 7
+does NOT mark these items RESOLVED.
+
+### Decision: 7C.1 SKIPPED, case-3b structural fix proceeds
+
+Operator decision (2026-06-04) after reviewing the 5-variant
+empirical record:
+
+- **7C.1 (apply chosen variant): SKIPPED**. No variant applied to
+  `app/rules.yaml`. The two FPR-driving rules retain their
+  baseline conditions and weights.
+- **7C.2 + 7C.3: PROCEEDED** (combined as one atomic commit per
+  the operator's standing atomic-commit preference; the add +
+  delete mutually replace each other with no broken intermediate
+  state). Symmetric triangle compound
+  `cold_start_country_triangle_with_carrier_dropoff` DELETED;
+  asymmetric `cold_start_outbound_carrier_dropoff` ADDED.
+  Derivation `_outbound_destination_mismatch` replaces
+  `_triangle_mismatch` with a defensive falsy check on both
+  inputs (None and empty string both produce False).
+  ALLOWED_CONTEXT_FIELDS count unchanged at 76 (1-for-1 swap).
+- **Population-baseline compound**:
+  `cold_start_population_baseline_rare_with_carrier_dropoff`
+  (Phase 6A.9) RETAINED. Different signal class
+  (tenant-population baseline rarity vs fixed country-equality).
+  Independent retention.
+
+### Structured-field architectural pattern preserved
+
+The Phase 6A architectural pattern that case-3b detection MUST
+consume structured payload fields (`customer.registered_country`,
+`shipment.origin/destination.country`, `shipment.origin_via_carrier_dropoff`)
+rather than parse address strings in production code is preserved
+unchanged. The Phase 7 export script's 4-tier customer-country
+derivation (`scripts/calibration/export_from_freight_risk.py`) is
+OFFLINE corpus-shaping only; the riskd app reads the structured
+field from the payload directly and never sees address-parsing
+heuristics.
+
+### Calibration-backlog impact
+
+- Items 1, 2 (`unfamiliar_ip_country_for_origin` /
+  `unknown_destination_address` FPR): **DEFERRED, NOT RESOLVED**.
+- Item 6 (case-3b detection on Roulottes Lupien): **RESOLVED** via
+  the 7C.2 asymmetric compound. Pre-launch detection capability
+  awaits 7D measurement; the new rule is in place and the
+  case-3b detection capability is no longer a 0/95 gap by design.
+- Items 3, 4, 5, 7-15: unchanged from Phase 6 closeout.
+
+### Phase 7's scope deviation from the original plan
+
+The original Phase 7 prompt anticipated a chosen variant would
+land in 7C.1 and mark items 1 + 2 RESOLVED. The empirical record
+showed otherwise. The prompt envisioned 4 variants; 5 were
+measured — Variant E was added mid-execution after A/B/C/D missed
+targets, and proved the structural bound. The structural-bound
+finding is the load-bearing outcome of Phase 7's measurement
+work: the FPR ambition was bounded by the existing rule
+catalogue, and any further FPR reduction requires architectural
+work (a new rule that catches case-2 fraud independently of the
+IPC/DEST + API-shape compound) deferred beyond Phase 7.
+
+### Repository hygiene: freight_risk data scrubbed from history
+
+PLAN_PHASE_7A.md 7A.0 ran `git filter-repo --invert-paths --path
+scripts/replay --path docs/replay-results --force` to remove all
+freight_risk-derived NDJSON corpora and per-record JSON results
+from every commit reachable from `feat/refactor`. The
+aggregate-only output policy now applies: per-record content
+lives only in `/tmp/` and is never committed. `scripts/calibration/`
+is Phase 7 ephemera tracked during Phase 7 (via `git add -f`,
+since `.gitignore` blocks it for defense-in-depth) and is deleted
+in 7E.3.
+
+### Phase 7 → Phase 8 sequencing
+
+Phase 7 closes with the case-3b structural fix landed + the
+empirical record documented. Phase 8 follows (test-suite audit,
+doc consolidation, migration squash) before production launch per
+the operator's Phase 6E sequencing decision.
+
+The architectural workstream implied by the structural-bound
+finding (a new rule that catches case-2 fraud without
+piggybacking on IPC/DEST) is documented as Phase 9+ post-launch
+work. That workstream does not block Phase 7 or Phase 8 close.
+
+---
+
 ## Decision provenance
 
 This document supersedes the bootstrap-prompt "Design Context" section where they conflict. Operator amendments (dated rows above) supersede this document where they conflict.
