@@ -1,0 +1,19 @@
+# tests/coverage_baseline.txt
+#
+# Pre-Phase-8B-audit line coverage baseline. Captured by 8B.0 via
+# `.venv/bin/pytest --cov=app tests/`. Used as the regression gate
+# for 8B.5 (re-measure after the phase-named-function renames and
+# collapses) and for the Phase 8D final integration pass.
+#
+# If the audit reduces coverage, halt and restore. Updates to this
+# file post-audit reflect the new floor; updates outside Phase 8B
+# require a brief commit message rationale.
+
+baseline_line_coverage_percent = 91
+baseline_statements_total = 1699
+baseline_statements_missed = 157
+baseline_tests_passed = 1118
+baseline_tests_failed = 1
+baseline_failure_known = tests/integration/test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2 (pre-existing; logged in .claude/BUGS.md 2026-06-05)
+baseline_captured_at = 2026-06-05
+baseline_captured_commit = 771ca90  # 8A.2-8A.3 close
