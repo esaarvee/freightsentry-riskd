@@ -116,9 +116,9 @@ def test_default_value_caps_cad_has_all_four_tiers() -> None:
     assert set(DEFAULT_VALUE_CAPS["CAD"].keys()) == {"high", "new_user", "medium", "low"}
 
 
-def test_default_value_caps_match_phase_2_thresholds() -> None:
+def test_default_value_caps_match_current_thresholds() -> None:
     # These literals must match the 7 currency-implicit rules in app/rules.yaml
-    # (Phase 2 thresholds) — 4B.5 rewrites those rules to consult these values.
+    # (currency thresholds). 4B.5 rewrote those rules to consult these values;
     # Phase 6B re-keyed USD → CAD; numeric thresholds unchanged.
     assert DEFAULT_VALUE_CAPS["CAD"]["high"] == 10000.0
     assert DEFAULT_VALUE_CAPS["CAD"]["new_user"] == 5000.0

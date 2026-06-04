@@ -1,21 +1,25 @@
 """Unit tests pinning the DSL ALLOWED_CONTEXT_FIELDS whitelist.
 
-Phase 2B.5 grows the whitelist from 45 (Phase 1) to 56 fields. The
-whitelist is the security boundary the DSL evaluator enforces — only
-names in this set may be referenced from a rule condition. Any field
-added to build_context must ALSO be added here, otherwise rule loader
-fails at lifespan startup.
+The whitelist is the security boundary the DSL evaluator enforces —
+only names in this set may be referenced from a rule condition. Any
+field added to build_context must ALSO be added here, otherwise the
+rule loader fails at lifespan startup.
 
 This test file is intentionally narrow: a frozen-set type check, a
-size pin, and an explicit per-field membership assertion for the
-Phase 2B additions. Field-semantics testing lives in the build_context
-integration tests (tests/integration/test_context.py).
+size pin, and explicit subset-membership probes for the historical
+field-addition groups. Field-semantics testing lives in the
+build_context integration tests (tests/integration/test_context.py).
 """
 
 from __future__ import annotations
 
 from app.rules import ALLOWED_CONTEXT_FIELDS
 
+# Phase 2B added 11 fields. The set is pinned here as a subset-probe
+# anchor — if any of these fields is ever silently removed from the
+# whitelist (e.g., during a refactor that drops production code paths
+# they back), the membership test below catches it. The Phase 2B
+# attribution is historical context that survives in the constant name.
 _PHASE_2B_ADDITIONS = frozenset(
     {
         "customer_locked_cloud_api",
@@ -40,61 +44,48 @@ def test_whitelist_is_frozenset() -> None:
     assert isinstance(ALLOWED_CONTEXT_FIELDS, frozenset)
 
 
-def test_whitelist_size_matches_phase_7c_total() -> None:
-    """Phase 1 baseline = 45; Phase 2B adds 11 → 56; Phase 3A adds 6 → 62;
-    Phase 3B adds 4 → 66; Phase 4B.4 adds 5 (shipment_currency +
-    4 tier thresholds) → 71; Phase 6A.2 adds 2
-    (origin_via_carrier_dropoff, shipment_route_unfamiliar_for_customer)
-    → 73; Phase 6A.5 adds 2 (customer_registered_country,
-    customer_country_triangle_mismatch) → 75; Phase 6A.8 adds 1
-    (shipment_route_rare_for_tenant) → 76. Phase 7C.2 swaps
-    customer_country_triangle_mismatch for
-    customer_destination_country_mismatch_outbound — net unchanged
-    at 76. Phase 7C.6 adds unfamiliar_asn_for_customer → 77. A
-    size drift catches both accidental removal AND silent addition
-    that bypasses operator + reviewer scrutiny."""
+def test_whitelist_size_matches_current() -> None:
+    """Pins the current whitelist size. A drift catches both accidental
+    removal AND silent addition that bypasses operator + reviewer
+    scrutiny. The current count (77) is the result of accumulated
+    additions across the Phase 1 baseline (45) through Phase 7C
+    (case-3b refactor + ASN-deviation signal); see docs/history.md
+    for the full per-phase progression."""
     assert len(ALLOWED_CONTEXT_FIELDS) == 77
 
 
-def test_whitelist_contains_phase_6a_2_additions() -> None:
-    """Phase 6A.2 case-3a signals must both be in the whitelist."""
-    phase_6a_2 = frozenset({"origin_via_carrier_dropoff", "shipment_route_unfamiliar_for_customer"})
-    missing = phase_6a_2 - ALLOWED_CONTEXT_FIELDS
-    assert not missing, f"Phase 6A.2 fields not in whitelist: {missing}"
+def test_whitelist_contains_pinned_baseline_additions() -> None:
+    """Every field in the pinned ``_PHASE_2B_ADDITIONS`` group is present.
+    A diff between build_context's ctx keys and this set is the single
+    source of truth for the whitelist — these field names must match
+    the production build_context keys exactly. Set size pinned too so
+    accidental constant edits in this file are caught."""
+    missing = _PHASE_2B_ADDITIONS - ALLOWED_CONTEXT_FIELDS
+    assert not missing, f"Pinned baseline fields not in whitelist: {missing}"
+    assert len(_PHASE_2B_ADDITIONS) == 11
 
 
-def test_whitelist_contains_phase_6a_5_and_7c_case3b_fields() -> None:
-    """customer_registered_country (6A.5) is retained; the symmetric
-    triangle field is REPLACED by the 7C.2 asymmetric outbound
-    field. Both case-3b detection primitives evolved together
-    across 6A.5 → 7C.2."""
-    expected = frozenset(
+def test_whitelist_contains_case_detection_signals() -> None:
+    """Phase 6 and 7 case-3a/3b detection primitives must all be present.
+    The symmetric ``customer_country_triangle_mismatch`` field
+    (Phase 6A.5) was DELETED in Phase 7C.2 in favor of the asymmetric
+    ``customer_destination_country_mismatch_outbound``; its absence is
+    pinned alongside the present-field probes so a future accidental
+    revive of the symmetric compound is caught."""
+    expected_present = frozenset(
         {
+            # Phase 6A.2 — case-3a route signals.
+            "origin_via_carrier_dropoff",
+            "shipment_route_unfamiliar_for_customer",
+            # Phase 6A.5 retained + Phase 7C.2 case-3b primitives.
             "customer_registered_country",
             "customer_destination_country_mismatch_outbound",
+            # Phase 6A.8 — case-3b sophisticated signal.
+            "shipment_route_rare_for_tenant",
+            # Phase 7C.6 — case-2 learning-based deviation.
+            "unfamiliar_asn_for_customer",
         }
     )
-    missing = expected - ALLOWED_CONTEXT_FIELDS
-    assert not missing, f"case-3b fields not in whitelist: {missing}"
-    # Triangle field is DELETED in 7C.2 — pin its absence so a future
-    # accidental revive of the symmetric compound is caught.
+    missing = expected_present - ALLOWED_CONTEXT_FIELDS
+    assert not missing, f"Phase 6/7 fields not in whitelist: {missing}"
     assert "customer_country_triangle_mismatch" not in ALLOWED_CONTEXT_FIELDS
-
-
-def test_whitelist_contains_phase_6a_8_addition() -> None:
-    """Phase 6A.8 case-3b sophisticated signal must be in the whitelist."""
-    assert "shipment_route_rare_for_tenant" in ALLOWED_CONTEXT_FIELDS
-
-
-def test_whitelist_contains_every_phase_2b_addition() -> None:
-    """Each Phase 2B field is present. A diff between build_context's
-    ctx keys and this set is the single source of truth for the
-    whitelist — these field names must match the production build_context
-    keys exactly."""
-    missing = _PHASE_2B_ADDITIONS - ALLOWED_CONTEXT_FIELDS
-    assert not missing, f"Phase 2B fields not in whitelist: {missing}"
-
-
-def test_whitelist_phase_2b_additions_count_is_eleven() -> None:
-    """Sanity: the pinned addition set is the documented 11 fields."""
-    assert len(_PHASE_2B_ADDITIONS) == 11

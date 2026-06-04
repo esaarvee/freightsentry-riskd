@@ -35,15 +35,15 @@ _PHASE_3A_MODIFICATION_FIELDS = frozenset(
 )
 
 
-def test_phase_3a_additions_count_is_six() -> None:
+def test_modification_additions_count_is_six() -> None:
     """Sanity: the pinned addition set is the documented 6 fields."""
     assert len(_PHASE_3A_MODIFICATION_FIELDS) == 6
 
 
-def test_whitelist_contains_every_phase_3a_modification_field() -> None:
-    """Each 3A modification field is present in the whitelist."""
+def test_whitelist_contains_modification_fields() -> None:
+    """Each modification-Context field is present in the whitelist."""
     missing = _PHASE_3A_MODIFICATION_FIELDS - ALLOWED_CONTEXT_FIELDS
-    assert not missing, f"Phase 3A modification fields not in whitelist: {missing}"
+    assert not missing, f"Modification fields not in whitelist: {missing}"
 
 
 def test_production_rules_yaml_loads_under_extended_whitelist() -> None:

@@ -329,7 +329,7 @@ def test_modification_rules_dormant_under_booking_path_defaults(
     assert not fired, f"modification rules fired under booking defaults: {fired}"
 
 
-def test_phase_3a_modification_rule_count(ruleset: RuleSet) -> None:
+def test_modification_rule_count(ruleset: RuleSet) -> None:
     """Pin the modification-rule count at 8."""
     modification_rules = [r for r in ruleset.rules if r.name.startswith("modification_")]
     assert len(modification_rules) == 8

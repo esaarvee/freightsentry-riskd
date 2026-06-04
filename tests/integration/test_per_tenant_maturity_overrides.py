@@ -292,12 +292,12 @@ async def test_overrides_do_not_affect_layer_1_block(
     assert b["score"] == 1.0
 
 
-async def test_empty_config_tenant_unchanged_from_phase3(
+async def test_empty_config_tenant_uses_defaults(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Tenants with empty config (`{}`) score identically to pre-4C
-    behavior. This is the invariance pin for the per-tenant override
-    refactor — no behavioral drift on default tenants."""
+    """Tenants with empty config (`{}`) score under the default thresholds
+    (no per-tenant overrides applied). Invariance pin for the per-tenant
+    override mechanism — no behavioral drift on default tenants."""
     # Mature customer at exactly the default thresholds.
     await _seed_customer_at_age(
         db_conn, seeded_tenant, external_id="cust-inv", age_days=180, total_shipments=50

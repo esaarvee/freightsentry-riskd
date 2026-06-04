@@ -110,7 +110,7 @@ def test_ip_previously_rejected_no_fire_when_false(ruleset: RuleSet) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_phase_3b_previously_rejected_rule_count(ruleset: RuleSet) -> None:
+def test_previously_rejected_rule_count(ruleset: RuleSet) -> None:
     """Pin the previously-rejected rule count at 4."""
     rule_names = {r.name for r in ruleset.rules if "previously_rejected" in r.name}
     expected = {
