@@ -151,10 +151,11 @@ def test_familiarity_diversity_rules_load(ruleset: RuleSet) -> None:
     assert not missing, f"missing 2C.7 rules: {missing}"
 
 
-def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
-    """Canonical rule-count audit. Updated each phase to reflect cumulative
-    additions; drift fails this test as the single source of truth that
-    per-batch set-membership tests match the production catalogue.
+def test_total_rule_count(ruleset: RuleSet) -> None:
+    """Canonical rule-count audit. Updated when rules.yaml changes; drift
+    fails this test as the single source of truth that the per-group
+    set-membership tests match the production catalogue. See
+    docs/history.md for the full per-phase additions.
 
     Phase 1 baseline:  14 rules
     2C.1 trust-conditioned:                       +7 =  21
@@ -178,7 +179,7 @@ def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
     assert len(ruleset.rules) == 81
 
 
-def test_phase2_end_no_duplicate_rule_names(ruleset: RuleSet) -> None:
+def test_no_duplicate_rule_names(ruleset: RuleSet) -> None:
     """No rule name appears more than once — catches accidental
     copy-paste duplication that the set-membership tests would silently
     miss."""
