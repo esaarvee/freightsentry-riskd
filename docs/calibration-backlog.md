@@ -389,6 +389,76 @@ production patterns.
 
 ---
 
+## 20. nD7-class fraud detection (brand-new + API + residential ASN compound)
+
+**Status**: deferred to post-launch architectural workstream.
+Introduced by the Phase 7D measurement finding (2026-06-04).
+
+**Context**: the Phase 7D case-2 measurement identified two
+structurally different fraud classes within the freight_risk
+`gobolt-non-34x-api` corpus:
+
+1. **gPYG-class** (compromised established customer): pre-attack
+   legitimate booking history exists. Customer baseline accumulates
+   from operator-approved ALLOW bookings during the warmup window.
+   The Phase 7C.7 `api_booking_from_unfamiliar_asn` rule fires
+   correctly on attack records (attack ASN absent from the
+   confirmed-legit baseline). **100% recall** measured post-7C.12.
+
+2. **nD7-class** (brand-new fraud-only customer): no legitimate
+   history exists. nD7's complete freight_risk presence is 6,684
+   records, all labeled `reject`, all attack records, earliest
+   booking same day as the attack window starts. Customer baseline
+   stays empty; cold-start gate on `api_booking_from_unfamiliar_asn`
+   (>=10 observations inside the derivation) prevents the rule
+   from firing. **25.9% catch** measured post-7C.12 (from
+   baseline-agnostic rules; reduced from 40.7% pre-7C.12 due to
+   the 7C.12 geo-rule weight cuts).
+
+The nD7-class shape is structurally different from gPYG-class:
+nD7-class customers have no operator-confirmed legitimate behavior
+to deviate from. The case-2 ASN-deviation rule is correctly
+silent on them (it would be wrong to flag a brand-new customer's
+first booking as "unfamiliar ASN" — they have no familiar ASNs
+by definition). A separate signal class is needed.
+
+**Sketch**:
+```yaml
+- name: brand_new_customer_api_residential_asn
+  description: |
+    Brand-new customer (<10 observations) booking via API from a
+    residential ASN. Targets the nD7-class case-2 fraud shape:
+    fraud-only customer with no legitimate history; first
+    transaction is already fraudulent; baseline-deviation
+    signals cannot fire.
+  condition: "is_api_booking AND customer_observations < 10 AND is_residential_asn"
+  weight: 0.50
+  maturity_sensitive: false
+```
+
+**Deferred action**: design discussion warranted before
+implementation. Concerns:
+- Legitimate new-customer onboarding from residential ASNs
+  exists (small businesses, individual operators). Weight 0.50
+  alone may cause FPR on legit cold-start traffic.
+- Compound conditions (require additional corroborating signals)
+  may be appropriate.
+- Phase 9+ scope; not blocking Phase 7 close.
+
+The architectural pattern follows the case-3b cold-start design
+(7C.2): use the cold-start gate INSIDE the derivation as a
+positive signal for the fraud shape (brand-new), rather than as
+a maturity gate (mature).
+
+**Acceptance gate**: production observation needed. The current
+operator confirmation that "case-2 attacks compromise established
+customers" doesn't necessarily generalize to "all case-2-class
+attacks have pre-attack legitimate history." Post-launch
+real-data observation will inform whether nD7-class fraud occurs
+in production at meaningful volume.
+
+---
+
 ## Phase-by-phase post-launch tuning timeline
 
 Cross-reference: `docs/production-launch-checklist.md`.

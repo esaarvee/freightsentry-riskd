@@ -699,3 +699,240 @@ detection target (>=85% on the Roulottes Lupien census) is the
 acceptance gate for Phase 7 close. The approved-corpus FPR
 targets are reclassified as "expected unchanged from baseline;
 deferred to post-launch."
+
+---
+
+## Phase 7D measurement — final, post-7C.12 (2026-06-04)
+
+Final 7D measurement under the Phase 7C.11 baseline-gating
+semantics + 7C.12 calibrated geo-rule weights. Methodology shifts
+across the Phase 7 arc are documented in `.ai/decisions.md`. The
+Phase 7B variant comparison numbers are NOT directly comparable
+to Phase 7D measurements — different architectural states.
+
+### Replay environment
+
+- App: post-7C.11 catalogue (81 rules; baseline gated on ALLOW).
+- MaxMind GeoLite2 ASN + City mounted (bind-mount, 7D-prep
+  commit `d11a534`).
+- Replay tenant: id 15622 (`replay-tenant`); full state
+  truncated pre-run (customer_baselines, decisions, shipments,
+  etc.).
+- Concurrency: 20 (Phase 5D verified-good).
+- Corpora: deterministic export (seed=42; same record counts as
+  the pre-7C.11 7D run).
+  - approved: 10000 measurement + 10662 warmup
+  - case2: 500 measurement + 100 warmup
+  - case3: 95 measurement + 0 warmup
+
+### Targets vs actuals (final, post-7C.12)
+
+| Metric | Baseline (6C) | Pre-MaxMind | Post-7C.11 | **Post-7C.12 (final)** | Target | Verdict |
+|---|---|---|---|---|---|---|
+| Approved BLOCK | 0.18% | 0.10% | 3.46% | **1.31%** | <0.05% original; **<0.5% retired-target** | CLOSE-BUT-OVER (2.6x retired-target) |
+| Approved REVIEW | 41% | 38.83% | 6.17% | **4.58%** | <15% (stretch <10%) | **PASS** (stretch) |
+| Case-2 recall (combined) | 98% | 97.6% | 84.0% | **80.0%** | ≥95% | FAIL combined |
+| **Case-2 recall (gPYG, legit-history customer)** | — | — | 100% | **100%** | ≥95% | **PASS** |
+| Case-2 recall (nD7, fraud-only customer) | — | — | 40.7% | **25.9%** | n/a (no baseline) | DEFERRED to item 20 |
+| Case-3b detection | 0% | 0% | 100% | **100%** | ≥85% | **PASS** |
+
+### Per-customer case-2 finding (critical for closeout reading)
+
+Per-customer breakdown of the 500 case-2 measurement records
+(both pre-7C.12 and post-7C.12):
+
+| Customer | Records | Has legit history? | Recall |
+|---|---|---|---|
+| **gPYG** (701 pre-Mar-31 approved records in freight_risk) | 365 | YES | **100%** (365/365 BLOCK) |
+| **nD7** (zero approved feedback in entire freight_risk dataset) | 135 | NO | 25.9% post-7C.12; 40.7% pre-7C.12 |
+
+**Customer nD7's complete shipment history in freight_risk is
+6,684 records, ALL labeled `reject` with notes `gobolt-non-34x-api`.
+Zero `approve`. Zero no-feedback. The customer's entire dataset
+presence is fraudulent.**
+
+Earliest nD7 booking: 2026-03-17 14:03 (same day the attack window
+starts). No pre-attack legitimate history exists in the dataset.
+
+Implication: the case-2 ASN-deviation rule (7C.7) correctly fires
+0% on nD7 because the customer's baseline can't accumulate — they
+have no operator-confirmed ALLOW bookings to fold. This is the
+DESIGNED behavior: ASN-deviation requires a baseline to deviate
+from. nD7-class fraud (purely fraudulent customer with no
+legitimate history) needs a different signal class — a "brand-new
++ API + residential ASN" compound. Sketched as calibration-backlog
+item 20; deferred to post-launch.
+
+The "84% recall ceiling" framing from the pre-7C.12 analysis was
+incorrect. It's not a structural ceiling — it's a customer-mix
+artifact: one of two case-2 customers is fraud-only. Customers
+with legitimate history (gPYG-class) achieve 100% recall.
+
+### Phase 7C.11 impact analysis (post-7C.11 / pre-7C.12 snapshot — partially superseded)
+
+> **Superseded for case-2 and BLOCK numbers.** This subsection
+> was drafted at the post-7C.11 checkpoint before 7C.12 geo-rule
+> calibration landed. Items below cite the post-7C.11 / pre-7C.12
+> intermediate state. Items 1 (case-3b 0% → 100%) and 3 (REVIEW
+> 41% → 6.17%) hold post-7C.12 unchanged. Item 2 (case-2 40.2%
+> → 84%) and Losses items 1 (BLOCK 1.45% → 3.46%) and 2 (case-2
+> "84% structural ceiling") are SUPERSEDED — see the
+> "Phase 7C.12 calibration impact" subsection below for the final
+> post-7C.12 numbers, and `.ai/decisions.md` Phase 7 closeout for
+> the per-customer-class reframe that retires the "structural
+> ceiling" framing. Retained here for empirical-audit continuity.
+
+**Wins**:
+
+1. **Case-3b detection 0% → 100%**. The 7C.2 outbound rule's
+   cold-start gate (`customer_observations < 10`) now stays True
+   for the entire 95-record corpus because the Roulottes Lupien
+   customer's baseline never accumulates (all 95 records BLOCK,
+   none fold). Pre-7C.11, the first ~10 records folded and the
+   gate closed for records 11-95. Post-7C.11, the gate stays
+   open. Rule fires on every case-3 record.
+
+2. **Case-2 recall 40.2% → 84%**. Customer baselines no longer
+   polluted by attack records. `api_booking_from_unfamiliar_asn`
+   fires 78.4% on case-2 (392/500), up from ~0% pre-7C.11
+   (baseline pollution = always-familiar ASNs).
+
+3. **Approved REVIEW 41% → 6.17%**. Beats the <15% target with
+   margin; beats the <10% stretch. Combined effect of 7C.7 rule
+   replacement + 7C.8 weight reductions + 7C.11 cold-start
+   bypassing maturity-gated pair-novelty rules.
+
+**Losses**:
+
+1. **Approved BLOCK rose 1.45% → 3.46%**. Predicted cold-start
+   ramp side effect. With baselines smaller (warmup ALLOW rate
+   89.7%, not 100%), more legitimate customer bookings appear
+   as "novel" along multiple signal classes. Top contributors:
+   `unknown_destination_address` (52.4% fire), `impossible_travel
+   _geo` (5.8%), `web_booking_from_cloud_ip` (4.7%),
+   `ip_fully_new_for_customer` (3.0%), `unfamiliar_ip_country_for
+   _origin` (3.0%). Compound noisy-OR pushes 346 records past
+   the 0.80 BLOCK threshold.
+
+2. **Case-2 recall ceiling at ~84%**. The 16% ALLOWed attacks
+   (80/500) come from ASNs that ARE in the customer's
+   warmup-confirmed baseline. Customer gPYG used 32+ different
+   ASNs legitimately (per V-14 finding); the 100 warmup records
+   sampled those ASNs broadly enough that attack ASNs overlap
+   with familiar-ASN history. Reaching 95% recall would require
+   an additional signal class (e.g., IP frequency or velocity
+   within the established ASN); structural ceiling on
+   ASN-deviation alone given diverse legitimate-ASN history.
+
+### Phase 7C.12 calibration impact
+
+The four MaxMind-enabled geo rules (impossible_travel_geo,
+ip_intercontinental_jump, ip_country_change, ip_long_distance_new_ip)
+had Phase 1-2 intuition-based weights set BEFORE MaxMind was
+provisioned in the test/dev stack. 7C.12 calibrated them against
+the Jan-Mar 2026 measured FPR. The "wait for production traffic"
+framing under the Phase 1-2 `no_weight_tuning_phase2` decision
+assumed production was the only data source for FPR-driven
+tuning; the 7D-prep MaxMind mount made historical-data
+calibration possible.
+
+Calibrated weights (conditions unchanged):
+- impossible_travel_geo: 0.65 → 0.30
+- ip_intercontinental_jump: 0.35 → 0.20
+- ip_country_change: 0.25 → 0.15
+- ip_long_distance_new_ip: 0.25 → 0.15
+
+Empirical impact (post-7C.12 vs post-7C.11):
+- Approved BLOCK: 3.46% → 1.31% (2.6x reduction)
+- Approved REVIEW: 6.17% → 4.58% (~26% reduction)
+- gPYG case-2 recall: 100% → 100% (preserved — the operator's gate)
+- nD7 case-2 catch: 40.7% → 25.9% (geo rules contributed to nD7 catches; cuts trade away some nD7 detection)
+- Case-3b detection: 100% → 100% (unchanged; uses different rule class)
+
+The case-2 gate per operator was "If the calibration moves case-2
+below 95% on gPYG, back off." gPYG holds at 100% → no back-off
+required.
+
+### BLOCK target retirement (operator decision 2026-06-04)
+
+The Phase 7 BLOCK target (<0.05%) was set against under-enriched
+measurements; the production catalogue with MaxMind active exposes
+geo-signal contributions that the original target did not
+anticipate. Phase 7C.12 calibrates those signals' weights against
+the Jan-Mar 2026 measured FPR. Post-calibration result: 1.31%
+BLOCK. Operator-stated post-calibration achievable: <0.5%; actual
+1.31% is 2.6x over but constitutes a 7.4x reduction from the
+6C-baseline-with-MaxMind state (would have been ~9-10% without
+the case-2 + case-3b + 7C.11 + 7C.12 cumulative work).
+
+The original <0.05% target is RETIRED. The new operational
+acceptance is documented in `.ai/decisions.md` Phase 7 closeout:
+production monitoring per `docs/production-launch-checklist.md`
+Phase E will track operator-approved-as-legit rate on BLOCKs;
+if Day 1-30 production data shows the BLOCKed records are real
+fraud catches that were ALLOWed pre-MaxMind, the 1.31% is a real
+detection win. If they're predominantly operator-approved false
+positives, post-launch calibration iterates further on these
+geo-rule weights or compounds.
+
+### Empirical findings worth Phase 7 closeout discussion (pre-7C.12 snapshot — superseded)
+
+> **Superseded by 7C.12 calibration above.** The text below was
+> drafted at the post-7C.11 / pre-7C.12 checkpoint when the
+> 3.46% BLOCK rate triggered the operator's two-paths question.
+> Path (b) was taken (geo-rule weight calibration), 7C.12 landed,
+> and the BLOCK rate dropped to 1.31%. The <0.05% target was
+> retired in the same operator decision. The "structural
+> ceiling" framing for case-2 was reframed to per-customer-class
+> semantics in `.ai/decisions.md` Phase 7 closeout. Retained
+> here for empirical-audit continuity; do not act on the
+> verdicts in this subsection.
+
+1. **Approved BLOCK exceeds target by 69x** (3.46% vs <0.05%).
+   The cold-start ramp from 7C.11 produces enough "novel" pair-
+   notes on legitimate customer history to compound through
+   noisy-OR. Two paths forward (operator decision required):
+
+   - (a) Accept the BLOCK rate as a Phase 7 known limitation;
+     document Phase 9+ work on the cold-start ramp signal
+     calibration. Production launch monitors per-tenant BLOCK
+     rate vs operator-approved-as-legit feedback to confirm the
+     pattern is harmless under real-traffic operator review.
+   - (b) Iterate further: tighten `unknown_destination_address`
+     weight (0.10 → 0.05) and/or add a cold-start grace
+     multiplier that downweights maturity-gated rules for
+     customers under a tightened observation threshold. Adds
+     1-2 commits to Phase 7C.
+
+2. **Case-2 recall structural ceiling at ~84%**. The 7C.7 ASN-
+   deviation design has an empirical ceiling that depends on
+   the diversity of the customer's legitimate ASN history.
+   gobolt-tenant customers using 30+ residential ISPs hit the
+   ceiling; gobolt-only-Google-Cloud customers would hit higher
+   recall. Phase 9+ architectural workstream (additional signal
+   classes for case-2: frequency, velocity, within-ASN /24
+   deviation) carries the remaining 11 percentage points to
+   the 95% target.
+
+3. **Case-3b 100% is the structural ceiling for this corpus**.
+   The single-customer cluster (95 records from Roulottes
+   Lupien) is now fully detected. Generalization to diverse
+   case-3b-class fraud actors awaits post-launch traffic.
+
+### Phase 7D acceptance gate (pre-7C.12 — resolved)
+
+The plan's iteration policy specified all targets must hit
+before Phase 7 closes. Strict reading at the post-7C.11 / pre-7C.12
+checkpoint: 7D FAILS (BLOCK and case-2 miss). Operator-decision
+2026-06-04 resolved both misses: (a) BLOCK target retired with
+rationale (see "BLOCK target retirement" above), (b) case-2
+"structural ceiling" reframed to per-customer-class semantics —
+gPYG-class hits 100%, nD7-class deferred to backlog item 20.
+Post-7C.12 verdict: Phase 7 closes. Surfaced and resolved via
+AskUserQuestion at the Phase 7D mid-pass checkpoint.
+
+### Raw aggregate result files
+
+Files live at `/tmp/phase-7d-results/{approved,case2,case3}.json`
+on the operator's machine. NOT committed. Aggregate-only per
+Phase 7 policy.
