@@ -385,20 +385,53 @@ rules:
 
   # Geographic (5 rules)
 
+  # =====================================================================
+  # Phase 7C.12 — calibrate MaxMind-enabled geo rules against measured FPR.
+  # Original weights (0.65 / 0.35 / 0.25 / 0.25) were intuition-based in
+  # Phase 1-2 BEFORE the test/dev stack had MaxMind ASN+City data
+  # provisioned. Phase 7D measurement (with MaxMind active for the first
+  # time, against the Jan-Mar 2026 operator-approved corpus) found these
+  # rules drive the bulk of approved-corpus BLOCK band — they fire on
+  # legitimate multi-region customer behavior that MaxMind now correctly
+  # exposes as geographic novelty.
+  #
+  # Per-rule fire share on the 346 approved BLOCKs (7D post-7C.11 run):
+  #   impossible_travel_geo:    248 (71.7%)  — biggest lever
+  #   ip_country_change:        202 (58.4%)
+  #   ip_long_distance_new_ip:  197 (57.0%)
+  #   ip_intercontinental_jump: 159 (46.0%)
+  #
+  # The geographic signals these rules detect are REAL — operator-
+  # approved long-distance bookings DO involve large IP-distance jumps.
+  # The signals belong on the noisy-OR ladder but at lower weights so
+  # they nudge records toward REVIEW (operator queue) rather than
+  # auto-BLOCK. Calibration backlog items 12-13 ("deferred to real-data
+  # observation") apply directly — the Jan-Mar 2026 historical traffic
+  # IS real data; the "wait for production traffic" framing assumed
+  # MaxMind would only be active in production, but 7D-prep mounted the
+  # data locally and measurement is now possible.
+  #
+  # Predicted composition on the top BLOCK pattern (n=50):
+  #   pre-calibration: 0.10 + 0.45 + 0.65 + 0.30 -> noisy-OR 0.879 (BLOCK)
+  #   post-calibration: 0.10 + 0.45 + 0.30 + 0.30 -> noisy-OR 0.76 (REVIEW)
+  # The signal is preserved; the auto-BLOCK is removed. Records move
+  # to operator review where they can be confirmed/rejected.
+  # =====================================================================
+
   - name: ip_intercontinental_jump
     description: "IP distance >5000km from customer's last booking — implausible same-day travel"
     condition: "ip_distance_km > 5000"
-    weight: 0.35
+    weight: 0.20
 
   - name: ip_long_distance_new_ip
     description: "IP distance >2000km from last booking + IP is new for this customer"
     condition: "ip_distance_km > 2000 AND is_new_ip"
-    weight: 0.25
+    weight: 0.15
 
   - name: ip_country_change
     description: "IP country differs from last booking + IP is new for this customer"
     condition: "ip_country_changed AND is_new_ip"
-    weight: 0.25
+    weight: 0.15
 
   - name: api_country_change_unfamiliar
     description: "API booking + new IP + IP country changed — high-stakes API ATO indicator"
@@ -407,8 +440,12 @@ rules:
 
   - name: impossible_travel_geo
     description: "Same-day booking from >500km away from last known location"
+    # Phase 7C.12 calibration: 0.65 -> 0.30 (see 7C.12 comment block
+    # above for rationale). Biggest single-rule contributor to
+    # approved-corpus BLOCK; the signal is preserved but the standalone
+    # auto-BLOCK contribution drops below the band threshold.
     condition: "impossible_travel"
-    weight: 0.65
+    weight: 0.30
 
   # Threat-intel composites (excluding redundant Layer-1 duplicates) (6 rules)
   # Note: ip2p_threat_scanner_signal and ip2p_threat_spam_signal carry the
