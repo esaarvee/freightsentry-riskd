@@ -17,3 +17,6 @@ baseline_tests_failed = 1
 baseline_failure_known = tests/integration/test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2 (pre-existing; logged in .claude/BUGS.md 2026-06-05)
 baseline_captured_at = 2026-06-05
 baseline_captured_commit = 771ca90  # 8A.2-8A.3 close
+post_8b_audit_line_coverage_percent = 91
+post_8b_audit_statements_missed = 157
+post_8b_audit_delta = +0.00  # no regression; phase-named function renames left coverage unchanged

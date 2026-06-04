@@ -173,3 +173,38 @@ Completed during the 8A→8B handoff. Findings recorded in the Decisions absorbe
 
 - **8C**: PLAN_PHASE_8B.md does NOT need to be deleted at 8C.13 — it joins history.md absorption like PLAN_PHASE_8A.md / 8C.md / 8D.md. The whole Phase 8 plan family gets absorbed at production-launch time (or kept as the canonical record per the prompt's operator-preference note in 8D.1).
 - **8C.4**: After 8B closes, `system-status.md` should note that the coverage baseline and the schema golden test now exist as anti-drift gates.
+
+---
+
+## Execution record
+
+### 8B.0 — coverage baseline anchor (commit d648e59)
+- `pytest --cov=app tests/` captured: **91% line coverage** (1699 statements; 157 missed). 1118 passes + 1 pre-existing failure.
+- `tests/coverage_baseline.txt` committed as the regression-gate anchor.
+
+### 8B.1-8B.3 — phase-named function renames + whitelist consolidation (commit 695c35f)
+- 13 phase-named functions identified by initial grep — all renamed.
+- `test_rules_whitelist.py` 7 → 4 functions (3 phase-6/7 subset probes consolidated; explicit present-probe for `unfamiliar_asn_for_customer` added in the merge).
+- 6 other files received pure renames.
+- Net test count: -3.
+- Reviewer panel cleanest tier: test-reviewer (ACTUALLY GOOD) + senior-engineer (SHIP IT) + code-flow (CLEAN).
+
+### 8B.3b — follow-up rename (commit 6cdc3f0)
+- 2 functions in `test_rules_familiarity_and_diversity.py` missed by initial regex (`test_phase2_end_*` form). Surfaced by senior-engineer review of 8B.1-3.
+- Final: `grep -rnE 'def test_phase|def test_.*phase[_0-9]' tests/` returns zero.
+
+### 8B.4 — shared-fixture-prop-up survey (this commit)
+- pytest-randomly installed; tests run with seeds 12345 and 54321.
+- Unit tests: 837 passes both seeds, zero order-dependent failures.
+- Integration tests: 246 passes both seeds, only pre-existing test_case_2 failure (not order-related).
+- No fixture-order-prop-up findings. No BUGS.md entries needed.
+
+### 8B.5 — coverage non-regression verification (this commit)
+- Post-audit coverage: **91%** (1699 statements; 157 missed). Delta vs baseline: **+0.00%**.
+- Gate PASS.
+- `tests/coverage_baseline.txt` updated with the post-audit datapoint.
+
+### 8B.6 — batch close (this commit)
+- All acceptance criteria met. Zero phase-named functions. Coverage non-regression confirmed.
+- Carry-forward to 8C: PLAN_PHASE_8B.md execution record exists; coverage anti-drift gate active.
+- Carry-forward to 8D: final coverage + schema golden re-verification in 8D.3.
