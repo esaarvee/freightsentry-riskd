@@ -311,3 +311,29 @@ Suggested action: defer to Phase 8 test-suite audit or open as a
 post-launch follow-up. scripts/calibration/ is deleted in 7E.3;
 these tests would land in scripts/replay_validation.py's existing
 test_replay_validation.py if added.
+
+## 2026-06-05 — test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2 missing 2 rules from the case-2 5-rule compound
+
+Discovered by: implementer during PLAN_PHASE_8A.md 8A.1 (validation step)
+Location: tests/integration/test_case_2.py:207
+Severity: medium
+Observation: The test asserts that 5 specific case-2 rules fire as a
+compound — `ip_fully_new_for_customer`, `unfamiliar_ip_country_for_origin`,
+`api_booking_from_unfamiliar_asn`, `locked_customer_unfamiliar_ip`, and
+`cloud_api_customer_deviation_iptype`. Against the actual current HEAD
+of feat/refactor (both pre- and post-Phase-8A squash — verified by
+git-stash-and-rerun), only 5 different rules fire and the two
+locked-customer-baseline rules (`locked_customer_unfamiliar_ip` and
+`cloud_api_customer_deviation_iptype`) are missing. The decision
+outcome remains BLOCK (the test still asserts BLOCK and that
+assertion presumably passes; the missing-rule assertion is what
+fails). The 2 missing rules are baseline-dependent; possible causes:
+(a) a derivation regression somewhere between 7C.7 (where the test
+landed) and 7C.13 (most recent commit before Phase 8) that broke
+the locked-customer derivation paths, (b) a test-setup drift where
+the baseline state no longer triggers the lock condition the
+rules predicate on, or (c) the test's compound assertion was
+over-specified at 7C.7 time and a subsequent semantic refinement
+intentionally narrowed which rules fire.
+Suggested action: investigate during 8B test audit OR defer to
+post-launch. NOT caused by 8A squash (schema-equivalent verified).
