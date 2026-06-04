@@ -197,20 +197,36 @@ rules:
     weight: 0.40
     maturity_sensitive: true
 
-  - name: api_non_cloud_ip
-    description: "API booking arriving from a non-cloud, non-datacenter IP"
-    condition: "is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip"
-    weight: 0.40
+  # =====================================================================
+  # Phase 7C.7 — case-2 learning-based detection. Replaces the deleted
+  # api_non_cloud_ip (tenant-agnostic novelty heuristic, 41% fire rate on
+  # approved corpus) and non_cloud_established_account (same signal at
+  # lower weight, 40% fire). Those rules' is_cloud_ip / is_datacenter_ip
+  # conditions captured gobolt-tenant-specific infrastructure (their
+  # legit API booked from Google Cloud) but fired universally on any
+  # tenant's API-from-non-cloud traffic. The replacement uses
+  # per-customer learned ASN deviation (unfamiliar_asn_for_customer
+  # derivation from 7C.6): each customer's accumulated ip_asn_stats
+  # baseline is their reference; deviation is the signal. Sharp on
+  # case-2 (gobolt customers shifting off Google Cloud); silent on
+  # non-gobolt tenants whose customers have non-cloud ASN baselines.
+  #
+  # Cold-start gate (customer_observations >= 10) is INSIDE the
+  # _asn_unfamiliar_for_customer derivation, matching the 7C.2
+  # _outbound_destination_mismatch pattern. The YAML condition is just
+  # the two-conjunct compose: is_api_booking AND
+  # unfamiliar_asn_for_customer.
+  # =====================================================================
+  - name: api_booking_from_unfamiliar_asn
+    description: "Case-2 learning-based — API booking from an ASN that is novel for this customer's accumulated baseline. Targets API-key-compromise attacks where the attacker routes bookings through their own infrastructure (typically residential ASN) instead of the customer's established source (e.g., Google Cloud for gobolt customers, static business ASN for on-prem ERP customers)."
+    condition: "is_api_booking AND unfamiliar_asn_for_customer"
+    weight: 0.65
+    maturity_sensitive: false
 
   - name: new_user_api_non_cloud
     description: "New user booking via API from a non-cloud, non-datacenter IP"
     condition: "is_new_user AND is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip"
     weight: 0.40
-
-  - name: non_cloud_established_account
-    description: "Established API account booking from non-cloud, non-datacenter IP"
-    condition: "NOT is_cloud_ip AND NOT is_datacenter_ip AND NOT is_new_user AND is_api_booking"
-    weight: 0.20
 
   - name: web_booking_from_cloud_ip
     description: "Web booking (UI channel) arriving from cloud or datacenter IP"

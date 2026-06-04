@@ -72,7 +72,7 @@ def test_risk_evaluation_produces_emf_block_with_correct_shape() -> None:
         "account_prior": 0.10,
         "signal_score": 0.40,
         "maturity": 0.0,
-        "triggered_rules": ["api_non_cloud_ip", "new_user_api_non_cloud"],
+        "triggered_rules": ["api_booking_from_unfamiliar_asn", "new_user_api_non_cloud"],
         "trust_score": 0.55,
         "flagged_count": 0,
     }

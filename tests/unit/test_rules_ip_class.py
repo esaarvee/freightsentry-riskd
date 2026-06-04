@@ -31,26 +31,38 @@ def test_residential_asn_high_velocity_threshold_15(ruleset: RuleSet) -> None:
 
 
 # ---------------------------------------------------------------------------
-# api_non_cloud_ip — is_api_booking AND NOT is_cloud_ip AND NOT is_datacenter_ip
+# api_booking_from_unfamiliar_asn (Phase 7C.7 replacement for the deleted
+# api_non_cloud_ip + non_cloud_established_account pair) —
+# is_api_booking AND unfamiliar_asn_for_customer
 # ---------------------------------------------------------------------------
 
 
-def test_api_non_cloud_ip_truth_table(ruleset: RuleSet) -> None:
-    rule = find_rule(ruleset, "api_non_cloud_ip")
+def test_api_booking_from_unfamiliar_asn_truth_table(ruleset: RuleSet) -> None:
+    rule = find_rule(ruleset, "api_booking_from_unfamiliar_asn")
 
     def fires(**overrides: object) -> bool:
         ctx = base_ctx()
         ctx["is_api_booking"] = True
         ctx["is_platform_booking"] = False
-        ctx["is_cloud_ip"] = False
-        ctx["is_datacenter_ip"] = False
+        ctx["unfamiliar_asn_for_customer"] = True
         ctx.update(overrides)  # type: ignore[arg-type]
         return rule.evaluate(ctx)
 
     assert fires() is True
     assert fires(is_api_booking=False, is_platform_booking=True) is False
-    assert fires(is_cloud_ip=True) is False
-    assert fires(is_datacenter_ip=True) is False
+    assert fires(unfamiliar_asn_for_customer=False) is False
+
+
+def test_api_booking_from_unfamiliar_asn_weight_and_maturity(ruleset: RuleSet) -> None:
+    """Weight 0.65 places the rule in REVIEW band standalone (just
+    below BLOCK 0.80). maturity_sensitive false because the cold-start
+    gate (customer_observations >= 10) is INSIDE the
+    _asn_unfamiliar_for_customer derivation — downweighting via
+    maturity would suppress the signal we use to flag the threat."""
+    rule = find_rule(ruleset, "api_booking_from_unfamiliar_asn")
+    assert rule.weight == 0.65
+    assert rule.maturity_sensitive is False
+    assert rule.action == ""
 
 
 # ---------------------------------------------------------------------------
@@ -69,31 +81,6 @@ def test_new_user_api_non_cloud_requires_new_user(ruleset: RuleSet) -> None:
     assert rule.evaluate(ctx) is True
     ctx["is_new_user"] = False
     assert rule.evaluate(ctx) is False
-
-
-# ---------------------------------------------------------------------------
-# non_cloud_established_account — same shape but inverted on is_new_user
-# ---------------------------------------------------------------------------
-
-
-def test_non_cloud_established_account_excludes_new_users(ruleset: RuleSet) -> None:
-    rule = find_rule(ruleset, "non_cloud_established_account")
-
-    def fires(**overrides: object) -> bool:
-        ctx = base_ctx()
-        ctx["is_api_booking"] = True
-        ctx["is_platform_booking"] = False
-        ctx["is_cloud_ip"] = False
-        ctx["is_datacenter_ip"] = False
-        ctx["is_new_user"] = False
-        ctx.update(overrides)  # type: ignore[arg-type]
-        return rule.evaluate(ctx)
-
-    assert fires() is True
-    assert fires(is_new_user=True) is False
-    assert fires(is_cloud_ip=True) is False
-    assert fires(is_datacenter_ip=True) is False
-    assert fires(is_api_booking=False, is_platform_booking=True) is False
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +156,17 @@ def test_ip_class_rules_load(ruleset: RuleSet) -> None:
     Canonical total-count audit lives in 2C.7."""
     expected = {
         "residential_asn_high_velocity",
-        "api_non_cloud_ip",
+        # api_non_cloud_ip + non_cloud_established_account replaced by
+        # api_booking_from_unfamiliar_asn in Phase 7C.7.
+        "api_booking_from_unfamiliar_asn",
         "new_user_api_non_cloud",
-        "non_cloud_established_account",
         "web_booking_from_cloud_ip",
         "web_only_customer_using_api",
     }
     actual = {r.name for r in ruleset.rules}
     missing = expected - actual
     assert not missing, f"missing IP-class rules: {missing}"
+    # Pin deletion: a future accidental revive of the symmetric pair
+    # surfaces here.
+    assert "api_non_cloud_ip" not in actual
+    assert "non_cloud_established_account" not in actual

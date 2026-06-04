@@ -242,8 +242,10 @@ def test_rule_count_after_6a9(ruleset: Any) -> None:
     adds cold_start_population_baseline_rare_with_carrier_dropoff → 82.
     Phase 7C.2 swaps cold_start_country_triangle_with_carrier_dropoff
     for cold_start_outbound_carrier_dropoff (1-for-1) → unchanged at 82.
+    Phase 7C.7 deletes api_non_cloud_ip + non_cloud_established_account
+    and adds api_booking_from_unfamiliar_asn (net -1) → 81.
 
     Uses the conftest `ruleset` fixture (cwd-independent) rather than
     opening rules.yaml by relative path.
     """
-    assert len(ruleset.rules) == 82
+    assert len(ruleset.rules) == 81

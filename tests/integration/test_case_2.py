@@ -29,6 +29,8 @@ import pytest
 import structlog
 from httpx import AsyncClient
 
+from tests.conftest import seeded_ip_enrichment
+
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 
 
@@ -146,12 +148,30 @@ async def test_unfamiliar_ip_against_established_customer_blocks_under_layer2(
         source_ip="198.51.100.42",
         channel="api",
     )
-    with structlog.testing.capture_logs() as captured:
-        response = await unauth_client.post(
-            _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
-        )
-    assert response.status_code == 200
-    body = response.json()
+    # Phase 7C.7: api_booking_from_unfamiliar_asn requires a non-None
+    # asn_org from enrichment. Seed Comcast (residential) so the rule
+    # can compare against the customer's GOOGLE-only baseline (set
+    # by _seed_established_customer above). Without this seed,
+    # enrichment returns asn_org=None and the new rule's defensive
+    # guard returns False, breaking case-2 detection in tests.
+    #
+    # country="RU" preserves unfamiliar_ip_country_for_origin firing:
+    # baseline carries "100 Bay Street||US"; the attack IP from a
+    # different country produces a novel origin/IP-country pair.
+    async with seeded_ip_enrichment(
+        db_conn,
+        "198.51.100.42",
+        asn_org="Comcast",
+        country="RU",
+        is_cloud=False,
+        is_datacenter=False,
+    ):
+        with structlog.testing.capture_logs() as captured:
+            response = await unauth_client.post(
+                _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
+            )
+        assert response.status_code == 200
+        body = response.json()
 
     # The canonical Phase 2 success criterion: case-2 reaches BLOCK.
     assert body["decision"] == "BLOCK", (
@@ -165,10 +185,12 @@ async def test_unfamiliar_ip_against_established_customer_blocks_under_layer2(
         f"per the bootstrap 'no weight tuning in Phase 2' rule."
     )
 
-    # 6-rule compound check — each rule pins a specific failure mode.
-    # If any of these silently stops firing, the remaining rules can
-    # still push score past BLOCK; this assertion locks the compound
-    # itself, not just the outcome.
+    # 5-rule compound check (Phase 7C.7 update: api_non_cloud_ip +
+    # non_cloud_established_account replaced by single
+    # api_booking_from_unfamiliar_asn rule). Each rule pins a specific
+    # failure mode. If any silently stops firing, the remaining rules
+    # can still push score past BLOCK; this assertion locks the
+    # compound itself, not just the outcome.
     expected_rules = {
         # Phase 1 maturity-gated familiarity rules (obs >= 10).
         "ip_fully_new_for_customer",  # new IP/netblock/ASN, m_s
@@ -176,17 +198,21 @@ async def test_unfamiliar_ip_against_established_customer_blocks_under_layer2(
         # Phase 2C.2 lock-in rules — pin the customer_locked_cloud_api gate.
         "cloud_api_customer_deviation_iptype",  # 5-clause locked detector
         "locked_customer_unfamiliar_ip",  # 4-clause locked + new IP
-        # Phase 2C.3 channel/IP-class rules.
-        "api_non_cloud_ip",  # api + non-cloud + non-dc
-        "non_cloud_established_account",  # +NOT new user
+        # Phase 7C.7 case-2 learning-based detection. Replaces deleted
+        # api_non_cloud_ip + non_cloud_established_account.
+        "api_booking_from_unfamiliar_asn",
     }
     actual_rules = set(body["triggered_rules"])
     missing = expected_rules - actual_rules
     assert not missing, (
-        f"case-2 6-rule compound is incomplete; missing: {missing}. "
+        f"case-2 5-rule compound is incomplete; missing: {missing}. "
         f"Each missing rule indicates a regression in a specific Phase 2C "
-        f"derivation. triggered_rules={body['triggered_rules']}"
+        f"or 7C derivation. triggered_rules={body['triggered_rules']}"
     )
+    # Phase 7C.7 pin: the deleted rules must not appear (catches
+    # accidental rule-name revival).
+    assert "api_non_cloud_ip" not in actual_rules
+    assert "non_cloud_established_account" not in actual_rules
 
     # Observability sanity preserved from 2A.4.
     risk_events = [e for e in captured if e.get("event") == "risk.evaluation"]
