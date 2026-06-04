@@ -41,6 +41,13 @@ services:
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
     ports:
       - "8000:8000"
+    volumes:
+      # Local-dev mount for MaxMind GeoLite2 + IP2Proxy enrichment data.
+      # data/enrichment/ is gitignored (populated by
+      # scripts/fetch_enrichment.py with a MAXMIND_LICENSE_KEY).
+      # Production deployment (ECS Fargate) provisions the data
+      # separately — this mount is dev-only.
+      - ./data/enrichment:/app/data/enrichment:ro
 
 volumes:
   postgres_data:
