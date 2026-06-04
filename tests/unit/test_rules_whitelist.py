@@ -50,9 +50,10 @@ def test_whitelist_size_matches_phase_7c_total() -> None:
     (shipment_route_rare_for_tenant) → 76. Phase 7C.2 swaps
     customer_country_triangle_mismatch for
     customer_destination_country_mismatch_outbound — net unchanged
-    at 76. A size drift catches both accidental removal AND silent
-    addition that bypasses operator + reviewer scrutiny."""
-    assert len(ALLOWED_CONTEXT_FIELDS) == 76
+    at 76. Phase 7C.6 adds unfamiliar_asn_for_customer → 77. A
+    size drift catches both accidental removal AND silent addition
+    that bypasses operator + reviewer scrutiny."""
+    assert len(ALLOWED_CONTEXT_FIELDS) == 77
 
 
 def test_whitelist_contains_phase_6a_2_additions() -> None:

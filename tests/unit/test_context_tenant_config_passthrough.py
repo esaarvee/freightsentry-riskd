@@ -41,10 +41,11 @@ def test_allowed_context_fields_count_is_76_after_6a8() -> None:
     6A.2 adds 2 case-3a signals → 73; 6A.5 adds 2 case-3b signals → 75;
     6A.8 adds 1 case-3b sophisticated signal → 76. Phase 7C.2 swaps
     the symmetric triangle-mismatch field for the asymmetric
-    outbound-destination-mismatch field — net unchanged at 76."""
+    outbound-destination-mismatch field — net unchanged at 76.
+    Phase 7C.6 adds unfamiliar_asn_for_customer → 77."""
     from app.rules import ALLOWED_CONTEXT_FIELDS
 
-    assert len(ALLOWED_CONTEXT_FIELDS) == 76
+    assert len(ALLOWED_CONTEXT_FIELDS) == 77
     # The 5 Phase 4B fields must remain present in the whitelist.
     assert "shipment_currency" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_high" in ALLOWED_CONTEXT_FIELDS

@@ -60,6 +60,11 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "ip2p_threat_spam",
         "ip2p_threat_any",
         "is_residential_asn",
+        # Phase 7C.6 — case-2 learning-based ASN deviation. True iff
+        # enrichment-derived asn_org is non-None AND customer past
+        # the cold-start gate AND the asn_org is novel to the
+        # customer's accumulated ip_asn_stats baseline.
+        "unfamiliar_asn_for_customer",
         # Familiarity (baseline-derived)
         "ip_familiarity_tier",
         "is_new_ip",

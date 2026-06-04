@@ -130,6 +130,10 @@ def base_ctx() -> dict[str, Any]:
         # symmetric triangle-mismatch). Default False; the
         # cold_start_outbound_carrier_dropoff rule tests override.
         "customer_destination_country_mismatch_outbound": False,
+        # Phase 7C.6 — case-2 learning-based ASN deviation. Default
+        # False; the api_booking_from_unfamiliar_asn rule tests
+        # override explicitly.
+        "unfamiliar_asn_for_customer": False,
         # Phase 6A.8 — case-3b sophisticated signal. Default False so
         # rules predating Phase 6A behave identically; case-3b
         # sophisticated rule tests (6A.9) override explicitly.

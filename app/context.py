@@ -150,6 +150,45 @@ def _outbound_destination_mismatch(
     return customer_country != destination_country
 
 
+def _asn_unfamiliar_for_customer(
+    asn_org: str | None,
+    baseline_ip_asn_stats: dict[str, Any],
+    customer_observations: float,
+    gate_threshold: float = 10.0,
+) -> bool:
+    """Phase 7C.6 case-2 learning-based ASN deviation derivation.
+
+    True iff: enrichment produced a non-None `asn_org` AND the
+    customer is past the cold-start gate (>= 10 effective
+    observations by default) AND `asn_org` is not in the customer's
+    accumulated ASN baseline.
+
+    Reuses the existing `ip_asn_stats` field on CustomerBaseline
+    (populated by add_observation since pre-Phase-7 work; decayed
+    uniformly with other stat-dicts at 90-day half-life). No new
+    schema or field added by this derivation — it's purely a
+    consumer of the existing baseline mechanism.
+
+    The cold-start gate is INSIDE the derivation (not in the
+    consuming rule's YAML condition) to match the pattern
+    established by `_outbound_destination_mismatch` for case-3b.
+    Maturity-insensitive rules can be written without re-asserting
+    the gate at the YAML layer.
+
+    Returns False when `asn_org` is None — defensive against
+    enrichment gaps (MaxMind miss / database unavailable). A
+    customer's familiarity baseline cannot meaningfully evaluate
+    novelty without a current ASN to compare.
+
+    Pure boolean; no I/O, no exceptions.
+    """
+    if asn_org is None:
+        return False
+    if customer_observations < gate_threshold:
+        return False
+    return asn_org not in baseline_ip_asn_stats
+
+
 async def build_context(
     conn: asyncpg.Connection,
     *,
@@ -289,6 +328,16 @@ async def build_context(
         "ip2p_threat_spam": "SPAM" in (enrichment.threat or ""),
         "ip2p_threat_any": bool(enrichment.threat),
         "is_residential_asn": is_residential_asn,
+        # Phase 7C.6 — case-2 learning-based ASN deviation. True iff
+        # enrichment produced a non-None asn_org AND the customer is
+        # past the cold-start gate AND asn_org is novel to the
+        # customer's accumulated ip_asn_stats baseline. Reuses the
+        # existing baseline mechanism; no new schema introduced.
+        "unfamiliar_asn_for_customer": _asn_unfamiliar_for_customer(
+            enrichment.asn_org,
+            baseline.ip_asn_stats,
+            baseline.effective_observations,
+        ),
         # Familiarity
         "ip_familiarity_tier": familiarity,
         "is_new_ip": familiarity in ("new_known_asn", "fully_new"),
