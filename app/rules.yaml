@@ -89,8 +89,14 @@ rules:
 
   - name: unknown_destination_address
     description: "Destination address not seen before for this established customer"
+    # Phase 7C.8: weight 0.20 -> 0.10. Case-2 detection moved to
+    # api_booking_from_unfamiliar_asn (7C.7); this rule's role
+    # shifts from primary FPR contributor to secondary corroborating
+    # signal. Condition unchanged; rule continues firing on novel
+    # destination addresses for established customers but no longer
+    # pushes records to REVIEW band standalone.
     condition: "NOT destination_address_familiar AND customer_observations >= 10"
-    weight: 0.2
+    weight: 0.1
     maturity_sensitive: true
 
   - name: ip_fully_new_for_customer
@@ -101,8 +107,16 @@ rules:
 
   - name: unfamiliar_ip_country_for_origin
     description: "Origin paired with an unseen IP country for this established customer"
+    # Phase 7C.8: weight 0.30 -> 0.15. Same rationale as
+    # unknown_destination_address: case-2 detection moved to
+    # api_booking_from_unfamiliar_asn (7C.7); this rule's role
+    # shifts from primary FPR contributor to secondary corroborating
+    # signal. Condition unchanged; the 72% baseline fire rate on
+    # approved corpus is intentionally preserved (legitimate
+    # freight customers' origin expansion is the dominant pattern)
+    # but contribution to scoring drops below REVIEW-pushing.
     condition: "NOT origin_ip_country_familiar AND customer_observations >= 10"
-    weight: 0.3
+    weight: 0.15
     maturity_sensitive: true
 
   # =====================================================================
