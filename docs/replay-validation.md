@@ -444,3 +444,209 @@ Limitations:
 Each file's `per_transaction` array is enumerable for downstream
 analysis. Operator can re-derive any of the aggregate counts in
 this doc from the per_transaction array.
+
+> **Note (Phase 7A.0)**: the `docs/replay-results/` directory + the
+> entire `scripts/replay/` tree (NDJSON corpora) were scrubbed from
+> repository history via `git filter-repo`. Phase 7 operates under
+> a strict aggregate-only output policy; per-record content lives
+> only in `/tmp/` and is never committed. Sections above this note
+> describe the historical Phase 6C measurement state; the files
+> they reference no longer exist in any commit reachable from
+> current HEAD.
+
+---
+
+## Phase 7B variant comparison (2026-06-04)
+
+Phase 7B measured five rule-file variants (A/B/C/D, plus E added
+2026-06-04 after the initial four missed all targets) against all
+three corpora to inform the calibration choice for 7C. The variant
+runner is `scripts/calibration/run_variants.py` (Phase 7 ephemera).
+Variant rule files live in `/tmp/rules-variants/`; result aggregates
+live in `/tmp/phase-7b-results/`. NEITHER is committed.
+
+### Methodology
+
+For each variant ∈ {A, B, C, D} and corpus ∈ {approved, case2, case3}:
+
+1. Truncate replay-tenant per-booking state (feedback, decisions,
+   customer_baselines, shipments, users, customers,
+   tenant_route_baselines, enterprises) so each variant starts
+   from cold-customer baselines and an empty idempotency cache.
+2. Push variant YAML into the running app container via
+   `docker compose cp` and restart the app (rules reload at
+   FastAPI lifespan startup).
+3. Healthcheck poll until `GET /health` returns 200.
+4. Run replay at concurrency=20 (Phase 5D's verified-good steady
+   state; Phase 6C's 50 caused observed `RemoteProtocolError`
+   disconnects under accumulated DB state and was tightened in 7B
+   for stability).
+
+Tenant: `replay-tenant` (id 15622) — token rotated for Phase 7.
+
+Corpora produced by `scripts/calibration/export_from_freight_risk.py`
+from the sibling freight_risk SQLite. Record counts:
+approved=10000, case2=500, case3=95.
+
+### Variant definitions
+
+| Variant | Gate | Weight changes | Secondary signal |
+|---|---|---|---|
+| A | `customer_observations >= 30` on both rules | none | none |
+| B | unchanged (`>= 10`) | IPC 0.3→0.15; DEST 0.2→0.10 | none |
+| C | `>= 30` AND halved weights | both | none |
+| D | unchanged (`>= 10`), weights unchanged | none | IPC: `AND (is_vpn OR is_proxy OR ip2p_threat_any OR ip_in_threat_list OR is_datacenter_ip)`. DEST: `AND shipment_value > shipment_value_threshold_medium` |
+| E | IPC `>= 10` + D-style compound; DEST `>= 30` | none | IPC: D-style compound. DEST: none. |
+
+Where IPC = `unfamiliar_ip_country_for_origin`, DEST =
+`unknown_destination_address`. Variant E was added after the
+initial A/B/C/D pass missed all targets simultaneously: the
+hypothesis was that an asymmetric split (harsh treatment on the
+higher-FPR-contributing IPC + gentle gate-tightening on DEST)
+might find a middle ground between A/C and D.
+
+### Decision-band outcomes
+
+Baseline (Phase 6C): approved 40.83% REVIEW / 0.18% BLOCK; case-2
+recall 98.0%; case-3b detection 0.0%.
+
+| Variant | Approved REVIEW | Approved BLOCK | Case-2 recall | Case-3b detection |
+|---|---|---|---|---|
+| A | 38.83% | 0.10% | 97.6% | 0.0% |
+| B | 40.67% | 0.09% | 99.0% | 0.0% |
+| C | 38.69% | 0.09% | 97.8% | 0.0% |
+| D | 4.28% | 0.07% | 43.2% | 0.0% |
+| E | 34.67% | 0.09% | 97.0% | 0.0% |
+
+### Per-rule fire rates on approved corpus
+
+| Rule | Baseline | A | B | C | D | E |
+|---|---|---|---|---|---|---|
+| `unfamiliar_ip_country_for_origin` | 71.83% | 58.57% | 71.59% | 58.57% | 0.00% | 0.00% |
+| `unknown_destination_address` | 64.82% | 52.39% | 64.12% | 52.39% | 0.00% | 52.39% |
+
+### Per-rule fire rates on case-2 corpus
+
+| Rule | A | B | C | D | E |
+|---|---|---|---|---|---|
+| `unfamiliar_ip_country_for_origin` | 94.0% | 98.0% | 94.0% | 0.0% | 0.0% |
+| `unknown_destination_address` | 93.4% | 97.4% | 93.4% | 0.0% | 93.4% |
+
+### Phase 7 target evaluation
+
+Targets (from PLAN_PHASE_7A.md decisions-absorbed table):
+
+- Approved BLOCK rate < 0.05% (from 0.18%)
+- Approved REVIEW rate < 15% target / < 10% stretch (from 41%)
+- Case-2 recall ≥ 95% floor (from 98%)
+- Case-3b detection ≥ 85% (from 0%)
+- `unfamiliar_ip_country_for_origin` < 15% (from 72%)
+- `unknown_destination_address` < 20% (from 65%)
+
+| Variant | BLOCK | REVIEW | Case-2 recall | Case-3b | IPC fire | DEST fire |
+|---|---|---|---|---|---|---|
+| A | FAIL (0.10%) | FAIL (38.83%) | PASS (97.6%) | EXPECTED FAIL (0%; 7C.2 lands the rule) | FAIL (58.6%) | FAIL (52.4%) |
+| B | FAIL (0.09%) | FAIL (40.67%) | PASS (99.0%) | EXPECTED FAIL | FAIL (71.6%) | FAIL (64.1%) |
+| C | FAIL (0.09%) | FAIL (38.69%) | PASS (97.8%) | EXPECTED FAIL | FAIL (58.6%) | FAIL (52.4%) |
+| D | FAIL (0.07%) | PASS stretch (4.28%) | FAIL (43.2%) | EXPECTED FAIL | PASS (0.0%) | PASS (0.0%) |
+| E | FAIL (0.09%) | FAIL (34.67%) | PASS (97.0%) | EXPECTED FAIL | PASS (0.0%) | FAIL (52.4%) |
+
+Case-3b detection is expected to remain at 0% across all variants
+because the case-3b coverage gap is structurally addressed by the
+new `cold_start_outbound_carrier_dropoff` rule landing in 7C.2,
+not by variant tuning. The 7C.2 + 7D pass measures case-3b.
+
+### No variant meets all targets
+
+A/B/C suppress IPC and DEST fire rates modestly (A and C cut both
+by ~14pp) but the **approved REVIEW rate barely moves** because the
+case-2-targeting rules `api_non_cloud_ip` (weight 0.40) and
+`non_cloud_established_account` (weight 0.20) fire on ~41% of the
+approved corpus on their own. Even when IPC/DEST are partially
+suppressed, the combination of `api_non_cloud_ip` +
+`non_cloud_established_account` + IPC + DEST via noisy-OR exceeds
+the 0.60 REVIEW threshold on the majority of api+non_cloud records.
+
+D *does* meet the REVIEW target (4.28%, well under <15% stretch)
+because zeroing out IPC and DEST drops the noisy-OR score below
+0.60 for most records — but the same change collapses case-2 recall
+to 43.2% (well below the 95% floor). The case-2 fraud signature
+(API+non-cloud+unknown destination) depends on the very IPC and
+DEST signals D zeroes out. The secondary-signal compound design
+discards real fraud-detection capability alongside the FPR.
+
+### Implication for 7C variant selection
+
+No single variant from {A, B, C, D} meets BOTH the approved REVIEW
+target AND the case-2 recall floor. The empirical data suggests
+the floor + target combination is mutually constrained by the
+existing rule catalogue: the rules that drive the FPR also do real
+work catching case-2 fraud.
+
+After A/B/C/D missed, operator (2026-06-04) proposed a fifth
+variant E with an asymmetric split: D-style secondary-signal
+compound on IPC (most FPR-reducing); A-style gate tightening on
+DEST (gentler, preserves case-2 recall on established customers).
+Variant E was measured and:
+
+- REVIEW dropped to 34.67% — directionally helpful (4pp better
+  than A/C; 17pp better than baseline) but still well above the
+  <15% target.
+- Case-2 recall held at 97.0% — within the floor.
+- DEST fire rate held at 52.4% (same as A/C since DEST takes the
+  same A-style gate-tightening).
+
+**Variant E confirmed the structural bound**: even with the
+asymmetric design that targets the highest-FPR-contributing rule
+with the harshest treatment, the other rules in the api+non_cloud
+compound (`api_non_cloud_ip` + `non_cloud_established_account`)
+keep the REVIEW share above 30%. The Phase 7 <15% REVIEW target
+is not reachable through tuning of IPC and DEST alone.
+
+### Decision (2026-06-04): fall back to case-3b fix only
+
+Per operator decision after the 5-variant empirical record:
+
+- **7C.1 (apply chosen variant): SKIPPED**. No variant is applied
+  in 7C. The host's `app/rules.yaml` retains the baseline
+  weights/conditions for the two FPR-driving rules. Calibration
+  backlog items 1 and 2 (`unfamiliar_ip_country_for_origin` 72%
+  fire; `unknown_destination_address` 65% fire) remain
+  **DEFERRED** to post-launch real-data observation, not
+  RESOLVED — the 4-week production fire-rate observation called
+  out in `docs/calibration-backlog.md` items 1 + 2 is the
+  next-step gate for any FPR intervention.
+
+- **7C.2, 7C.3, 7C.4 PROCEED**: case-3b structural fix
+  (`cold_start_outbound_carrier_dropoff` added, symmetric
+  triangle compound deleted) is the load-bearing Phase 7
+  outcome. 7C.2's new rule resolves calibration-backlog item 6
+  (case-3b detection on Roulottes Lupien census). `.ai/decisions.md`
+  Phase 7 amendment documents: (a) the empirical 5-variant record,
+  (b) the structural bound argument, (c) the deferral of items 1 + 2
+  to post-launch.
+
+- **7D (final validation): RUNS** against the post-7C catalogue.
+  The approved-corpus targets are NOT achievable per the 7B
+  finding; 7D documents the actual measurements but does not
+  block Phase 7 close on the FPR targets. Case-2 recall ≥95%
+  and case-3b detection ≥85% remain enforced acceptance gates;
+  the approved REVIEW + IPC + DEST fire-rate targets are
+  re-classified as "expected unchanged from baseline; deferred
+  to post-launch."
+
+- **7E.1**: calibration backlog items 1 + 2 keep their existing
+  "deferred action" narrative (no RESOLVED block added). Item
+  6 (case-3b detection) gets a RESOLVED block referencing
+  7C.2.
+
+### Raw aggregate result files
+
+Files live at `/tmp/phase-7b-results/{a,b,c,d,e}-{approved,case2,case3}.json`
+on the operator's machine. NOT committed. Aggregate-only per Phase 7
+policy.
+
+The reproducibility contract is: re-run
+`scripts/calibration/export_from_freight_risk.py` (deterministic
+under seed=42 against the same freight_risk DB snapshot) + re-run
+`scripts/calibration/run_variants.py`.
