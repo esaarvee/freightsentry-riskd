@@ -120,28 +120,34 @@ def _derive_route_unfamiliar(
     return current_key not in top_n_keys
 
 
-def _triangle_mismatch(
+def _outbound_destination_mismatch(
     customer_country: str | None,
-    origin_country: str | None,
     destination_country: str | None,
 ) -> bool:
-    """Phase 6A.5 customer_country_triangle_mismatch derivation.
+    """Phase 7C.2 case-3b asymmetric mismatch derivation.
 
-    Returns True iff the customer ships outside their declared country
-    in BOTH origin AND destination — the case-3b shape (e.g., a CA
-    customer shipping US → US). Returns False when ANY of the three
-    countries is None: corpora without ground-truth structured-field
-    data cannot trigger the country-mismatch rule by accident.
+    Returns True iff both inputs are truthy (non-None, non-empty)
+    AND differ. The Roulottes Lupien attack shape is customer ships
+    outside their declared country in the DESTINATION only (origin
+    can match customer country). The symmetric triangle-mismatch
+    (deleted in 7C.3) required customer_country to differ from BOTH
+    origin and destination — too narrow for the empirical attack.
 
-    Pure boolean over already-validated inputs; no I/O, no exceptions.
+    Null/empty handling: returns False when either input is None or
+    empty string. Customers without a declared registered country
+    (tier-4 fallback in the freight_risk export) and shipments
+    without a structured destination country cannot trigger this
+    rule by accident. The empty-string special-case is defensive:
+    Pydantic enforces the 2-letter regex at ingress so empty string
+    can't reach the derivation through normal booking flow, but
+    treating it as no-signal symmetric with None eliminates a class
+    of "what if the model loosens" questions.
+
+    Pure boolean; no I/O, no exceptions.
     """
-    return (
-        customer_country is not None
-        and origin_country is not None
-        and destination_country is not None
-        and customer_country != origin_country
-        and customer_country != destination_country
-    )
+    if not customer_country or not destination_country:
+        return False
+    return customer_country != destination_country
 
 
 async def build_context(
@@ -303,19 +309,15 @@ async def build_context(
             shipment_destination_country,
             baseline.effective_observations,
         ),
-        # Phase 6A.5 — case-3b signals (brand-new-customer fraud)
+        # Phase 6A.5 — case-3b signals (brand-new-customer fraud).
         # customer_registered_country is a structured-field passthrough
-        # from payload.customer (ISO 3166-1 alpha-2). customer_country_
-        # triangle_mismatch returns True iff the customer is shipping
-        # outside their declared country in BOTH origin and destination
-        # — a sharp signal when combined with cold-start + carrier-
-        # dropoff in the cold_start_country_triangle_with_carrier_dropoff
-        # compound (6A.5 rule). Returns False when any of the three
-        # countries is None (no signal without ground-truth data).
+        # from payload.customer (ISO 3166-1 alpha-2). Phase 7C.2
+        # replaces the symmetric triangle-mismatch (deleted) with an
+        # asymmetric outbound-destination check matching the
+        # empirically-observed Roulottes Lupien attack shape.
         "customer_registered_country": payload.customer.registered_country,
-        "customer_country_triangle_mismatch": _triangle_mismatch(
+        "customer_destination_country_mismatch_outbound": _outbound_destination_mismatch(
             payload.customer.registered_country,
-            shipment_origin_country,
             shipment_destination_country,
         ),
         # Phase 6A.8 — tenant population baseline rarity (DB-backed,

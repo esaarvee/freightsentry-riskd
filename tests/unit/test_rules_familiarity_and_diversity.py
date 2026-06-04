@@ -169,6 +169,8 @@ def test_phase2_end_total_rule_count(ruleset: RuleSet) -> None:
     6A.3 case_3_compound:                         +1 =  80
     6A.5 cold_start_country_triangle:             +1 =  81
     6A.9 cold_start_population_baseline_rare:     +1 =  82
+    7C.2 swap cold_start_country_triangle for
+         cold_start_outbound_carrier_dropoff:     net 0 = 82
     """
     assert len(ruleset.rules) == 82
 

@@ -35,8 +35,8 @@ class CustomerData(BaseModel):
     external_id: str
     registered_address: str | None = None
     business_name: str | None = None
-    # Phase 6A.5: structured country signal for case-3b detection
-    # (cold_start_country_triangle_with_carrier_dropoff). ISO 3166-1
+    # Phase 6A.5 + 7C.2: structured country signal for case-3b
+    # detection (cold_start_outbound_carrier_dropoff). ISO 3166-1
     # alpha-2 uppercase code or None. Platform integration supplies the
     # field on production booking payloads; replay corpora inject ground
     # truth where known (CA for Roulottes Lupien census; null for
@@ -44,6 +44,9 @@ class CustomerData(BaseModel):
     # string parsing on purpose — format variation across users / forms /
     # platforms makes parsers silently unreliable (same family of
     # problem that dropped address-string-matching signals earlier).
+    # The originally-paired symmetric triangle compound was replaced in
+    # 7C.2 by the asymmetric outbound compound; this field's consumer
+    # rule is now cold_start_outbound_carrier_dropoff.
     registered_country: str | None = Field(
         default=None, min_length=2, max_length=2, pattern=r"^[A-Z]{2}$"
     )

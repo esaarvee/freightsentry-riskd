@@ -580,34 +580,37 @@ rules:
     maturity_sensitive: true
 
   # =====================================================================
-  # Phase 6A.5 — case-3b simple compound (brand-new-customer fraud).
-  # Brand-new customer (< 10 obs, so the per-customer route baseline is
-  # not meaningful) ships outside their declared country in BOTH origin
-  # AND destination, AND uses a carrier-dropoff origin handoff. Each
-  # signal is benign-ish in isolation:
-  #   - cross-border freight forwarders legitimately ship outside their
-  #     own country
-  #   - small businesses occasionally test carrier-dropoff
-  #   - brand-new customers obviously exist
-  # The combination of all three is the case-3b attack shape (e.g. the
-  # Roulottes Lupien 95-record fraud cluster, where a Canadian business
-  # appeared as a brand-new customer shipping CA → US repeatedly with
-  # carrier-facility drop-off).
+  # Phase 7C.2 — case-3b asymmetric compound (Roulottes Lupien attack
+  # shape). Replaces the symmetric triangle compound above. The
+  # triangle compound assumed customer ships outside their declared
+  # country in BOTH origin and destination; the empirical Phase 6C
+  # measurement (0/95 detection on the Roulottes Lupien census)
+  # showed the attack shape is asymmetric: customer ships FROM their
+  # declared country (origin matches) TO outside-country with
+  # carrier-facility drop-off.
   #
-  # Weight 0.65 sits just below BLOCK band 0.80 standalone — lands in
-  # REVIEW by itself. Composes with IP-quality / value-tier / IP-novelty
-  # cold-start rules to reach BLOCK when multiple signals fire. Maturity-
-  # INSENSITIVE because the cold-start gate is already in the condition.
+  # Predicates:
+  # - customer_destination_country_mismatch_outbound: derived in
+  #   app/context.py via _outbound_destination_mismatch. True iff
+  #   customer.registered_country and shipment.destination.country
+  #   are both truthy (non-None, non-empty) AND differ. Null/empty
+  #   safety encapsulated in the helper.
+  # - origin_via_carrier_dropoff: structured-field passthrough.
+  # - customer_observations < 10: cold-start gate.
   #
-  # The sophisticated case-3b sibling rule
-  # (cold_start_population_baseline_rare_with_carrier_dropoff) lands in
-  # 6A.9 and uses the tenant population baseline instead of the fixed
-  # country-equality heuristic.
+  # Weight 0.65 sits below BLOCK band 0.80 standalone — lands in
+  # REVIEW by itself. Composes with IP-quality / value-tier
+  # cold-start rules to reach BLOCK when multiple signals fire.
+  # maturity_sensitive false (gate inside the condition).
+  #
+  # The symmetric `cold_start_country_triangle_with_carrier_dropoff`
+  # rule above is DELETED in 7C.3. Both compounds co-existed only
+  # transiently between 7C.2 and 7C.3 (declared break).
   # =====================================================================
 
-  - name: cold_start_country_triangle_with_carrier_dropoff
-    description: "Case-3b simple — brand-new customer (< 10 obs) ships outside their declared country in BOTH origin AND destination AND uses carrier-dropoff origin handoff. Targets brand-new-customer fraud where transaction baseline cannot anchor route-deviation."
-    condition: "customer_country_triangle_mismatch AND origin_via_carrier_dropoff AND customer_observations < 10"
+  - name: cold_start_outbound_carrier_dropoff
+    description: "Case-3b asymmetric — brand-new customer (< 10 obs) ships to a destination outside their declared country via carrier-dropoff origin handoff. Targets the Roulottes Lupien attack shape (customer ships FROM declared country TO outside-country with carrier facility drop-off)."
+    condition: "customer_destination_country_mismatch_outbound AND origin_via_carrier_dropoff AND customer_observations < 10"
     weight: 0.65
     maturity_sensitive: false
 

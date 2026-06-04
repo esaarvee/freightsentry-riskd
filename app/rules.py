@@ -121,11 +121,15 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "shipment_route_unfamiliar_for_customer",
         # Phase 6A.5 — case-3b signals. customer_registered_country is a
         # structured-field passthrough from payload.customer (ISO 3166-1
-        # alpha-2). customer_country_triangle_mismatch is derived in
-        # build_context — True iff customer is shipping outside their
-        # declared country in BOTH origin and destination.
+        # alpha-2). Phase 7C.2 replaced the symmetric triangle-mismatch
+        # with the asymmetric outbound-destination check (Roulottes
+        # Lupien attack shape) per the Phase 7B empirical record.
         "customer_registered_country",
-        "customer_country_triangle_mismatch",
+        # Phase 7C.2 — case-3b asymmetric mismatch. True iff
+        # customer.registered_country and shipment.destination.country
+        # are both truthy AND differ. Powers
+        # cold_start_outbound_carrier_dropoff.
+        "customer_destination_country_mismatch_outbound",
         # Phase 6A.8 — case-3b sophisticated signal. Derived from
         # tenant_route_baselines via derive_route_rarity. True iff the
         # current (customer_country, origin_country, destination_country)

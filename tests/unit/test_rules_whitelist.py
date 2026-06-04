@@ -40,16 +40,18 @@ def test_whitelist_is_frozenset() -> None:
     assert isinstance(ALLOWED_CONTEXT_FIELDS, frozenset)
 
 
-def test_whitelist_size_matches_phase_6a_total() -> None:
+def test_whitelist_size_matches_phase_7c_total() -> None:
     """Phase 1 baseline = 45; Phase 2B adds 11 → 56; Phase 3A adds 6 → 62;
     Phase 3B adds 4 → 66; Phase 4B.4 adds 5 (shipment_currency +
     4 tier thresholds) → 71; Phase 6A.2 adds 2
     (origin_via_carrier_dropoff, shipment_route_unfamiliar_for_customer)
     → 73; Phase 6A.5 adds 2 (customer_registered_country,
     customer_country_triangle_mismatch) → 75; Phase 6A.8 adds 1
-    (shipment_route_rare_for_tenant) → 76. A size drift catches both
-    accidental removal AND silent addition that bypasses operator +
-    reviewer scrutiny."""
+    (shipment_route_rare_for_tenant) → 76. Phase 7C.2 swaps
+    customer_country_triangle_mismatch for
+    customer_destination_country_mismatch_outbound — net unchanged
+    at 76. A size drift catches both accidental removal AND silent
+    addition that bypasses operator + reviewer scrutiny."""
     assert len(ALLOWED_CONTEXT_FIELDS) == 76
 
 
@@ -60,11 +62,22 @@ def test_whitelist_contains_phase_6a_2_additions() -> None:
     assert not missing, f"Phase 6A.2 fields not in whitelist: {missing}"
 
 
-def test_whitelist_contains_phase_6a_5_additions() -> None:
-    """Phase 6A.5 case-3b signals must both be in the whitelist."""
-    phase_6a_5 = frozenset({"customer_registered_country", "customer_country_triangle_mismatch"})
-    missing = phase_6a_5 - ALLOWED_CONTEXT_FIELDS
-    assert not missing, f"Phase 6A.5 fields not in whitelist: {missing}"
+def test_whitelist_contains_phase_6a_5_and_7c_case3b_fields() -> None:
+    """customer_registered_country (6A.5) is retained; the symmetric
+    triangle field is REPLACED by the 7C.2 asymmetric outbound
+    field. Both case-3b detection primitives evolved together
+    across 6A.5 → 7C.2."""
+    expected = frozenset(
+        {
+            "customer_registered_country",
+            "customer_destination_country_mismatch_outbound",
+        }
+    )
+    missing = expected - ALLOWED_CONTEXT_FIELDS
+    assert not missing, f"case-3b fields not in whitelist: {missing}"
+    # Triangle field is DELETED in 7C.2 — pin its absence so a future
+    # accidental revive of the symmetric compound is caught.
+    assert "customer_country_triangle_mismatch" not in ALLOWED_CONTEXT_FIELDS
 
 
 def test_whitelist_contains_phase_6a_8_addition() -> None:

@@ -39,7 +39,9 @@ def test_build_modification_context_signature_requires_tenant_config() -> None:
 def test_allowed_context_fields_count_is_76_after_6a8() -> None:
     """4A starts at 66; 4B.4 adds 5 currency-derived fields → 71;
     6A.2 adds 2 case-3a signals → 73; 6A.5 adds 2 case-3b signals → 75;
-    6A.8 adds 1 case-3b sophisticated signal → 76."""
+    6A.8 adds 1 case-3b sophisticated signal → 76. Phase 7C.2 swaps
+    the symmetric triangle-mismatch field for the asymmetric
+    outbound-destination-mismatch field — net unchanged at 76."""
     from app.rules import ALLOWED_CONTEXT_FIELDS
 
     assert len(ALLOWED_CONTEXT_FIELDS) == 76
@@ -52,8 +54,11 @@ def test_allowed_context_fields_count_is_76_after_6a8() -> None:
     # The 2 Phase 6A.2 fields must be present.
     assert "origin_via_carrier_dropoff" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_route_unfamiliar_for_customer" in ALLOWED_CONTEXT_FIELDS
-    # The 2 Phase 6A.5 fields must be present.
+    # Phase 6A.5 customer_registered_country is retained; Phase 7C.2
+    # replaced the symmetric triangle-mismatch with the asymmetric
+    # outbound mismatch.
     assert "customer_registered_country" in ALLOWED_CONTEXT_FIELDS
-    assert "customer_country_triangle_mismatch" in ALLOWED_CONTEXT_FIELDS
+    assert "customer_destination_country_mismatch_outbound" in ALLOWED_CONTEXT_FIELDS
+    assert "customer_country_triangle_mismatch" not in ALLOWED_CONTEXT_FIELDS
     # The Phase 6A.8 sophisticated signal must be present.
     assert "shipment_route_rare_for_tenant" in ALLOWED_CONTEXT_FIELDS

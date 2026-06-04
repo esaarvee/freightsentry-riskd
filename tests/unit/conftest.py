@@ -122,12 +122,14 @@ def base_ctx() -> dict[str, Any]:
         "origin_via_carrier_dropoff": False,
         "shipment_route_unfamiliar_for_customer": False,
         # Phase 6A.5 — case-3b signals. Defaults are None / False;
-        # case-3b rule tests override explicitly. The triangle-mismatch
-        # default is False because the rule shape AND-chains it with
-        # cold-start + carrier-dropoff signals — keeping it neutral
-        # preserves prior-phase regression.
+        # case-3b rule tests override explicitly. The default
+        # registered_country=None + mismatch=False neutralizes the
+        # case-3b compound shape in tests that aren't targeting it.
         "customer_registered_country": None,
-        "customer_country_triangle_mismatch": False,
+        # Phase 7C.2 — case-3b asymmetric signal (replaces the deleted
+        # symmetric triangle-mismatch). Default False; the
+        # cold_start_outbound_carrier_dropoff rule tests override.
+        "customer_destination_country_mismatch_outbound": False,
         # Phase 6A.8 — case-3b sophisticated signal. Default False so
         # rules predating Phase 6A behave identically; case-3b
         # sophisticated rule tests (6A.9) override explicitly.
