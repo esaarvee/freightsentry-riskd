@@ -1,32 +1,68 @@
 # System status — freightsentry-riskd
 
-**Stage**: Greenfield. Phase 1 in progress (foundation adaptation + skeleton + signal/baseline core).
+**Stage**: Pre-launch. Phases 1-7 complete; Phase 8 documentation cleanup in progress. Production deploy to `ca-central-1` is the next operator-driven step.
 
-**Production launch target**: ~6 weeks from project start (Phase 6). Production region `ca-central-1`, test/staging `us-east-2`. Single-tenant cutover; SaaS multi-tenant capability ready from Phase 1 schema onwards.
+**Production region**: `ca-central-1`. **Test/staging region**: `us-east-2`. Single-tenant cutover at launch; SaaS multi-tenant capability ready from the foundation schema onward (RLS-enforced; `tenants` table is the multi-tenant root).
 
-## Implications for design and execution
+For per-phase historical narrative, decisions, and outcome records, see [`docs/history.md`](../docs/history.md). For current architecture, see [`.ai/decisions.md`](./decisions.md). For the schema, see [`.ai/schema.md`](./schema.md). For the rule catalogue, see [`.ai/rules.md`](./rules.md).
 
-- **No production traffic.** All validation runs against integration tests, fixtures (case-1 ATO ~50 shipments, case-2 ATO ~21K shipments) and synthetic load. Phase 6 staging replay against `us-east-2` is the closest approximation to real volume before launch.
-- **No production logs, no telemetry.** Phase 1 emits structured JSON logs to stdout with `metric: true`-tagged counters for later CloudWatch sink (Phase 5 wires the sink).
-- **Latency claims are not measured under realistic conditions.** Phase 5 load test against staging Docker Compose enforces the <200ms p95 ceiling.
-- **Cost projections are pre-launch.** CAD 1000/month operational ceiling validated by Phase 6 cost-explorer extrapolation after 30 days of staging traffic.
-- **Operator runbooks** describe procedures for the launched system. Phase 1-5 runbooks are aspirational — they document the intended state, not currently-occurring operations.
+## Implications for design and execution (pre-launch)
+
+- **No production traffic yet.** All validation runs against integration tests (1118 tests passing per the `tests/coverage_baseline.txt` anchor at Phase 8A close), the staging replay corpus (`us-east-2`), and synthetic fixtures (case-1 ATO ~50 shipments, case-2 ATO ~21K shipments, Phase 6/7 case-3 carrier-dropoff fixtures).
+- **No production logs, no production telemetry yet.** Phase 5C wired EMF-formatted JSON to stdout for the CloudWatch sink. Phase 6 wired the rule-fire and decision metrics; Phase 7 added held-booking + case-2/case-3 metrics. Live observability begins when production traffic starts.
+- **Latency claims validated under staging load only.** Phase 5C load test against the staging Docker Compose stack confirmed the <200 ms p95 ceiling; production re-measurement happens post-launch.
+- **Operator runbooks** in [`docs/`](../docs/) describe the launched-system procedures. The production-launch-checklist and AWS deploy runbook are the active operational references.
 
 ## Phase status
 
-| Phase | Status | Notes |
+| Phase | Status | Outcome |
 |---|---|---|
-| Phase 1 — Foundation + signal/baseline core | In progress | Batch 1A doc adaptation |
-| Phase 2 — Trust + account-prior + full rule library | Pending | |
-| Phase 3 — Modification + feedback + tenant scoping | Pending | |
-| Phase 4 — Per-tenant config + cold-start + admin reads | Pending | |
-| Phase 5 — Observability + security hardening + load test | Pending | |
-| Phase 6 — Deploy + fixture replay + cost validation | Pending | |
+| Phase 1 — Foundation + signal/baseline core | Complete | Postgres + Alembic + RLS + DSL + initial rule catalogue + skeleton API |
+| Phase 2 — Trust + account-prior + full rule library | Complete | Layer 2 wired; trust score computed on read; ~62 rules total |
+| Phase 3 — Modification + feedback + tenant scoping | Complete | `/v1/modification` endpoint + feedback ingestion (3B) + previously-rejected baselines |
+| Phase 4 — Per-tenant config + cold-start + admin reads | Complete | `TenantConfig` + currency ALLOW-list + cold-start grace + admin endpoints |
+| Phase 5 — Observability + security hardening + load test | Complete | EMF observability; tenant-config cache; `riskd_app_login` runtime role; load test green |
+| Phase 6 — Deploy artifacts + fixture replay + case-3 detection | Complete | Case-3a + case-3b rules; `tenant_route_baselines`; multi-stage Docker; GitHub Actions test/build/deploy |
+| Phase 7 — Pre-launch calibration + case-2 learning + retire BLOCK target | Complete | `api_booking_from_unfamiliar_asn` (case-2); ALLOW-only baseline gating (7C.11); geo-rule weight calibration; BLOCK target retired in favour of per-customer case-2 framing |
+| Phase 8 — Documentation cleanup + plan-file teardown | In progress | Migration squash (8A); test rename + coverage anchor (8B); doc consolidation + history.md absorption + plan-file teardown (8C, this batch); phase wrap + final close (8D) |
 
-See `MASTER_PLAN.md` for the per-phase scope, `PLAN_PHASE_{N}.md` for the per-batch commit plan, and `REPORT_PHASE_{N}.md` (produced at phase close) for the disposition record.
+## Anti-drift gates
+
+Established in Phase 8A/8B to prevent silent regression as the codebase matures:
+
+- **Schema golden test** — [`tests/integration/test_schema_golden.py`](../tests/integration/test_schema_golden.py) (from 8A.0). Snapshots the post-squash schema (5 migrations, 13 tables, 2 roles) and fails CI if any column, index, constraint, RLS policy, or grant drifts without a corresponding alembic migration.
+- **Coverage non-regression** — [`tests/coverage_baseline.txt`](../tests/coverage_baseline.txt) (from 8B.0). Anchors line coverage at 91% (Phase 8B baseline). CI enforces non-regression; a drop below baseline fails the build.
+- **Lint / type / unit-test gate** — [`.github/workflows/test.yml`](../.github/workflows/test.yml) runs `ruff check`, `ruff format --check`, `mypy app/`, `pytest tests/unit/` on every push. Integration tests run on PR.
+- **Pre-commit hooks** — [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) replicates the lint/type/unit-test gate locally as a non-bypassable per-commit enforcement (per CLAUDE.md "Pre-commit enforcement").
+
+## Tech stack snapshot
+
+- **Language**: Python 3.13+ (3.14 is the operator's local; pre-commit pins `python3` auto-discovery).
+- **Web framework**: FastAPI on `uvicorn`. Single ASGI app at `app/main.py`.
+- **Database**: PostgreSQL 16. Connection pool via `asyncpg`. Migrations via Alembic (5 post-squash revisions in [`alembic/versions/`](../alembic/versions/)).
+- **Schema validation**: Pydantic v2. All request/response models live in `app/api/<endpoint>.py`.
+- **Config**: `pydantic-settings`. No `env_prefix` — env var names match field names verbatim (e.g. `DATABASE_URL`, `HMAC_SECRET`). Sourced from `.env` locally; from the platform secret manager in production.
+- **External data**: MaxMind GeoLite2-Country + GeoLite2-ASN (geo lookup); IP2Proxy PX11 (VPN / Tor / threat tagging); FireHOL Level 1 + Level 2 (IP threat feeds). All cached locally via `ip_enrichment` table.
+- **Container**: Multi-stage Dockerfile (build vs runtime separation, per Phase 6D). Runtime image strips build-tools.
+- **CI**: GitHub Actions with three-level pipeline ([`.github/workflows/test.yml`](../.github/workflows/test.yml), `build.yml`, `deploy.yml`).
+- **Production target**: ECS Fargate (`ca-central-1`). OIDC for AWS auth (no long-lived access keys).
+
+## Pre-launch readiness
+
+The Phase 8 close gates production launch. Items the operator confirms before flipping production traffic:
+
+- [`docs/production-launch-checklist.md`](../docs/production-launch-checklist.md) — operational acceptance criteria and SQL probes.
+- [`docs/aws-deploy-runbook.md`](../docs/aws-deploy-runbook.md) — GUI walkthrough for the ECS Fargate deploy.
+- [`docs/calibration-backlog.md`](../docs/calibration-backlog.md) — open monitoring + tuning items deferred to the post-launch 5-month observation window.
+- [`docs/security-audit-rls-phase-5.md`](../docs/security-audit-rls-phase-5.md) — RLS + runtime-role audit (operational reference; do not delete).
+- [`docs/replay-validation.md`](../docs/replay-validation.md) — Phase 7D final measurement record and methodology.
+
+The launch is operator-driven, not Claude-driven. The 5-month FPR observation window begins at the operator's launch flip.
 
 ## Mid-run deviations
 
-`.claude/STATUS.md` `Unforeseen / checkpoints` table captures any decisions surfaced during execution that diverge from the approved plan. Empty rows means clean execution; populated rows are paged to the operator at the next checkpoint.
+[`.claude/STATUS.md`](../.claude/STATUS.md) `Unforeseen / checkpoints` table captures decisions surfaced during execution that diverge from the approved plan. Phase 1-7 closed with 9 logged checkpoints; the operator triages at phase boundaries.
 
-Last updated: 2026-05-25 (Phase 1, Batch 1A in progress).
+[`.claude/BUGS.md`](../.claude/BUGS.md) captures tangential issues discovered mid-task. The operator drains at phase boundaries; resolved items receive a `RESOLVED: <commit>` annotation; deferred items get a `DEFERRED to <plan>` annotation.
+
+Last updated: 2026-06-05 (Phase 8C in progress).
