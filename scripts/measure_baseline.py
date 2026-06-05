@@ -19,7 +19,7 @@ Usage:
         [--concurrency 50] \\
         [--json-out docs/baseline-phase-5c.json]
 
-The headroom gate (per PLAN_PHASE_5C.md 5C.4):
+The headroom gate (per Phase 5C.4 plan):
 - If any endpoint p95 > 200ms: STOP. The cache + EMF processor changes
   should not degrade latency this much; surface to STATUS.md.
 - If any endpoint p95 >= 170ms (less than 30ms headroom): YELLOW FLAG.

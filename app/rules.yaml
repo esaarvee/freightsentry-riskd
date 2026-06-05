@@ -339,7 +339,7 @@ rules:
   # =====================================================================
   # Phase 2C.6 — Value-anomaly + geographic + threat-intel composites
   #
-  # Triage notes (per PLAN_PHASE_2C.md):
+  # Triage notes (Phase 2C — see docs/history.md):
   # - threat_intel_level1 (freight_risk 29) NOT ported — Phase 1's
   #   blacklisted_ip BLOCK rule already covers ip_in_level1 at Layer 1.
   #   Adding it as a Layer 3 contribution would be redundant (Layer 1
@@ -487,7 +487,7 @@ rules:
   # The 3 IP-familiarity-tier rules from freight_risk plus 2 compound
   # rules whose conditions re-use existing fields without adaptation.
   #
-  # Triaged from this commit per plan (reason in PLAN_PHASE_2C.md):
+  # Triaged from this commit per Phase 2C plan (see docs/history.md):
   # - unknown_email_for_customer, unknown_phone_for_customer: would
   #   require adapted condition (proxy fields). Defer to Phase 3+
   #   when is_new_email / is_new_phone fields land.

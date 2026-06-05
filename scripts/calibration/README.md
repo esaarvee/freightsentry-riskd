@@ -1,8 +1,7 @@
 # scripts/calibration/ — Phase 7 ephemera
 
-> This directory is Phase 7 ephemera. Created in PLAN_PHASE_7A.md
-> commit 7A.2; deleted in PLAN_PHASE_7E.md commit 7E.3. Do not rely
-> on it after Phase 7 closes.
+> This directory is Phase 7 ephemera. Created in commit 7A.2;
+> deleted in commit 7E.3. Do not rely on it after Phase 7 closes.
 
 The directory is gitignored (`.gitignore` `scripts/calibration/` since
 Phase 7A.0). Files here must be staged with `git add -f` during Phase 7.

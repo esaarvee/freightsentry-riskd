@@ -9,7 +9,7 @@ Seventeen rules grouped into:
 - Threat-intel composites (6): Level-2-with-VPN, IP2P signal/scanner/
   new-user/api, open-proxy (NOT VPN AND NOT Tor)
 
-Note: PLAN_PHASE_2C.md triaged 2 rules out of the original 19-rule list
+Note: Phase 2C triaged 2 rules out of the original 19-rule list
 (threat_intel_level1 — Phase 1 BLOCK already covers; outside_allowed_country
 — defers to Phase 4 tenant-config landing). After triage, 17 rules
 land here.

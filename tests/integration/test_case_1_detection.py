@@ -6,7 +6,7 @@ the attacker bursts 30 web-channel bookings from a single VPN IP in the
 185.220.101.0/24 range over ~60 minutes (single-IP burst is the more
 realistic ATO pattern — attackers don't rotate per booking).
 
-Per PLAN_PHASE_2D.md the assertions use band-level tolerances — we
+Per the Phase 2D plan, the assertions use band-level tolerances — we
 do NOT pin a specific shipment index for each band transition because:
 (a) the score progression depends on noisy-OR composition of many
 rules whose weights are Phase-6 calibration targets, and

@@ -7,8 +7,8 @@ three NDJSON corpora to an operator-supplied output directory
 that the replay orchestrator (scripts/replay_validation.py) consumes.
 
 THIS SCRIPT IS PHASE 7 EPHEMERA. Tracked during Phase 7 only; deleted
-in PLAN_PHASE_7E.md commit 7E.3. NEVER produces output inside the
-repo tree; output paths are /tmp by default.
+in commit 7E.3. NEVER produces output inside the repo tree; output
+paths are /tmp by default.
 
 Customer-country derivation (priority order, per-record):
   1. Explicit country column on a customers table — N/A in the
@@ -126,7 +126,7 @@ _CORPORA: tuple[CorpusSpec, ...] = (
     CorpusSpec(
         slug="case3",
         filename="case3_census.ndjson",
-        # Exact match per PLAN_PHASE_6C.md + 7A.2; the plan-specified
+        # Exact match per the Phase 6C / 7A.2 plan; the plan-specified
         # literal text is the operator's ground-truth notes string.
         where_clause=(
             "f.feedback='reject' AND f.notes='Roulottes Lupien — entire customer history fraud (user-confirmed)'"

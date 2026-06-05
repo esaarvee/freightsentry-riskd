@@ -92,7 +92,7 @@ explain this:
    The 5C.4 baseline run was shorter and didn't reach warm steady-state.
 
 The 5D.2 RLS role transition did NOT push the load test over the
-budget. Earlier projection from REPORT_PHASE_5B was "5D's role
+budget. The earlier 5B projection was "5D's role
 transition + RLS overhead is expected to add 5-15ms p95" — actual
 overhead is small enough to be lost in the noise vs the bigger
 cache-warmth signal. Cache hit ratio dominates RLS overhead.

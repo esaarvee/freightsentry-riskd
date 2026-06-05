@@ -7,11 +7,11 @@ orchestrator against three corpora for each variant, and writes
 aggregate result JSON files to a results directory.
 
 THIS SCRIPT IS PHASE 7 EPHEMERA. Tracked during Phase 7 only; deleted
-in PLAN_PHASE_7E.md commit 7E.3. Variant rule files live in /tmp;
-result aggregates live in /tmp; ONLY the final docs/replay-validation.md
+in Phase 7E commit 7E.3. Variant rule files live in /tmp; result
+aggregates live in /tmp; ONLY the final docs/replay-validation.md
 section gets committed (and that's done by hand, NOT by this script).
 
-Variants (per PLAN_PHASE_7B.md):
+Variants (Phase 7B):
 
   A — Tightened maturity gate, weights unchanged
       unfamiliar_ip_country_for_origin: gate >= 30; weight 0.3
