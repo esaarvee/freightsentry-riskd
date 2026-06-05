@@ -121,7 +121,7 @@ Subagents MUST NOT mark a task done until pre-commit passes locally. Failures fr
 
    **Slice the plan file in the invocation prompt**: when a plan file is in play, do not have reviewers read the whole file. Specify the current commit position (commit number + brief title) and the section ranges or section headers for the current commit and upcoming commits N+1 through M. Reviewers fetch only those sections via Read offset/limit or section anchors.
 
-   Example invocation suffix: `Plan file: PLAN_PHASE_1.md, current commit: 1B.2 (initial migration), upcoming commits: 1B.3 through 1D.8 sections. Read only those sections.`
+   Example invocation suffix: `Plan file: PLAN_PHASE_N.md, current commit: 1B.2 (initial migration), upcoming commits: 1B.3 through 1D.8 sections. Read only those sections.` (Phase 1-7 plan files were deleted in 8C.13; the example pattern teaches the slicing technique using a hypothetical plan-file name. For the historical phase narratives see `docs/history.md`.)
 
    The reviewer agents are tuned to load plan context lazily — telling them up-front which sections matter avoids loading thousands of lines of unrelated commit history per cycle.
 
@@ -285,7 +285,7 @@ When a subagent encounters an issue tangential to its current task — a bug in 
    ```
    ## YYYY-MM-DD — <one-line summary>
 
-   Discovered by: <subagent role> during <task ID, e.g. PLAN_PHASE_2.md 2D.3>
+   Discovered by: <subagent role> during <task ID, e.g. PLAN_PHASE_N.md 2D.3>
    Location: <file:line or N/A>
    Severity: low | medium | high
    Observation: <2-3 sentences of what's wrong>
@@ -310,7 +310,7 @@ Each work phase has a distinct job. Verification, planning, and execution should
 
 - **Verification phase** discovers facts about the codebase. Writes to `docs/verification-phase-N.md`. Does NOT change code, plans, or decisions. Reads anywhere the bootstrap prompt directs; writes only the verification doc.
 
-- **Planning phase** produces MASTER_PLAN amendments (if any) and PLAN_PHASE_N.md. Reads verification output and the design context. Does NOT re-explore the codebase; if planning needs facts not in verification, return to verification rather than shortcut.
+- **Planning phase** produces `PLAN_PHASE_N.md`. Reads verification output and the design context. Does NOT re-explore the codebase; if planning needs facts not in verification, return to verification rather than shortcut. At phase close, the plan-file narrative is absorbed into `docs/history.md`; PLAN files for Phases 1-7 were absorbed and deleted in 8C.13.
 
 - **Execution phase** applies the plan. Reads what the plan says to read; modifies what the plan says to modify. Does NOT decide new things or re-plan in flight.
 
