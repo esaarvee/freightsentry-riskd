@@ -384,3 +384,45 @@ Completed during the Phase 8 verification phase. Key findings (see PLAN_PHASE_8A
 
 - **8D**: Verifies `docs/production-launch-checklist.md` references are all live (every doc the checklist references exists post-8C). 8D.2 is the verification gate.
 - **8D.1 — REPORT_PHASE_8.md**: must reference `docs/history.md` instead of historical PLAN files.
+
+## Execution record (2026-06-05)
+
+All 15 commits in 8C landed on `feat/refactor`:
+
+| Commit | Hash | Subject |
+|---|---|---|
+| 8C.1 | 795d5c0 | restructure .ai/decisions.md to topic-organized current-architecture (1963 → 631 lines) |
+| 8C.2 | e0346fe | rewrite .ai/schema.md against post-squash 5-migration state (335 → 557) |
+| 8C.3 | 8ab6b30 | rewrite .ai/rules.md with Phase 4-7 catalogue + corrected fields (278 → 657); 81/81 rules + 77/77 ALLOWED_CONTEXT_FIELDS |
+| 8C.4 | 59ee3ef | refresh .ai/system-status.md to pre-launch state (32 → 68) |
+| 8C.5 | 674f013 | trim docs/replay-validation.md (938 → 515; Phase 7D preserved verbatim) |
+| 8C.6 | 412eaf4 | annotate calibration-backlog 20 items with Phase 8C close status (475 → 587) |
+| 8C.7 | 52c7968 | light-audit docs/production-launch-checklist.md (254 lines; phase preambles trimmed) |
+| 8C.8 | 15b0c86 | document ALLOW-only baseline accumulation gate in .ai/enrichment.md |
+| 8C.9 | (no-op) | METRIC_SPECS verified current — 21 entries match docs/observability.md 1:1; no commit |
+| 8C.10 | d6b516e | delete 4 superseded audit + verification docs (1020 lines removed) |
+| 8C.11 | 561a5f6 | generate REPORT_PHASE_7.md (457 lines; transient — deleted in 8C.13) |
+| 8C.12 | f80bcd8 | create docs/history.md (1786 lines) absorbing 48+ source docs |
+| 8C.13 | 1aa6781 | delete 51 Phase 1-7 PLAN/REPORT/MASTER_PLAN files; fix 8 cross-refs |
+| 8C.14 | 8ad8721 | update CLAUDE.md (3 cross-ref fixes; MASTER_PLAN refs → 0) |
+| 8C.15 | (this commit) | batch close; execution record |
+
+Acceptance criteria 1-14 all met:
+1. ✓ `.ai/decisions.md` topic-organized (631 lines, 21 H2 sections).
+2. ✓ `.ai/schema.md` rewritten against post-squash 5-migration state (557 lines, H2 per migration).
+3. ✓ `.ai/rules.md` rewritten with Phase 4-7 catalogue (657 lines, 81/81 rules + 77/77 fields).
+4. ✓ `.ai/system-status.md` reflects pre-launch state (68 lines).
+5. ✓ `docs/replay-validation.md` trimmed (515 lines); Phase 7D measurement intact verbatim.
+6. ✓ `docs/calibration-backlog.md` 20 items preserved with Phase 8C status annotations.
+7. ✓ Operational runbooks light-edited (production-launch-checklist + load-test-phase-5 minor refs).
+8. ✓ Deleted: security-audit-rls-phase-3/4.md, verification-phase-1.md, initial-audit.md.
+9. ✓ REPORT_PHASE_7.md generated (8C.11), absorbed in 8C.12, deleted in 8C.13.
+10. ✓ `docs/history.md` created at 1786 lines (within 1200-1800 target).
+11. ✓ Deleted 51 files: PLAN_PHASE_1-7*.md, REPORT_PHASE_*.md, MASTER_PLAN.md.
+12. ✓ CLAUDE.md updated; 0 MASTER_PLAN refs.
+13. ✓ Cross-reference audit clean: zero refs to deleted files outside docs/history.md and Phase 8 plan files.
+14. ✓ PLAN_PHASE_8C.md final state with execution record (this section).
+
+Reviewer-panel discipline: every code-touching commit ran the routed reviewer panel; no panel-skip events. First-pass clean on 8C.2, 8C.3, 8C.7, 8C.8, 8C.10, 8C.12. Second-cycle iteration on 8C.1 (one accuracy fix), 8C.4 (one test-count correction), 8C.11 (one typo fix).
+
+No high-severity issues. No `.claude/STATUS.md` checkpoint entries. No `.claude/BUGS.md` entries logged during 8C.
