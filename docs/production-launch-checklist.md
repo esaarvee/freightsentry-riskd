@@ -8,8 +8,10 @@
 > Cross-references:
 > - `docs/aws-deploy-runbook.md` — one-time AWS infrastructure setup
 > - `docs/calibration-backlog.md` — post-launch tuning items
-> - `docs/security-audit-rls-phase-5.md` — RLS posture + Phase 5D auth
->   chicken-and-egg context
+> - `docs/security-audit-rls-phase-5.md` — RLS posture + runtime-role
+>   auth chicken-and-egg context
+> - `tests/integration/test_schema_golden.py` — schema anti-drift gate
+> - `tests/coverage_baseline.txt` — coverage non-regression anchor
 
 ---
 
@@ -49,9 +51,10 @@
       `ALEMBIC_DATABASE_URL` (superuser DSN).
 - [ ] Verify `riskd_app_login` role exists in RDS.
 - [ ] Verify `riskd_app` role exists and has NO LOGIN permission.
-- [ ] Verify migrations 0010 (`customer_baselines.country_route_stats`)
-      and 0011 (`customers.registered_country` + `tenant_route_baselines`
-      + RLS) applied.
+- [ ] Verify all 5 post-squash migrations applied (`0001_foundation`
+      through `0005_runtime_roles`). The squashed schema includes
+      `customer_baselines.country_route_stats`, `customers.registered_country`,
+      `tenant_route_baselines` + RLS, and the `riskd_app_login` runtime role.
 - [ ] Verify `tenant_route_baselines` is empty for the new tenant:
       `SELECT COUNT(*) FROM tenant_route_baselines WHERE tenant_id = $1`
       returns 0. This is expected cold-start state; the table populates
@@ -70,7 +73,7 @@
 - [ ] **RLS verification (existing tables)**: connect to RDS as
       `riskd_app_login`, run `SELECT * FROM customers` WITHOUT setting
       `app.tenant_id`. Confirm 0 rows returned.
-- [ ] **RLS verification (Phase 6A new table)**: same query against
+- [ ] **RLS verification (`tenant_route_baselines`)**: same query against
       `tenant_route_baselines`. Confirm 0 rows returned without
       `set_tenant_id`.
 
@@ -123,9 +126,8 @@
 
 - [ ] Latency p95 < 200ms (project ceiling).
 - [ ] Latency p99 trend stable.
-- [ ] **Latency p95 trend monitoring**: Phase 5D baseline was ~12ms;
-      with the +4ms overhead from 6A.7 + 6A.8, the post-deploy baseline
-      shifts to ~16ms.
+- [ ] **Latency p95 trend monitoring**: load-test baseline is ~16ms
+      (Phase 5C load test + case-3 detection overhead).
   - **Yellow flag (≥50ms p95)**: investigate query performance;
     evaluate in-process cache on `tenant_route_baselines` reads.
   - **Red flag (≥195ms p95)**: calibration backlog action before
@@ -135,13 +137,12 @@
       calibration backlog.
 - [ ] Calibration-backlog rules' fire rates observed; pattern compared
       to `docs/replay-validation.md` expectations.
-- [ ] **Customer baseline cold-start ramp** (Phase 7C.10): monitor
-      `customer_baselines` ASN-population rate. The new
-      `api_booking_from_unfamiliar_asn` rule (Phase 7C.7) requires
-      per-customer `customer_observations >= 10` to fire; at
-      launch all baselines start empty so case-2 detection
-      capability ramps with booking accumulation. Day-1 case-2
-      detection by this rule will be 0% by design.
+- [ ] **Customer baseline cold-start ramp**: monitor `customer_baselines`
+      ASN-population rate. The `api_booking_from_unfamiliar_asn` rule
+      requires per-customer `customer_observations >= 10` to fire; at
+      launch all baselines start empty so case-2 detection capability
+      ramps with booking accumulation. Day-1 case-2 detection by this
+      rule will be 0% by design.
       - Query to track: `SELECT COUNT(*) FROM customer_baselines
         WHERE ip_asn_stats <> '{}'::jsonb` (number of customers
         with at least one ASN observation; ip_asn_stats column is
@@ -151,9 +152,9 @@
       - If the ramp is slower than expected (e.g., low-volume
         tenants), surface to calibration-backlog item 16 for
         post-launch evaluation.
-- [ ] **Held-booking backlog** (Phase 7C.11): REVIEW/BLOCK bookings
-      are now HELD in pending state until operator feedback arrives.
-      Operators may want visibility into the backlog size.
+- [ ] **Held-booking backlog**: REVIEW/BLOCK bookings are HELD in
+      pending state until operator feedback arrives. Operators may want
+      visibility into the backlog size.
       - Query to track:
         ```sql
         SELECT COUNT(*) AS held_count
@@ -173,11 +174,10 @@
         feedback never arriving), surface to calibration-backlog
         item 19 for post-launch architectural decision (force-
         fold admin endpoint or grace-period auto-fold).
-- [ ] **Cold-start ramp under 7C.11 gating**: customer baseline
-      accumulation now requires ALLOW bookings (or operator-
+- [ ] **Cold-start ramp under ALLOW-gated baselines**: customer
+      baseline accumulation requires ALLOW bookings (or operator-
       approved feedback on REVIEW/BLOCK bookings). Expect ~5-15%
-      longer cold-start window vs the legacy "all bookings
-      populate baseline" behavior. Tenants with high pre-launch
+      longer cold-start window vs an unconditional baseline. Tenants with high pre-launch
       REVIEW rates see longer ramps. Compare per-tenant
       `customer_baselines.value_n` growth trajectory across
       Days 1-30 against the expected ALLOW-rate × bookings-rate
@@ -205,9 +205,8 @@
 - [ ] Per item: confirm pattern; design tuning intervention (weight
       reduction, condition tightening); run staged replay if a current
       corpus is available; plan-mode the tuning commit.
-- [ ] Tuning commits follow the same CLAUDE.md commit cycle as Phase 6:
-      reviewer panel mandatory; declared breaks if any; per-commit
-      validation.
+- [ ] Tuning commits follow the CLAUDE.md commit cycle: reviewer panel
+      mandatory; declared breaks if any; per-commit validation.
 
 ---
 
@@ -223,13 +222,14 @@
 ## Phase I — Month 5+ (ongoing operation)
 
 - [ ] Calibration cycles continue against the backlog.
-- [ ] Phase 7+ scope opens (auto-rollback, multi-environment GitHub
-      Actions promotions, IaC migration, additional fraud detection
-      classes, trust-suppression architectural workstream).
+- [ ] Post-launch architectural workstreams open (auto-rollback,
+      multi-environment GitHub Actions promotions, IaC migration,
+      additional fraud detection classes, trust-suppression workstream
+      — see `docs/calibration-backlog.md` items 7 and 17).
 
 ---
 
-## Always-on: Phase 5D auth chicken-and-egg awareness
+## Always-on: auth chicken-and-egg awareness
 
 RLS is DROPPED on `api_tokens` + `app_users` because token lookup precedes
 `set_tenant_id` (chicken-and-egg: you need the token to know the tenant
@@ -247,7 +247,7 @@ this defense; there is no DB-layer backstop. Documented in
 - No CI integration tests (unit + Snyk only; integration tests run
   locally against docker-compose Postgres).
 - No auto-migration on deploy (operator one-off ECS task).
-- No IaC (AWS GUI runbook; future Terraform/CDK is Phase 7+ scope).
+- No IaC (AWS GUI runbook; Terraform/CDK is post-launch scope).
 - Single-region per environment (production = `ca-central-1`).
 - Single-customer case-3 cluster validated (Roulottes Lupien); cluster
   recall ≠ population recall until real-data observation across
