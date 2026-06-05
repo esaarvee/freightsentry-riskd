@@ -65,6 +65,39 @@ Implicit — 8A, 8B, 8C have already established the state 8D verifies. The pre-
 
 **Reviewer panel**: doc-reviewer + senior-engineer.
 
+### 8D.2 — Verification matrix (2026-06-05)
+
+`docs/production-launch-checklist.md` cross-reference audit:
+
+| Referenced path | Resolves? | Notes |
+|---|---|---|
+| `docs/aws-deploy-runbook.md` | ✓ | Operational; light-edited path acceptable |
+| `docs/calibration-backlog.md` | ✓ | Post-8C.6 status-annotated state |
+| `docs/security-audit-rls-phase-5.md` | ✓ | Post-8C.10 supersession-claim updated |
+| `tests/integration/test_schema_golden.py` | ✓ | From 8A.0 — anti-drift gate |
+| `tests/coverage_baseline.txt` | ✓ | From 8B.0 — 91% anchor |
+| `infra/iam-policies/` | ✓ | Directory exists |
+| `app/api/booking.py` | ✓ | Live |
+| `scripts/tenant_onboard.py` | ✓ | Live |
+| `.github/workflows/deploy.yml` | ✓ | Live |
+| `docs/load-test-phase-5.md` | ✓ | Post-8C.13 cross-ref fix applied |
+| `docs/replay-validation.md` | ✓ | Post-8C.5 trimmed state |
+| `CLAUDE.md` | ✓ | Post-8C.14 update applied |
+
+Phase A through I operational gate descriptions read end-to-end against current state (post-8C.7 trim):
+- Phase A — Pre-deploy infrastructure: GUI runbook + 9 GitHub Secrets + IAM roles match current AWS deployment model.
+- Phase B — Pre-deploy migrations + tenant bootstrap: references `alembic upgrade head` + 5-migration verification + `riskd_app_login` runtime role check + RLS verification queries — all current.
+- Phase C — First deploy: `git tag v1.0.0 && git push` + `.github/workflows/deploy.yml` rollover + ALB health check — current.
+- Phase D — Post-deploy verification (day 1): EMF metrics + decision rate + error rate + `tenant_route_baselines` population + `customers.registered_country` SQL probe — current.
+- Phase E — Day 1-7 monitoring: latency p95 < 200ms ceiling + customer baseline cold-start ramp + held-booking backlog + ALLOW-gated baseline ramp — all reflect current implementation.
+- Phase F — Week 1-4: population baseline fire rate monitoring — current.
+- Phase G — Month 2-3 (first tuning pass): references `docs/calibration-backlog.md` items 1-6 — current (items 1, 2 are PARTIAL post-8C.6; items 3, 4 are RESOLVED post-rule deletion).
+- Phase H — Month 4-5 (second tuning pass): references calibration-backlog items 9-10 and 11 — current.
+- Phase I — Month 5+: references architectural workstreams items 7 and 17 — current post-8C.6.
+- Always-on: auth chicken-and-egg awareness section — current; cross-references `docs/security-audit-rls-phase-5.md`.
+
+No broken references. No outdated operational gates. Checklist verified current as of 2026-06-05.
+
 ### 8D.3 — Final integration test pass
 
 **Changes**:
