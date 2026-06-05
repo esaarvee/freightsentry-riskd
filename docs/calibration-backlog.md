@@ -2,507 +2,344 @@
 
 > **Audience**: operators and post-launch development phases driving rule
 > weight, threshold, and compound-condition tuning against real production
-> traffic. **NOT acted on during the build phases.** This document is the
-> canonical record of deferred items synthesized from the Phase 6C replay
-> validation + amendments accumulated across Phases 6A and 6D.
+> traffic. **NOT acted on during build phases.**
 >
 > Tuning happens during the 5-month post-launch observation window per
-> `docs/production-launch-checklist.md` (Phase G — Month 2-3 first tuning
-> pass; Phase H — Month 4-5 second pass).
+> `docs/production-launch-checklist.md` (Phase G — Month 2-3 first pass;
+> Phase H — Month 4-5 second pass).
 >
 > Why no build-phase tuning: weights calibrated against synthetic-history
 > data risk fitting the artifact of the synthesis rather than the
 > production reality. Ship the rules as-shipped; observe under real
 > traffic; tune against this backlog with confidence.
 >
-> **Phase 7E close-decision context (2026-06-04)**: Phase 7E closed the
-> build-phase calibration cycle with the BLOCK target retired and case-2
-> detection reframed per-customer-class (gPYG-class established-customer
-> compromise vs. nD7-class brand-new fraud-only customer). The full
-> Phase 7 close-decision narrative lives in [`docs/history.md`](history.md).
-> Items below carry pre-launch status as of Phase 8C close (2026-06-05);
-> the operator triages each item at the 5-month observation window mark
-> against real production traffic, NOT against the synthetic-history replay
-> corpus the backlog originated from.
+> **Status framing**: items below carry pre-launch status as of Phase 8C
+> close (2026-06-05). The operator triages each item at the 5-month
+> observation window mark against real production traffic, NOT against
+> the synthetic-history replay corpus the backlog originated from.
+>
+> **Item numbering** is stable for cross-reference continuity from
+> `docs/history.md` and `.ai/decisions.md`. Items appear by section
+> grouping (active / parameter-tuning / architectural / observation /
+> deferred / resolved), not by number.
 
 ---
 
-## 1. Approved-corpus FPR — `unfamiliar_ip_country_for_origin` (72% fire rate)
+## Active items
 
-**Observation (from `docs/replay-validation.md`)**: the rule fires on
-7,183 / 10,000 operator-approved records — a high baseline that
-contributes meaningfully to the 41% REVIEW share on the approved corpus.
+Known post-launch action paths. Re-measure against production traffic
+during the 5-month observation window; design intervention if the
+pattern persists.
 
-**Deferred action**: observe ≥4 weeks of production fire rate. If the
-pattern persists on real traffic, evaluate (a) weight reduction, or
-(b) compound the trigger with route deviation rather than IP-origin pair
-novelty alone (e.g. require a second signal before the rule contributes).
+### Item 1 — `unfamiliar_ip_country_for_origin` semantic refinement
 
-**PARTIAL** (Phase 7C.8, 2026-06-04): weight reduced 0.30 → 0.15.
-The rule's fire rate is intentionally preserved (Phase 7 amendment
-clarified the rule is pair-novelty on (origin, ip_country) per
-customer; legitimate freight customers' origin expansion is the
-dominant pattern). Its contribution to scoring drops via the
-weight reduction; case-2 detection load shifted to
-`api_booking_from_unfamiliar_asn` (7C.7). Outstanding post-launch
-work: the rule's pair-novelty SEMANTICS may need additional
-refinement (e.g., decouple origin from IP-country; require a
-second signal). Not RESOLVED — semantic refinement still
-deferred to post-launch real-data observation.
+**Status**: PARTIAL (Phase 7C.8); semantic refinement deferred.
 
-**Status (Phase 8C 2026-06-05)**: PARTIAL — weight reduction
-(0.30 → 0.15) landed in 7C.8; pair-novelty semantic refinement
-deferred. Re-measure FPR after 4 weeks of production traffic;
-re-evaluate semantic refinement at the 5-month tuning checkpoint.
+**Observation (Phase 6C replay)**: rule fires on 7,183 / 10,000
+operator-approved records — high baseline contributing to the 41%
+REVIEW share on the approved corpus.
 
----
+**Action landed (Phase 7C.8)**: weight reduced 0.30 → 0.15. Fire rate
+intentionally preserved (the rule's pair-novelty semantics on
+`(origin, ip_country)` per customer remain — legitimate freight
+customers' origin expansion is the dominant pattern). Case-2
+detection load shifted to `api_booking_from_unfamiliar_asn` (Item 16
+context).
 
-## 2. Approved-corpus FPR — `unknown_destination_address` (65% fire rate)
-
-**Observation**: fires on 6,482 / 10,000 approved records. Similar
-high-baseline behavior; rule alone is not discriminating between
-fraud and legitimate novel destinations.
-
-**Deferred action**: observe ≥4 weeks. If persistent on real traffic,
-evaluate weight reduction OR compounding with other signals before
-contributing (e.g. only contribute when paired with a value or IP
-anomaly).
-
-**PARTIAL** (Phase 7C.8, 2026-06-04): weight reduced 0.20 → 0.10.
-Same shape as item 1: fire rate preserved; contribution to scoring
-reduced; case-2 detection load shifted to the ASN-deviation rule.
-Semantic refinement (compound with value or IP anomaly) remains
-post-launch work.
-
-**Status (Phase 8C 2026-06-05)**: PARTIAL — weight reduction
-(0.20 → 0.10) landed in 7C.8; pair-novelty semantic refinement
-deferred. Re-measure FPR after 4 weeks of production traffic;
-re-evaluate semantic refinement at the 5-month tuning checkpoint.
+**Open post-launch work**: pair-novelty semantic refinement. Candidate
+designs: (a) decouple origin from IP-country; (b) require a second
+signal before the rule contributes. Re-measure FPR after ≥4 weeks of
+production traffic; design intervention at the 5-month tuning
+checkpoint if pattern persists.
 
 ---
 
-## 3. Approved-corpus FPR — `api_non_cloud_ip` + `non_cloud_established_account` co-fire
+### Item 2 — `unknown_destination_address` semantic refinement
 
-**Observation**: each fires on >40% of the approved corpus
-(4,128 / 10,000 and 3,986 / 10,000). They are case-2-targeting rules
-but the high baseline indicates partial overlap with legitimate
-behavior shapes.
+**Status**: PARTIAL (Phase 7C.8); semantic refinement deferred.
 
-**Deferred action**: observe ≥4 weeks. Evaluate compound weight or
-condition tightening if the false-positive cluster persists.
+**Observation (Phase 6C replay)**: fires on 6,482 / 10,000 approved
+records. Same shape as Item 1 — high baseline; rule alone not
+discriminating between fraud and legitimate novel destinations.
 
-**Status (Phase 8C 2026-06-05)**: RESOLVED via rule deletion —
-both `api_non_cloud_ip` and `non_cloud_established_account` were
-DELETED in Phase 7C.2 / 7C.7 and replaced by the per-customer
-learned-ASN-deviation rule `api_booking_from_unfamiliar_asn`
-(7C.7). The tenant-agnostic non-cloud-IP signal that produced
-this approved-corpus FPR cluster no longer exists in the rule
-catalogue. The replacement rule's FPR re-measurement falls under
-item 16 (cold-start ramp).
+**Action landed (Phase 7C.8)**: weight reduced 0.20 → 0.10. Fire rate
+preserved; contribution to scoring reduced.
+
+**Open post-launch work**: compound with a value or IP anomaly before
+contributing. Re-measure FPR after ≥4 weeks of production traffic;
+design intervention at the 5-month tuning checkpoint if persistent.
 
 ---
 
-## 4. Approved-corpus BLOCK cluster — 18 records / 0.18%
+### Item 6 — Case-3b detection generalization
 
-**Observation**: 18 / 10,000 approved records reached BLOCK on the
-4-rule compound (`unknown_destination_address` +
-`unfamiliar_ip_country_for_origin` + `api_non_cloud_ip` +
-`non_cloud_established_account`). All 18 records' `request_id` retained
-in `docs/replay-results/approved.json` per-transaction array.
+**Status**: PARTIAL — architectural sub-pattern resolved in Phase
+7C.2-3; population-baseline + case_3_compound validation deferred.
 
-**Caveat**: per Phase 6C limitations, "approved" labels carry label noise
-(operator-approved ≠ truly legitimate). Some fraction of the 18 may be
-fraud that slipped through the manual approval workflow.
+**Context**: Phase 6C measured 0/95 detection on the Roulottes Lupien
+case-3b census. Phase 7C.2 added `cold_start_outbound_carrier_dropoff`
+(asymmetric: customer ≠ destination; origin can match) and deleted the
+symmetric `cold_start_country_triangle_with_carrier_dropoff`. Phase 7D
+re-measurement confirmed 100% detection on the census post-7C.2.
 
-**Deferred action**: post-launch operators triage whether the BLOCK
-pattern persists on real traffic of similar shape. If the pattern
-recurs on confirmed-legitimate transactions, revisit the 4-rule
-compound's weight tuning.
+**Single-customer cluster caveat carries forward**: all 95 census
+records are from one customer. Cluster recall ≠ population recall.
+Generalization across diverse case-3b fraud actors awaits post-launch
+traffic.
 
-**Status (Phase 8C 2026-06-05)**: RESOLVED via rule deletion — two
-of the four compound contributors (`api_non_cloud_ip`,
-`non_cloud_established_account`) were DELETED in Phase 7C.2 / 7C.7.
-The historical 4-rule BLOCK compound no longer exists. The
-remaining two rules (`unknown_destination_address`,
-`unfamiliar_ip_country_for_origin`) had weight reductions in 7C.8
-(items 1, 2). Post-launch BLOCK-cluster pattern re-evaluation
-folds into items 1, 2 monitoring.
+**Open post-launch work**:
 
----
-
-## 5. Case-2 false negatives — 10 / 500 ALLOW'd
-
-**Observation**: 10 case-2 records bypassed BLOCK + REVIEW. The
-fire-count distribution shows `ip_fully_new_for_customer` (138/500)
-and `unknown_origin_address` (88/500) — these records had
-IP-familiar customers AND known origin addresses, softening the
-compound.
-
-**Deferred action**: post-launch evaluation of whether weight
-adjustments would improve case-2 recall toward 100% without
-inflating approved-corpus FPR. Rationale for deferral: 98% recall
-is acceptable for v1 launch; tuning without diverse
-production-traffic counter-examples risks regression on the
-approved-corpus pattern.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. The Phase 7E close decision retired the BLOCK target;
-case-2 measurement reframed per-customer-class (see item 20).
-Recall tuning resumes against real production traffic at the
-5-month checkpoint.
-
----
-
-## 6. Case-3b detection on Roulottes Lupien census — 0 / 95 (0%)
-
-**Observation**: combined REVIEW + BLOCK detection on the 95-record
-census was 0% (target ≥85%). Two structural reasons (full diagnosis
-in `docs/replay-validation.md`):
-
-- **`cold_start_country_triangle_with_carrier_dropoff`** did not fire:
-  the Roulottes Lupien attack is CA-registered customer shipping CA→US,
-  which is asymmetric (origin matches customer country, only
-  destination differs). The triangle-mismatch condition requires both
-  origin AND destination to differ from customer country.
-- **`cold_start_population_baseline_rare_with_carrier_dropoff`** did not
-  fire: the replay tenant had an empty `tenant_route_baselines` table
-  (cold-start). The rule's 100-observation minimum (`RARITY_MIN_OBSERVATIONS`)
-  is intentionally conservative for cold-start tenants.
-
-**Single-customer cluster caveat**: all 95 records are from one
-customer. Cluster recall ≠ population recall. Generalization across
-diverse case-3b fraud actors awaits post-launch traffic.
-
-**Deferred actions (post-launch)**:
-
-1. **Domestic-origin + carrier-dropoff + cross-border-destination
-   sub-pattern.** Either (a) relax `customer_country_triangle_mismatch`
-   to fire when customer ≠ destination only (origin can match), or
-   (b) add `cold_start_outbound_carrier_dropoff` targeting the
-   asymmetric pattern. Decide after post-launch data shows whether
-   this pattern recurs across diverse fraud actors or is specific
-   to the Roulottes Lupien cluster.
-
-2. **Population baseline seeding for new tenants.** Sophisticated
+1. **Population baseline seeding for new tenants.** Sophisticated
    compound detection ramps up as tenants accumulate ≥100 observations.
    Revisit whether 100 is the right minimum or whether sub-100 tenants
    should default to a configurable static rarity list.
 
-3. **`case_3_compound` empirical validation.** `case_3_compound`
-   targets case-3a (established-customer compromise) and is not
-   expected to fire on the case-3b census by design (maturity gate +
-   contaminated customer baseline). Validation defers to post-launch
-   when (a) platform integration supplies the structured signals AND
-   (b) case-3a-style fraud is observed in production.
-
-**Status (Phase 8C 2026-06-05)**: PARTIAL — bullet (1) was
-addressed architecturally in Phase 7C.2-3: the symmetric
-`cold_start_country_triangle_with_carrier_dropoff` rule was
-DELETED and replaced by the asymmetric outbound compound. Bullets
-(2) population-baseline seeding for new tenants and
-(3) `case_3_compound` empirical validation remain DEFERRED to
-post-launch tuning. The single-customer-cluster caveat carries
-forward — generalization measurement awaits real production traffic.
+2. **`case_3_compound` empirical validation.** Targets case-3a
+   (established-customer compromise); not expected to fire on case-3b
+   by design (maturity gate + contaminated customer baseline).
+   Validation defers to post-launch when (a) platform integration
+   supplies the structured signals AND (b) case-3a-style fraud is
+   observed in production.
 
 ---
 
-## 7. Trust-suppression on mature accounts — Phase 7+ architectural workstream
+### Item 16 — Customer baseline cold-start ramp (Phase 7C.10)
 
-**Pattern**: a mature legitimate customer has a low `account_prior`
-(established trust). If that account is compromised, the case-3a /
-case-3b signals fire, but the combined score may not reach BLOCK
-because the trust contribution offsets the fraud contribution.
+**Status**: ACTIVE — post-launch monitoring required.
 
-**Classification**: architectural, NOT parameter tuning. Deferred to
-Phase 7+. Candidate designs to evaluate:
+**Context**: at production launch all `customer_baselines` rows start
+empty (`ip_asn_stats == '{}'` etc.). The `api_booking_from_unfamiliar_asn`
+rule (Phase 7C.7) has a cold-start gate `customer_observations >= 10`
+inside its derivation; the rule cannot fire until each customer has
+accumulated ≥10 bookings. The case-3b asymmetric compound (Phase 7C.2)
+has the inverse relationship (`< 10` inside the derivation) and IS
+expected to fire on brand-new-customer fraud at launch.
 
-- Capability-based trust (per-dimension trust: shipping behavior,
-  payment history, geographic pattern — compromise one, lose one).
-- Session-anomaly signals (device fingerprint change, geographic jump
-  indicators) feeding a separate suppression layer.
-- Asymmetric trust freeze (rapid trust erosion on first anomaly,
-  slow trust rebuild).
+**Detection ramp**:
+- Day 1: 0% case-2 detection by the new ASN rule (by design).
+- Weeks: partial detection (customers cross the 10-observation gate).
+- Months: full detection (per-customer ASN baselines stable).
 
-Background context lives in [`docs/history.md`](history.md)
-(Phase 6A case-3 detection capability discussion).
-
-**Status (Phase 8C 2026-06-05)**: ARCHITECTURAL WORKSTREAM —
-deferred unless launch evidence demands. Trust-suppression is
-not a parameter-tuning item; it requires design discussion
-before any code lands.
+**Open post-launch work**: monitor `customer_baselines` population rate
+during Day 1-30 (production-launch checklist Phase E). If the ramp
+takes longer than expected (low-volume tenants stall before the gate),
+revisit: (a) lower the gate to ≥5, (b) seed baselines from
+post-launch production observations, or (c) add a complementary rule
+catching case-2-style attacks on cold-start customers via different
+signals.
 
 ---
 
-## 8. Population baseline thresholds (Phase 6A amendment)
+### Item 18 — Cold-start ramp lengthening under 7C.11 baseline gating
+
+**Status**: DEFERRED — post-launch monitoring; intervention
+trigger-based.
+
+**Context**: Phase 7C.11 gates `customer_baselines` accumulation on
+ALLOW band — REVIEW/BLOCK bookings no longer contribute to
+`ip_asn_stats`, `ip_stats`, Welford accumulators. Cold-start customers
+reach the ≥10 maturity gate (Item 16) slower than under pre-7C.11
+behavior; delta is approximately the per-customer REVIEW-band rate.
+
+**Expected impact**:
+- Clean-traffic tenants (most bookings → ALLOW): ramp lengthening
+  <5%.
+- High-REVIEW-rate tenants (mature anti-fraud platforms catching
+  real attacks, OR high-FPR tenants needing calibration): empirical
+  5-15% range.
+
+**Open post-launch work**: monitor `customer_baselines.value_n` growth
+trajectory per tenant during Day 1-30. If a tenant's customers
+consistently take >2x longer than expected to cross ≥10 observations,
+that's a calibration signal — either (a) the tenant's REVIEW rate
+needs upstream rule-catalogue review, or (b) the cold-start gate
+threshold should be relaxed for that tenant.
+
+Cross-references Items 1, 2 indirectly: 7C.11 reduces those rules'
+fire rates because cold-start customers (below the ≥10 maturity gate)
+bypass them entirely. The 7D re-measurement after 7C.11 reflects the
+combined 7C.7 + 7C.8 + 7C.11 impact on FPR.
+
+---
+
+## Threshold and parameter tuning
+
+Operational parameters with no current calibration evidence. Tune
+during Month 2-3 (Phase G) and Month 4-5 (Phase H) tuning passes per
+launch checklist.
+
+### Item 8 — Population baseline thresholds (Phase 6A amendment)
 
 **Current values** in `app/tenant_route_baselines.py`:
 - `RARITY_MIN_OBSERVATIONS = 100`
 - `RARITY_THRESHOLD = 0.02` (2%)
 
-**Deferred action**: tune post-launch with real production traffic data
-once tenant baselines accumulate diverse legitimate routes. The 6C
-replay had no signal on this (empty baseline).
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Tenant baselines populate over the 5-month observation
-window; threshold tuning resumes once empirical distribution is
-available.
+**Status**: DEFERRED. Phase 6C replay had no signal (empty baseline).
+Tune once tenant baselines accumulate diverse legitimate routes over
+the 5-month observation window.
 
 ---
 
-## 9. Modification weight calibration
+### Item 9 — Modification weight calibration
 
-**Status**: deferred to post-launch (no real modification feedback
-data available in Phase 6).
+**Status**: DEFERRED — no real modification-feedback data available
+in Phase 6.
 
-**Deferred action**: with production-traffic modification events
-accumulated, evaluate whether the per-modification weight contributions
-reflect real-world re-modification-fraud frequency.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Month 4-5 second tuning pass per launch checklist
-Phase H.
+**Post-launch action**: with production modification events
+accumulated, evaluate whether per-modification weight contributions
+reflect real-world re-modification-fraud frequency. Month 4-5 second
+tuning pass (Phase H).
 
 ---
 
-## 10. Previously-rejected weight calibration
+### Item 10 — Previously-rejected weight calibration
 
-**Status**: deferred to post-launch.
-
-**Deferred action**: tune previously-rejected-customer weight against
-real-data observation of repeat-fraud-attempt frequency.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Month 4-5 second tuning pass per launch checklist
-Phase H.
+**Status**: DEFERRED. Tune against real-data observation of
+repeat-fraud-attempt frequency. Month 4-5 second tuning pass (Phase H).
 
 ---
 
-## 11. Cold-start grace multiplier (0.5)
+### Item 11 — Cold-start grace multiplier (0.5)
 
-**Status**: hardcoded; FPR impact unmeasured against real traffic.
+**Status**: DEFERRED — hardcoded; FPR impact unmeasured against real
+traffic.
 
-**Deferred action**: post-launch FPR-on-new-tenant evidence will inform
-whether 0.5 is the right multiplier or whether the value should be
-dynamic (e.g. proportional to observation count).
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Cold-start grace tuning per Phase 7E close decision.
+**Post-launch action**: FPR-on-new-tenant evidence will inform whether
+0.5 is right or whether the value should be dynamic (e.g.,
+proportional to observation count).
 
 ---
 
-## 12. Pool-max scaling
+### Item 12 — Pool-max scaling
 
-**Status**: asyncpg pool max = 10. Phase 5D Run 2 (20-user steady state)
-sustained 10,970 aggregate requests at 183 RPS / ~12ms p95 against this
-ceiling without saturating the pool.
+**Status**: DEFERRED — re-evaluation triggers on observed pool-
+saturation events; no preemptive change.
 
-**Deferred action**: re-evaluate against production load profile. If
-sustained-throughput plateau hits the pool ceiling, raise to match
-real concurrency.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Re-evaluation triggers on observed pool-saturation
-events; no preemptive change.
+**Baseline**: asyncpg pool max = 10. Phase 5D Run 2 (20-user steady
+state) sustained 10,970 aggregate requests at 183 RPS / ~12ms p95
+without saturating. Raise to match real concurrency if sustained-
+throughput plateau hits the ceiling.
 
 ---
 
-## 13. Sub-60s tenant config cache invalidation
+### Item 13 — Sub-60s tenant config cache invalidation
 
-**Status**: current TTL acceptable for Phase 6 scope (60s).
+**Status**: DEFERRED — current TTL (60s) acceptable.
 
-**Deferred action**: only revisit if a specific production requirement
-emerges (e.g. immediate-effect tenant config changes for incident
-response).
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Revisit only on operator request.
+**Post-launch action**: revisit only if a specific production
+requirement emerges (e.g., immediate-effect tenant config changes
+for incident response).
 
 ---
 
-## 14. Case-1 replay — deferred indefinitely
+### Item 15 — Latency budget watch (Phase 6A amendment)
 
-**Status**: no enrichment data from the case-1 training window
-(historical fraud pre-dating MaxMind + IP2Proxy database states
-available to the replay environment).
+**Status**: DEFERRED — monitoring-driven; no scheduled tuning pass.
 
-**Deferred action**: no current path to validation. Re-evaluate if
-historical enrichment snapshots become available.
+**Baseline shift**: Phase 5D measured ~12ms p95 on booking. Phase
+6A.7 + 6A.8 added synchronous `tenant_route_baselines` UPSERT + a
+SELECT for rarity derivation, adding ~4ms. Post-amendment baseline:
+~16ms p95.
 
-**Status (Phase 8C 2026-06-05)**: DEFERRED — indefinitely. No
-known path to validation. Carries forward unchanged.
-
----
-
-## 15. Latency budget watch (Phase 6A amendment)
-
-**Baseline shift**: Phase 5D measured ~12ms p95 on the booking endpoint.
-Phase 6A.7 + 6A.8 added a synchronous UPSERT (`tenant_route_baselines`
-maintenance on every booking) + a SELECT for rarity derivation, adding
-~4ms p95. Post-amendment baseline: ~16ms p95.
-
-**Monitoring thresholds** (per `docs/production-launch-checklist.md`
-Phase E):
-- **Yellow flag (≥50ms p95)**: investigate query performance,
-  evaluate in-process cache on `tenant_route_baselines` reads.
-- **Red flag (≥195ms p95)**: calibration backlog action before the
-  200ms ceiling breach.
-
-**Deferred action**: only intervenes if monitoring thresholds trigger.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Monitoring-driven only; no scheduled tuning pass.
+**Monitoring thresholds** (per launch-checklist Phase E):
+- **Yellow (≥50ms p95)**: investigate query performance; evaluate
+  in-process cache on `tenant_route_baselines` reads.
+- **Red (≥195ms p95)**: calibration backlog action before the 200ms
+  ceiling breach.
 
 ---
 
-## 16. Customer baseline cold-start ramp at production launch (Phase 7C.10)
+## Architectural workstreams
 
-**Status**: documented; ongoing post-launch observation.
+Design discussion required before implementation. Phase 9+ scope;
+deferred unless launch evidence demands.
 
-**Observation**: At production launch all `customer_baselines` rows
-start empty (`ip_asn_stats == '{}'` etc.). The new
-`api_booking_from_unfamiliar_asn` rule (Phase 7C.7) has a cold-start
-gate `customer_observations >= 10` inside its derivation; the rule
-cannot fire until each customer has accumulated ≥10 bookings. The
-new case-3b asymmetric compound (Phase 7C.2) has the inverse
-relationship (cold-start gate `< 10` inside the derivation) and IS
-expected to fire on brand-new-customer fraud at launch.
+### Item 7 — Trust-suppression on mature accounts
 
-Detection ramp for case-2:
-- Day 1: 0% case-2 detection by the new ASN rule.
-- Weeks: partial detection (customers cross the 10-observation
-  gate).
-- Months: full detection (per-customer ASN baselines stable).
+**Pattern**: a mature legitimate customer has a low `account_prior`
+(established trust). If that account is compromised, case-3a / case-3b
+signals fire, but the combined score may not reach BLOCK because the
+trust contribution offsets the fraud contribution.
 
-**Deferred action**: monitor `customer_baselines` population rate
-during Day 1-30 (production-launch checklist Phase E). If the ramp
-takes longer than expected (e.g., low-volume tenants struggle to
-cross the gate), revisit either (a) lowering the gate to >= 5,
-(b) seeding baselines from prior production observations (no
-freight_risk data — only post-launch production observations), or
-(c) adding a complementary rule that catches case-2-style attacks
-on cold-start customers via different signals.
+**Classification**: architectural, NOT parameter tuning. Candidate
+designs to evaluate:
+- Capability-based trust (per-dimension trust: shipping behavior,
+  payment history, geographic pattern — compromise one, lose one).
+- Session-anomaly signals (device fingerprint change, geographic
+  jump indicators) feeding a separate suppression layer.
+- Asymmetric trust freeze (rapid erosion on first anomaly, slow
+  rebuild).
 
-**Status (Phase 8C 2026-06-05)**: ACTIVE — post-launch monitoring
-required. Day 1-30 customer_baselines population rate is a
-launch-checklist Phase E observable; tuning intervention triggers
-only if low-volume tenants stall before the >=10 maturity gate.
+Background context in [`docs/history.md`](history.md) (Phase 6A
+case-3 detection capability discussion).
 
 ---
 
-## 17. Tenant-bulk-import of historical bookings into customer_baselines
+### Item 17 — Tenant-bulk-import of historical bookings
 
-**Status**: deferred to post-launch architectural workstream;
-explicit operator decision required.
+**Status**: ARCHITECTURAL WORKSTREAM — explicit operator decision
+required before design starts.
 
 **Context**: Phase 7's no-freight-risk-data-in-the-repo policy
-prohibits embedding historical bookings into the riskd repo. A
-production-tenant onboarding flow that bulk-imports the tenant's
-own historical bookings (from their own systems, not from
-freight_risk) would give Day-1 detection capability — case-2 rule
-fires immediately on established customers — but introduces
-architectural complexity (idempotency, schema mapping, replay-vs-
-real distinction, audit trail).
+prohibits embedding historical bookings in the riskd repo. A
+production-tenant onboarding flow bulk-importing the tenant's own
+historical bookings (from their systems, not from freight_risk) would
+give Day-1 detection capability — case-2 rule fires immediately on
+established customers — but introduces architectural complexity.
 
-**Deferred action**: post-launch decision. Without bulk-import,
-case-2 detection capability ramps per item 16 above. With
-bulk-import, the architecture needs design for: tenant data
-ingest format, replay-record vs production-record discrimination
-in audit logs, schema-mapping per-tenant ETL, transactional
-guarantees during bulk-load, and decision-cache implications
-(should bulk-imported bookings populate the decisions table?).
+**Design considerations if pursued**:
+- Tenant data ingest format.
+- Replay-record vs production-record discrimination in audit logs.
+- Per-tenant schema-mapping ETL.
+- Transactional guarantees during bulk-load.
+- Decision-cache implications (should bulk-imported bookings populate
+  the `decisions` table?).
 
-**Status (Phase 8C 2026-06-05)**: ARCHITECTURAL WORKSTREAM —
-deferred unless launch evidence demands. Tenant-bulk-import is
-not parameter tuning; explicit operator decision required before
-design starts.
+Without bulk-import, case-2 detection capability ramps per Item 16.
 
 ---
 
-## 18. Cold-start ramp lengthening under 7C.11 baseline gating
+### Item 19 — Force-fold admin endpoint (Phase 7C.11 edge case)
 
-**Status**: introduced by Phase 7C.11; ongoing post-launch
-observation.
+**Status**: DEFERRED — intervention triggers only on observed backlog
+growth.
 
-**Context**: Phase 7C.11 gates customer baseline accumulation on
-ALLOW band — REVIEW/BLOCK bookings no longer contribute to
-`ip_asn_stats`, `ip_stats`, Welford accumulators (and therefore
-`effective_observations`). Cold-start customers reach the >=10
-maturity gate slower than under the pre-7C.11 behavior; the
-delta is approximately the per-customer REVIEW band rate.
+**Context**: Phase 7C.11 holds REVIEW/BLOCK bookings in pending state
+until operator feedback arrives. Edge case: feedback never comes
+(operator forgot, workflow outage, team rotation losing context).
+Booking stays held indefinitely, never folding to the customer
+baseline.
 
-For tenants with naturally clean traffic (most bookings → ALLOW),
-the ramp lengthening is minimal (<5%). For tenants whose
-infrastructure or customer mix produces high pre-launch REVIEW
-rates (mature anti-fraud platforms catching real attacks, OR
-high-FPR tenants whose calibration needs work), the ramp can
-lengthen meaningfully — empirical 5-15% range expected.
+Acceptable for v1 — operators typically catch up via normal workflow.
+Held-booking population is queryable (launch-checklist Phase F
+runbook entry).
 
-**Deferred action**: monitor `customer_baselines.value_n` growth
-trajectory per tenant during Day 1-30 (production launch checklist
-Phase E). If a tenant's customers consistently take >2x longer
-than the legacy baseline to cross >=10 observations, that's a
-calibration signal — either (a) the tenant's REVIEW rate is high
-and the upstream rule catalogue needs review, or (b) the cold-
-start gate threshold should be relaxed for that tenant.
-
-Items 1, 2 (pair-novelty rule fire rates) cross-reference: 7C.11
-reduces these rules' fire rates indirectly because cold-start
-customers (below the >=10 maturity gate) bypass them entirely.
-The 7D re-measurement after 7C.11 commits reflects the combined
-7C.7 + 7C.8 + 7C.11 impact on FPR.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Per-tenant `customer_baselines.value_n` growth trajectory
-is the launch-checklist Phase E observable; tuning resumes at
-the 5-month checkpoint per Phase 7E close.
-
----
-
-## 19. Force-fold admin endpoint (Phase 7C.11 edge case)
-
-**Status**: deferred to post-launch architectural workstream.
-
-**Context**: Phase 7C.11 holds REVIEW/BLOCK bookings in pending
-state until operator feedback arrives. Edge case: feedback never
-comes. Reasons could include operator forgot, feedback workflow
-outage, or operator team rotated and lost context. The booking
-stays held indefinitely, never folding to the customer baseline.
-
-This is acceptable for v1 — operators typically catch up via
-normal workflow. The held-booking population is queryable
-(launch checklist Phase F runbook entry); if it grows
-operationally, an admin endpoint could be added.
-
-**Deferred action**: post-launch operator-experience observation.
-If the held-booking backlog accumulates persistently:
-
-1. Add a `POST /admin/feedback/force-fold` endpoint that takes
-   a target_request_id and applies an `approved` feedback
-   server-side (e.g., scheduled batch-fold after N days of no
-   feedback).
-2. OR: add an auto-approve grace period (e.g., 90 days post-
-   booking without feedback → automatic fold).
-3. OR: keep the held state indefinitely and add an operational
-   alert when the backlog exceeds a per-tenant threshold.
+**Candidate designs if backlog accumulates persistently**:
+1. `POST /admin/feedback/force-fold` taking a `target_request_id` and
+   applying an `approved` feedback server-side.
+2. Auto-approve grace period (e.g., 90 days post-booking without
+   feedback → automatic fold).
+3. Keep the held state indefinitely; add an operational alert when
+   the per-tenant backlog exceeds a threshold.
 
 Decision deferred — operator preference depends on observed
 production patterns.
 
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Intervention triggers only on observed backlog growth;
-the three candidate designs remain open for operator decision.
-
 ---
 
-## 20. nD7-class fraud detection (brand-new + API + residential ASN compound)
+## Observation-dependent
 
-**Status**: deferred to post-launch architectural workstream.
-Introduced by the Phase 7D measurement finding (2026-06-04).
+Decision pending production-traffic observation; intervention design
+sketched but not committed.
 
-**Context**: the Phase 7D case-2 measurement identified two
-structurally different fraud classes within the freight_risk
-`gobolt-non-34x-api` corpus:
+### Item 20 — nD7-class fraud detection (brand-new + API + residential ASN)
+
+**Status**: DEFERRED — post-launch tuning roadmap. Sketch below is a
+candidate design, NOT a committed implementation.
+
+**Context**: the Phase 7D case-2 measurement identified two structurally
+different fraud classes within the freight_risk `gobolt-non-34x-api`
+corpus:
 
 1. **gPYG-class** (compromised established customer): pre-attack
    legitimate booking history exists. Customer baseline accumulates
@@ -516,19 +353,19 @@ structurally different fraud classes within the freight_risk
    records, all labeled `reject`, all attack records, earliest
    booking same day as the attack window starts. Customer baseline
    stays empty; cold-start gate on `api_booking_from_unfamiliar_asn`
-   (>=10 observations inside the derivation) prevents the rule
+   (≥10 observations inside the derivation) prevents the rule
    from firing. **25.9% catch** measured post-7C.12 (from
    baseline-agnostic rules; reduced from 40.7% pre-7C.12 due to
    the 7C.12 geo-rule weight cuts).
 
 The nD7-class shape is structurally different from gPYG-class:
 nD7-class customers have no operator-confirmed legitimate behavior
-to deviate from. The case-2 ASN-deviation rule is correctly
-silent on them (it would be wrong to flag a brand-new customer's
-first booking as "unfamiliar ASN" — they have no familiar ASNs
-by definition). A separate signal class is needed.
+to deviate from. The case-2 ASN-deviation rule is correctly silent
+on them (it would be wrong to flag a brand-new customer's first
+booking as "unfamiliar ASN" — they have no familiar ASNs by
+definition). A separate signal class is needed.
 
-**Sketch**:
+**Candidate design**:
 ```yaml
 - name: brand_new_customer_api_residential_asn
   description: |
@@ -542,46 +379,76 @@ by definition). A separate signal class is needed.
   maturity_sensitive: false
 ```
 
-**Deferred action**: design discussion warranted before
-implementation. Concerns:
-- Legitimate new-customer onboarding from residential ASNs
-  exists (small businesses, individual operators). Weight 0.50
-  alone may cause FPR on legit cold-start traffic.
+**Concerns before implementation**:
+- Legitimate new-customer onboarding from residential ASNs exists
+  (small businesses, individual operators). Weight 0.50 alone may
+  cause FPR on legit cold-start traffic.
 - Compound conditions (require additional corroborating signals)
   may be appropriate.
-- Phase 9+ scope; not blocking Phase 7 close.
-
-The architectural pattern follows the case-3b cold-start design
-(7C.2): use the cold-start gate INSIDE the derivation as a
-positive signal for the fraud shape (brand-new), rather than as
-a maturity gate (mature).
+- Architectural pattern follows the case-3b cold-start design
+  (Phase 7C.2): use the cold-start gate INSIDE the derivation as a
+  positive signal for the fraud shape (brand-new), rather than as
+  a maturity gate (mature).
 
 **Acceptance gate**: production observation needed. The current
 operator confirmation that "case-2 attacks compromise established
 customers" doesn't necessarily generalize to "all case-2-class
-attacks have pre-attack legitimate history." Post-launch
-real-data observation will inform whether nD7-class fraud occurs
-in production at meaningful volume.
-
-**Status (Phase 8C 2026-06-05)**: DEFERRED — post-launch tuning
-roadmap. Per Phase 7D close decision, case-2 detection was
-reframed per-customer-class; nD7-class detection awaits real
-production observation before any new rule lands. The sketch
-above is a candidate design, NOT a committed implementation.
+attacks have pre-attack legitimate history." Post-launch real-data
+observation will inform whether nD7-class fraud occurs in production
+at meaningful volume.
 
 ---
 
-## Phase-by-phase post-launch tuning timeline
+## Deferred indefinitely
 
-Cross-reference: `docs/production-launch-checklist.md`.
+### Item 14 — Case-1 replay
 
-| Window | Activity |
-|---|---|
-| Week 1 | Observation only — Day 1-7 verification per launch checklist Phase E. |
-| Week 1-4 | Observation; calibration-backlog items accumulate production-frequency data per launch checklist Phase F. No tuning yet. |
-| Month 2-3 | First tuning pass per launch checklist Phase G. Per-item: confirm pattern, design intervention (weight reduction, condition tightening), staged replay if a current corpus is available, plan-mode the tuning commit. |
-| Month 4-5 | Second tuning pass per launch checklist Phase H. Modification weights + previously-rejected weights become tuneable with real feedback latency. Re-evaluate cold-start grace multiplier with FPR-on-new-tenant evidence. |
-| Month 5+ | Ongoing calibration; architectural workstreams (items 7, 17) re-open if launch evidence demands. |
+**Status**: DEFERRED indefinitely. No known path to validation. No
+enrichment data from the case-1 training window (historical fraud
+pre-dating MaxMind + IP2Proxy database states available to the replay
+environment). Re-evaluate if historical enrichment snapshots become
+available.
 
-Tuning commits follow the same CLAUDE.md 6-step commit cycle as Phase 6 —
-reviewer panel mandatory; declared breaks if any; per-commit validation.
+---
+
+## Resolved / superseded
+
+Listed for audit-trail continuity; not actionable post-launch. Full
+Phase 7C close narrative in [`docs/history.md`](history.md).
+
+- **Item 3** — Approved-corpus FPR on `api_non_cloud_ip` +
+  `non_cloud_established_account`. **RESOLVED in Phase 7C.2/7C.7**:
+  both rules DELETED; replaced by per-customer
+  `api_booking_from_unfamiliar_asn`. Replacement rule's FPR
+  re-measurement folds into Item 16.
+
+- **Item 4** — Approved-corpus BLOCK cluster (18/10,000 records on
+  the 4-rule compound). **RESOLVED via Phase 7C.2/7C.7 rule deletions**:
+  two of the four compound contributors (`api_non_cloud_ip`,
+  `non_cloud_established_account`) no longer exist. Remaining-rule
+  weight reductions in 7C.8 fold into Items 1, 2 monitoring.
+
+- **Item 5** — Case-2 false negatives (10/500 ALLOW'd against the
+  Phase 6C corpus). **SUPERSEDED by Phase 7D per-customer-class
+  reframing**: the 98% recall measurement is from the old framing.
+  Current case-2 detection measurement is in
+  `docs/replay-validation.md` Phase 7D section. Item 20 covers the
+  nD7-class detection gap that the new framing exposed.
+
+- **Item 6 bullet 1** — Domestic-origin + carrier-dropoff +
+  cross-border-destination sub-pattern. **RESOLVED in Phase 7C.2-3**:
+  symmetric `cold_start_country_triangle_with_carrier_dropoff` DELETED;
+  asymmetric `cold_start_outbound_carrier_dropoff` added. Bullets 2-3
+  carry forward in Item 6 above.
+
+---
+
+## Timeline
+
+Tuning happens during the 5-month post-launch observation window. See
+`docs/production-launch-checklist.md` Phase G (Month 2-3 first pass)
+and Phase H (Month 4-5 second pass) for the operational schedule.
+
+Tuning commits follow the same CLAUDE.md 6-step commit cycle as
+build-phase work — reviewer panel mandatory; declared breaks if any;
+per-commit validation.
