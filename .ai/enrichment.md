@@ -145,7 +145,11 @@ class CustomerBaseline:
 
 Per the operator amendment, writes happen within the request's single transaction: `for_update=True` on load, then `add_observation`, then `save`, all before the transaction commits.
 
-`add_rejected_observation` (feedback path, Phase 3) increments `r_n` instead of `n`.
+**ALLOW-only baseline accumulation gate**: `baseline.add_observation` is invoked only when `result.decision == "ALLOW"` (`app/api/booking.py:207`). REVIEW/BLOCK bookings are HELD in pending state — no per-customer baseline mutation (ip/netblock/asn stats, value/cadence Welford accumulators, `last_booking_*`, channel histograms, country/origin/dest/lane stats, email/phone HMACs are all untouched). When operator feedback later marks a held booking as `approved`, the feedback endpoint folds the deferred observation then (see `app/api/feedback.py`). This gating makes the baseline a record of operator-confirmed legitimate behavior, not a record of all evaluated bookings — rationale in [`.ai/decisions.md` § Customer baseline](./decisions.md#customer-baseline).
+
+Side effect: velocity counts (SQL-based on the `shipments` table) are UNAFFECTED — those still count REVIEW/BLOCK bookings. Only per-customer baseline state is gated.
+
+`add_rejected_observation` (feedback path) increments `r_n` instead of `n`. Used by the feedback endpoint to fold operator-confirmed rejections into the `rejected_*` stat-dicts that power the previously-rejected rule family.
 
 ---
 
@@ -248,7 +252,8 @@ POST /api/v1/shipments/booking/evaluate
   → score(context, rules)
   → INSERT shipments
   → INSERT decisions
-  → baseline.add_observation + baseline.save
+  → if result.decision == "ALLOW":
+        baseline.add_observation + baseline.save
   → UPDATE customers (last_seen, total_shipments + 1)
   → COMMIT
   → return BookingResponse
