@@ -1,6 +1,6 @@
 # System status — freightsentry-riskd
 
-**Stage**: Pre-launch. Phases 1-7 complete; Phase 8 documentation cleanup in progress. Production deploy to `ca-central-1` is the next operator-driven step.
+**Stage**: Pre-launch. Phases 1-8 complete. Production deploy to `ca-central-1` is the next operator-driven step.
 
 **Production region**: `ca-central-1`. **Test/staging region**: `us-east-2`. Single-tenant cutover at launch; SaaS multi-tenant capability ready from the foundation schema onward (RLS-enforced; `tenants` table is the multi-tenant root).
 
@@ -24,7 +24,7 @@ For per-phase historical narrative, decisions, and outcome records, see [`docs/h
 | Phase 5 — Observability + security hardening + load test | Complete | EMF observability; tenant-config cache; `riskd_app_login` runtime role; load test green |
 | Phase 6 — Deploy artifacts + fixture replay + case-3 detection | Complete | Case-3a + case-3b rules; `tenant_route_baselines`; multi-stage Docker; GitHub Actions test/build/deploy |
 | Phase 7 — Pre-launch calibration + case-2 learning + retire BLOCK target | Complete | `api_booking_from_unfamiliar_asn` (case-2); ALLOW-only baseline gating (7C.11); geo-rule weight calibration; BLOCK target retired in favour of per-customer case-2 framing |
-| Phase 8 — Documentation cleanup + plan-file teardown | In progress | Migration squash (8A); test rename + coverage anchor (8B); doc consolidation + history.md absorption + plan-file teardown (8C, this batch); phase wrap + final close (8D) |
+| Phase 8 — Pre-launch consolidation | Complete | Migration squash 11→5 (8A); coverage anchor at 91% + test rename (8B); doc consolidation + history.md absorption + plan-file teardown (8C); phase wrap + 1116-test final pass (8D) |
 
 ## Anti-drift gates
 
@@ -65,4 +65,4 @@ The launch is operator-driven, not Claude-driven. The 5-month FPR observation wi
 
 [`.claude/BUGS.md`](../.claude/BUGS.md) captures tangential issues discovered mid-task. The operator drains at phase boundaries; resolved items receive a `RESOLVED: <commit>` annotation; deferred items get a `DEFERRED to <plan>` annotation.
 
-Last updated: 2026-06-05 (Phase 8C in progress).
+Last updated: 2026-06-05 (Phase 8 complete; production launch pending operator action).

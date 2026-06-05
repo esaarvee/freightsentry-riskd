@@ -216,3 +216,43 @@ After 8D close, the next operator action is production launch per `docs/producti
 - Calibration-backlog items 11, 15-20 as the active post-launch tuning roadmap.
 
 If a Phase 8 finding surfaces a launch-blocker (e.g., 8B reveals a coverage gap that's actually a missing test class), launch is paused until the gap is closed. Phase 8 is launch-readiness; nothing else.
+
+## Phase 8 close — execution record (2026-06-05)
+
+All 4 commits in 8D landed on `feat/refactor`:
+
+| Commit | Hash | Subject |
+|---|---|---|
+| 8D.1 | 4671fd4 | REPORT_PHASE_8.md (564 lines, canonical Phase 8 record) |
+| 8D.2 | 64f8f70 | production-launch-checklist verification matrix (all 12 refs resolve) |
+| 8D.3 | 881f3b9 | final integration test pass — 1116 passed, 91% coverage, schema golden PASS |
+| 8D.4 | (this commit) | Phase 8 close — cross-doc audit + history.md update + system-status.md final |
+
+Acceptance criteria 1-9 all met:
+1. ✓ `REPORT_PHASE_8.md` complete and accurate (564 lines).
+2. ✓ `docs/production-launch-checklist.md` verified — all 12 references resolve.
+3. ✓ `pytest tests/` returns 0 failures (1116 passed).
+4. ✓ `tests/integration/test_schema_golden.py` passes.
+5. ✓ Coverage 91% — exact match against `tests/coverage_baseline.txt`.
+6. ✓ `docs/history.md` Phase 8 section rewritten to reflect completion.
+7. ✓ `.ai/system-status.md` reflects post-Phase-8 pre-launch state.
+8. ✓ Cross-doc consistency audit clean: `grep -rln 'PLAN_PHASE_[1-7]\|REPORT_PHASE_[1-7]\|MASTER_PLAN' app/ tests/ scripts/ docs/ .ai/ alembic/ CLAUDE.md` returns empty.
+9. ⏳ Operator approves Phase 8 close — pending operator review.
+
+Phase 8 close conditions (consolidated from prompt §Phase 8 close conditions):
+1. ✓ 5 alembic migrations in `alembic/versions/`; 0 of the original 11 remaining; schema-equivalent to pre-squash; round-trip verified (8D.3).
+2. ✓ Coverage delta ≥ 0% (exact match); phase-named functions renamed (8B.1-3 + 8B.3b).
+3. ✓ `.ai/decisions.md`, `.ai/schema.md`, `.ai/rules.md`, `.ai/system-status.md` current.
+4. ✓ `docs/replay-validation.md` trimmed; `docs/calibration-backlog.md` updated.
+5. ✓ `docs/history.md` created at 1786 lines (within 1200-1800 target); Phase 8 closing section added in this commit.
+6. ✓ 4 superseded docs deleted (8C.10).
+7. ✓ `PLAN_PHASE_1-7*.md`, `REPORT_PHASE_*.md` (including transient REPORT_PHASE_7), `MASTER_PLAN.md` deleted (8C.13).
+8. ✓ `CLAUDE.md` updated (8C.14); no references to deleted files anywhere.
+9. ✓ `REPORT_PHASE_8.md` complete (8D.1).
+10. ✓ `docs/production-launch-checklist.md` verified current (8D.2).
+11. ✓ Full integration test suite passes; 5-migration chain verified (8D.3).
+12. ⏳ Operator approves Phase 8 close — pending operator review.
+
+Reviewer-panel discipline: every code-touching commit ran the routed reviewer panel. No panel-skip events. No `.claude/STATUS.md` checkpoint entries opened during 8D. No `.claude/BUGS.md` entries logged during 8D (the pre-existing case-2 compound finding from 8A remains logged; not a launch-blocker per its medium-severity classification).
+
+The build phases are complete. Next operator action is production deploy per `docs/production-launch-checklist.md`.

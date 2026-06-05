@@ -1713,37 +1713,53 @@ post-launch hardening.
 
 ---
 
-## Phase 8 — Pre-launch consolidation (in progress)
+## Phase 8 — Pre-launch consolidation
 
-Phase 8 is the pre-launch consolidation: test suite audit, doc
-consolidation, migration squash, BUGS.md/STATUS.md drain. Four batches
-(8A through 8D) planned; the present commit is part of batch 8C (doc
-consolidation). Phase 8 is in flight at the time this document is
-written and is not absorbed here — `PLAN_PHASE_8A.md` through
-`PLAN_PHASE_8D.md` remain in repo as the canonical Phase 8 record (per
-operator preference, either absorbed at production launch or kept as
-the Phase 8 record).
+Phase 8 was the pre-launch consolidation pass: migration squash, test
+suite audit, doc consolidation, plan-file teardown. Four batches landed:
 
-Two Phase 8 landmarks of architectural note worth recording:
+- **Batch 8A — Migration squash + revision-ID sweep** (commits
+  `41c3d90` schema golden, `4fec9bb` atomic squash, `771ca90` revision-ID
+  sweep + close). The 11-migration chain (`0001_initial.py` through
+  `0011_case_3b_schema.py`) collapsed atomically into a 5-migration
+  chain (`0001_foundation`, `0002_booking_flow`, `0003_baselines`,
+  `0004_enrichment_global`, `0005_runtime_roles`). `pg_dump` byte-
+  equivalent against pre-squash state; round-trip verified.
+  `tests/integration/test_schema_golden.py` (`41c3d90`) anchors the
+  schema contract as the anti-drift gate.
 
-- **Migration squash** (8A.1, `4fec9bb`): the 11-migration chain
-  (`0001_initial.py` through `0011_case_3b_schema.py`) collapsed
-  atomically into a 5-migration chain. The squash preserved the
-  final-state schema byte-equivalent to the pre-squash state — the
-  golden schema baseline test (`8A.0`, `41c3d90`) anchored the contract.
-  Migration `0001_foundation.py` collapses everything through the
-  Phase 5 RLS work; subsequent migrations carry the post-foundation
-  amendments. The squash never enabled RLS on `api_tokens` /
-  `app_users` in `0001_foundation.py`, matching the Phase 5D 0009
-  RLS-drop outcome.
+- **Batch 8B — Test audit + coverage anchor** (commits `d648e59`
+  coverage baseline, `695c35f` + `6cdc3f0` phase-named test renames +
+  whitelist probe consolidation, `859abe1` fixture survey + close).
+  Line coverage anchored at 91% (`tests/coverage_baseline.txt`) as a
+  non-regression gate. ~3 redundant whitelist probes collapsed; net
+  test count 1118 → 1116 (Phase 8B collapse delta minus 8A.0 schema
+  golden addition).
 
-- **Coverage anchor** (8B.0, `d648e59`): line coverage anchored at 91%
-  as a non-regression gate going forward.
+- **Batch 8C — Doc audit + plan-file teardown** (15 commits +
+  1 no-op verification, `795d5c0` through `e7f990b`). `.ai/` rewrites
+  (`decisions.md`, `schema.md`, `rules.md`, `system-status.md`,
+  `enrichment.md`); `docs/` operational updates (`replay-validation.md`,
+  `calibration-backlog.md`, `production-launch-checklist.md`,
+  `load-test-phase-5.md`); 4 superseded audits deleted (`initial-audit`,
+  `security-audit-rls-phase-3/4`, `verification-phase-1`); 51 historical
+  plan/report/master files deleted; `docs/history.md` (this file, 1786
+  lines pre-Phase-8-close) created absorbing 48+ source docs; CLAUDE.md
+  cross-references cleaned.
 
-The present commit 8C.12 lands `docs/history.md` (this file). 8C.13 will
-delete the Phase 1-7 plan and report files plus the master plan, since
-their content has been absorbed here. The Phase 8 plan files (8A-8D)
-remain through batch close.
+- **Batch 8D — Phase 8 wrap** (commits `4671fd4` REPORT_PHASE_8.md,
+  `64f8f70` checklist verification, `881f3b9` final integration test
+  pass at 1116 passed + 91% coverage). REPORT_PHASE_8.md kept as the
+  canonical Phase 8 record. Production-launch checklist references all
+  resolve. Schema golden passes.
+
+The squash never enabled RLS on `api_tokens` / `app_users` in
+`0001_foundation.py`, matching the Phase 5D 0009 RLS-drop outcome.
+
+For the full Phase 8 outcome record see `REPORT_PHASE_8.md` at repo
+root. `PLAN_PHASE_8A.md` through `PLAN_PHASE_8D.md` are retained
+through production launch per operator decision; absorption into this
+file may happen in a future post-launch cleanup window.
 
 ---
 
