@@ -1,9 +1,10 @@
 # Phase 5 RLS + security audit (delta over Phase 4)
 
-Supersedes `docs/security-audit-rls-phase-4.md` for the Phase 5 ship
-state (commit ranges 5A.1 through 5D.4 inclusive). Captures the
-security-relevant deltas of Phase 5 and the operational invariants
-that Phase 6 deploy must preserve.
+Supersedes prior Phase 3 + Phase 4 RLS audits (now archived in
+`docs/history.md`) for the Phase 5 ship state (commit ranges 5A.1
+through 5D.4 inclusive). Captures the security-relevant deltas of
+Phase 5 and the operational invariants that Phase 6 deploy must
+preserve.
 
 ## Phase 5 deltas at a glance
 

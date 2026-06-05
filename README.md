@@ -13,7 +13,6 @@ Real-time fraud detection SaaS for freight aggregation platforms. Single Python 
 - **Workflow (commit cycle, reviewer panel)**: `CLAUDE.md`
 - **Six-phase plan**: `MASTER_PLAN.md`
 - **Phase 1 detailed plan**: `PLAN_PHASE_1.md`
-- **Phase 1 verification**: `docs/verification-phase-1.md`
 - **Project status + mid-run deviations**: `.ai/system-status.md`, `.claude/STATUS.md`
 
 ## Stack
