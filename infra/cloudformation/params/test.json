@@ -2,5 +2,6 @@
   "Environment": "test",
   "LogRetentionDays": "7",
   "DbBackupRetentionDays": "1",
-  "DbDeletionProtection": "false"
+  "DbDeletionProtection": "false",
+  "AcmCertificateArn": "arn:aws:acm:us-east-2:000000000000:certificate/REPLACE-WITH-CERT-UUID"
 }
