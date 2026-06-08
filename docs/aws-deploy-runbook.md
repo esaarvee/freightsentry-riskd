@@ -9,6 +9,44 @@ runbook walks the operator through pasting them in the right places.
 Follow top-to-bottom on first deploy. Each section's checkbox
 prefix `[ ]` is meant to be ticked as you go.
 
+> **⚠ LAUNCH BLOCKER — Pattern B-lite enrichment refresh module.**
+> Deploying the infrastructure (this runbook or the CFN template below)
+> alone does NOT produce a feature-complete service. `app/enrich.py`
+> tolerates missing source files, so the runtime container passes
+> `/health/` and serves `/v1/booking` requests, but every booking gets a
+> dead IP-enrichment row (`is_proxy=False`, `is_vpn=False`,
+> `country=None`, etc.) and every rule conditioned on IP-fraud signals
+> fires on False. A separate follow-up pass implements
+> `app/enrichment_refresh.py` (runtime download from FireHOL / MaxMind /
+> IP2Location) — must land before production launch. See
+> `infra/cloudformation/README.md` § Launch Blocker for detail.
+
+## IaC-managed resources (alternative to manual Phase A)
+
+As of the INFRA-CFN buildout (June 2026), the IaC-suitable subset of
+Phase A is captured in [`infra/cloudformation/freightsentry-riskd.yml`](../infra/cloudformation/freightsentry-riskd.yml).
+See [`infra/cloudformation/README.md`](../infra/cloudformation/README.md)
+for deploy commands, pre-deploy verification, post-deploy operator
+steps, parameter table, cost projection, and deviations.
+
+The CFN template provisions: VPC + networking, security groups, RDS,
+ECR, CloudWatch log group, 5 Secrets Manager containers, IAM roles
+(task-exec / task / deploy), ALB + target group + HTTPS listener, ECS
+cluster.
+
+The CFN template intentionally does NOT provision: ECS service or
+task-definition (stays in `infra/ecs-task-definition.json` + the
+manual procedure below so it doesn't conflict with the existing
+deploy workflow's `register-task-definition` / `update-service`
+ownership). Secret VALUES (only the empty containers). ACM cert
+(operator issues out-of-band). Domain / Route 53 records.
+
+The remainder of this runbook documents the manual procedures
+(Phase A — non-IaC pieces; Phase B — post-deploy ops; rollback; etc.).
+Operators using the CFN template should skip Phase A items already
+covered by the template and pick up at the manual pieces noted in
+the CFN README's "Post-deploy operator steps".
+
 ## Prerequisites
 
 - [ ] AWS account with administrative access
