@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >-
+  freightsentry-riskd IaC stack. Additive to the manual runbook
+  (docs/aws-deploy-runbook.md). Region is determined by the
+  `aws cloudformation deploy --region` flag (AWS::Region pseudo-parameter
+  is referenced throughout; no Region parameter exists). ECS service +
+  task-definition stay manual (see infra/cloudformation/README.md and
+  plan D16). Pattern B-lite enrichment refresh module is a launch
+  blocker shipped in a separate pass (see README banner).
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment
+        Parameters:
+          - Environment
+          - LogRetentionDays
+    ParameterLabels:
+      Environment:
+        default: Deployment environment (test or production)
+      LogRetentionDays:
+        default: CloudWatch log group retention (days)
+
+Parameters:
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - test
+      - production
+    Description: >-
+      Deployment environment. Determines env-suffix on account-global
+      resource names (IAM roles in C6). Region is set by the deploy
+      command's --region flag and resolved via AWS::Region.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1827, 3653]
+    Description: >-
+      CloudWatch log retention. Test envs typically override to 7 in
+      params/test.json; production defaults to 30.
+
+Resources:
+
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: freightsentry-riskd
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep 10 most recent images; expire older",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /ecs/freightsentry-riskd
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DatabaseUrlSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/DATABASE_URL
+      Description: >-
+        Runtime DSN (riskd_app_login role). Populated post-deploy by
+        operator after the alembic runtime-roles migration creates the role.
+      SecretString: '{"placeholder":"populate via aws secretsmanager put-secret-value"}'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  HmacSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/HMAC_SECRET
+      Description: >-
+        HMAC signing key. Populated post-deploy via
+        `openssl rand -hex 32 | aws secretsmanager put-secret-value`.
+      SecretString: '{"placeholder":"populate via aws secretsmanager put-secret-value"}'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  MaxmindSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/MAXMIND_LICENSE_KEY
+      Description: >-
+        MaxMind GeoLite2 license key. Populated post-deploy. Required
+        by Pattern B-lite enrichment refresh module (launch blocker).
+      SecretString: '{"placeholder":"populate via aws secretsmanager put-secret-value"}'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  Ip2proxySecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/IP2PROXY_DOWNLOAD_TOKEN
+      Description: >-
+        IP2Proxy LITE PX11 download token. Populated post-deploy.
+        Required by Pattern B-lite enrichment refresh module.
+      SecretString: '{"placeholder":"populate via aws secretsmanager put-secret-value"}'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+
+  EcrRepositoryUri:
+    Description: ECR repository URI for `docker push` and task-def IMAGE_URI substitution.
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EcrRepository}'
+
+  LogGroupName:
+    Description: CloudWatch log group for ECS task logs.
+    Value: !Ref LogGroup
+
+  DatabaseUrlSecretArn:
+    Description: ARN of the runtime DATABASE_URL secret (populate post-deploy).
+    Value: !Ref DatabaseUrlSecret
+
+  HmacSecretArn:
+    Description: ARN of the HMAC_SECRET secret.
+    Value: !Ref HmacSecret
+
+  MaxmindSecretArn:
+    Description: ARN of the MAXMIND_LICENSE_KEY secret.
+    Value: !Ref MaxmindSecret
+
+  Ip2proxySecretArn:
+    Description: ARN of the IP2PROXY_DOWNLOAD_TOKEN secret.
+    Value: !Ref Ip2proxySecret
