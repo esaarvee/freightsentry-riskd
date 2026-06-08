@@ -47,7 +47,11 @@ repos:
     hooks:
       - id: check-yaml
         # rules.yaml is parsed by app/rules.py at startup; catch malformed
-        # YAML here so it never reaches the rule loader.
+        # YAML here so it never reaches the rule loader. --unsafe relaxes
+        # constructor instantiation so CloudFormation intrinsic tags (!Sub,
+        # !Ref, !GetAtt, !GetAZs, !Cidr, !Select) under infra/cloudformation/
+        # don't trip PyYAML's strict loader; syntax validation is preserved.
+        args: [--unsafe]
       - id: check-toml
       - id: check-json
       - id: end-of-file-fixer
