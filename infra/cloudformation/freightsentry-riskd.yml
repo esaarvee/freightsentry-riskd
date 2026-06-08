@@ -17,11 +17,17 @@ Metadata:
         Parameters:
           - Environment
           - LogRetentionDays
+      - Label:
+          default: Networking
+        Parameters:
+          - VpcCidr
     ParameterLabels:
       Environment:
         default: Deployment environment (test or production)
       LogRetentionDays:
         default: CloudWatch log group retention (days)
+      VpcCidr:
+        default: VPC CIDR block (must not overlap any existing VPC in the target region)
 
 Parameters:
 
@@ -43,7 +49,215 @@ Parameters:
       CloudWatch log retention. Test envs typically override to 7 in
       params/test.json; production defaults to 30.
 
+  VpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+    AllowedPattern: '^(10|172|192)\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/(1[6-9]|2[0-4])$'
+    ConstraintDescription: Must be an RFC1918 private CIDR with /16-/24 mask.
+    Description: >-
+      VPC CIDR. MUST NOT overlap any existing VPC in the target region —
+      operator runs the pre-deploy verification command in README before
+      first deploy and overrides per env if needed. Fallbacks documented:
+      10.2.0.0/16, 172.20.0.0/16. Subnet CIDRs are derived via !Cidr
+      (no separate subnet-CIDR parameters).
+
 Resources:
+
+  # ---------------------------------------------------------------
+  # C2 — VPC + networking
+  # 4 /20 subnets sliced from the /16 VPC CIDR via !Cidr:
+  #   index 0 → PublicSubnet1   (e.g. 10.1.0.0/20)
+  #   index 1 → PublicSubnet2   (e.g. 10.1.16.0/20)
+  #   index 2 → PrivateSubnet1  (e.g. 10.1.32.0/20)
+  #   index 3 → PrivateSubnet2  (e.g. 10.1.48.0/20)
+  # Single NAT in PublicSubnet1 (cost trade-off; cross-AZ private-
+  # subnet egress goes through this NAT). Acceptable at pre-launch
+  # single-tenant scale; multi-AZ NAT is a scale-up knob.
+  # ---------------------------------------------------------------
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-vpc-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-igw-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 12]]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-public-1-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 12]]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-public-2-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 4, 12]]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-private-1-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 4, 12]]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-private-2-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-nat-eip-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-nat-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-public-rt-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-private-rt-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ---------------------------------------------------------------
+  # C1 resources (ECR, log group, secret containers)
+  # ---------------------------------------------------------------
 
   EcrRepository:
     Type: AWS::ECR::Repository
@@ -176,3 +390,15 @@ Outputs:
   Ip2proxySecretArn:
     Description: ARN of the IP2PROXY_DOWNLOAD_TOKEN secret.
     Value: !Ref Ip2proxySecret
+
+  VpcId:
+    Description: VPC ID for downstream resource attachment.
+    Value: !Ref Vpc
+
+  PublicSubnetIds:
+    Description: Comma-separated public subnet IDs (for ALB attachment in C5).
+    Value: !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+
+  PrivateSubnetIds:
+    Description: Comma-separated private subnet IDs (for ECS tasks in C7 and DB subnet group in C4).
+    Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
