@@ -789,6 +789,31 @@ Resources:
           Value: !Ref Environment
 
   # ---------------------------------------------------------------
+  # C7 — ECS cluster (cluster ONLY per D16)
+  # Service and TaskDefinition stay in infra/ecs-task-definition.json
+  # + the manual runbook procedure so the existing deploy workflow's
+  # `aws ecs register-task-definition` / `aws ecs update-service`
+  # ownership of task-def revisions doesn't conflict with CFN.
+  # See C8 README §"Post-deploy operator steps" for the manual
+  # service-creation procedure.
+  # ---------------------------------------------------------------
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'freightsentry-riskd-cluster-${Environment}'
+      CapacityProviders:
+        - FARGATE
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------
   # C1 resources (ECR, log group, secret containers)
   # ---------------------------------------------------------------
 
@@ -978,3 +1003,10 @@ Outputs:
       GitHub Actions deploy role ARN. Operator sets this as the
       `AWS_ROLE_TO_ASSUME` GitHub secret per env.
     Value: !GetAtt DeployRole.Arn
+
+  EcsClusterName:
+    Description: >-
+      ECS cluster name. Operator uses for the manual `aws ecs create-service`
+      step (per D16; service stays outside CFN to avoid conflict with the
+      deploy workflow's register-task-definition / update-service ownership).
+    Value: !Ref EcsCluster
