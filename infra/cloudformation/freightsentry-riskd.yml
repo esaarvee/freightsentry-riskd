@@ -256,6 +256,85 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
 
   # ---------------------------------------------------------------
+  # C3 — Security groups
+  # Cross-app isolation boundary: by NOT including platform-app's SGs
+  # as sources, riskd's RDS is reachable only from riskd's ECS tasks.
+  # Platform-app workloads have their own SGs and cannot ingress here.
+  # Egress is left default (allow-all) on every SG:
+  #   - ALB: needs to talk to target ECS tasks (8000/tcp).
+  #   - ECS task: needs ECR pulls, Secrets Manager, RDS, CloudWatch
+  #     Logs, and NAT-bound enrichment upstreams (raw.githubusercontent
+  #     .com / MaxMind / IP2Location per Pattern B-lite launch blocker).
+  #   - RDS: AWS docs recommend NOT restricting egress on DB instances
+  #     (backups + Performance Insights + other AWS services need it).
+  # ---------------------------------------------------------------
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'freightsentry-riskd-alb-${Environment}'
+      GroupDescription: ALB ingress (443 + 80) from the internet; redirects 80 to 443 in C5.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP (redirected to HTTPS at the listener)
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-alb-sg-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  EcsTaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'freightsentry-riskd-ecs-${Environment}'
+      GroupDescription: ECS task ingress on 8000/tcp from ALB only; default egress for ECR/Secrets/RDS/NAT.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: App port from ALB SG only
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-ecs-sg-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'freightsentry-riskd-rds-${Environment}'
+      GroupDescription: RDS ingress on 5432/tcp from riskd ECS tasks only; default egress per AWS RDS guidance.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsTaskSecurityGroup
+          Description: PostgreSQL from riskd ECS tasks only (cross-app isolation boundary)
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-rds-sg-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------
   # C1 resources (ECR, log group, secret containers)
   # ---------------------------------------------------------------
 
