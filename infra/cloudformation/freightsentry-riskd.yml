@@ -34,6 +34,11 @@ Metadata:
           default: Load balancer
         Parameters:
           - AcmCertificateArn
+      - Label:
+          default: IAM and GitHub OIDC
+        Parameters:
+          - GitHubOidcProviderArn
+          - GitHubOidcSubject
     ParameterLabels:
       Environment:
         default: Deployment environment (test or production)
@@ -55,6 +60,10 @@ Metadata:
         default: Deletion protection
       AcmCertificateArn:
         default: ACM certificate ARN (required; HTTPS listener)
+      GitHubOidcProviderArn:
+        default: GitHub OIDC provider ARN (account-level; from platform-app)
+      GitHubOidcSubject:
+        default: GitHub OIDC subject pattern (controls which workflows can assume DeployRole)
 
 Parameters:
 
@@ -149,6 +158,25 @@ Parameters:
       cert out-of-band (DNS or email validation) in the target region
       BEFORE first deploy. ACM certs are region-scoped; can't reuse across
       regions. No default — required parameter.
+
+  GitHubOidcProviderArn:
+    Type: String
+    AllowedPattern: '^arn:aws:iam::[0-9]{12}:oidc-provider/token\.actions\.githubusercontent\.com$'
+    ConstraintDescription: Must be the account-level GitHub Actions OIDC provider ARN.
+    Description: >-
+      GitHub Actions OIDC provider ARN — already exists in the AWS account
+      from the platform-app deployment (D5). Operator runs
+      `aws iam list-open-id-connect-providers` to obtain. NOT created by
+      this template (would conflict with platform-app).
+
+  GitHubOidcSubject:
+    Type: String
+    Default: 'repo:esaarvee/freightsentry-riskd:ref:refs/tags/v*'
+    Description: >-
+      GitHub OIDC subject pattern controlling which repository / branch /
+      tag pushes can assume DeployRole. Default matches the deploy.yml
+      tag-push trigger (`v*` semver tags). Override per env if forking or
+      using a different ref pattern.
 
 Resources:
 
@@ -617,6 +645,150 @@ Resources:
             StatusCode: HTTP_301
 
   # ---------------------------------------------------------------
+  # C6 — IAM roles
+  # Account-global resources; env-suffixed names per D13. Region
+  # coexistence works because IAM is account-scoped, not regional —
+  # one role per env, used by deploys in either region.
+  #
+  # D18 enforcement: TaskExecutionRole grants secretsmanager:GetSecretValue
+  # on an EXPLICIT 4-ARN list, NOT the wildcard `freightsentry-riskd/*`
+  # the existing manual policy used. DB_MASTER is intentionally excluded
+  # — runtime must not read superuser credentials. Alembic migrations
+  # are run by the operator using their own AWS credentials.
+  # ---------------------------------------------------------------
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-task-exec-${Environment}'
+      Description: ECS task execution role - pull image, write logs, fetch 4 runtime secrets (NOT DB_MASTER per D18).
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: task-execution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: ECRImagePull
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/freightsentry-riskd'
+              - Sid: CloudWatchLogsWrite
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/freightsentry-riskd:*'
+              - Sid: SecretsManagerReadExplicitFourArns
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseUrlSecret
+                  - !Ref HmacSecret
+                  - !Ref MaxmindSecret
+                  - !Ref Ip2proxySecret
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-task-${Environment}'
+      Description: ECS task role - empty policy. App makes zero AWS API calls; metrics emit via EMF on stdout.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-deploy-${Environment}'
+      Description: GitHub Actions OIDC-assumed role for tag-push deploys (.github/workflows/deploy.yml).
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Ref GitHubOidcSubject
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: ECRPush
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/freightsentry-riskd'
+              - Sid: ECSTaskDefinitionRegister
+                Effect: Allow
+                Action: ecs:RegisterTaskDefinition
+                Resource: '*'
+              - Sid: ECSServiceUpdate
+                Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                Resource:
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/freightsentry-riskd-cluster-${Environment}/*'
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/freightsentry-riskd-cluster-${Environment}/*'
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/freightsentry-riskd-cluster-${Environment}'
+              - Sid: IAMPassRoleForEcs
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt TaskExecutionRole.Arn
+                  - !GetAtt TaskRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------
   # C1 resources (ECR, log group, secret containers)
   # ---------------------------------------------------------------
 
@@ -792,3 +964,17 @@ Outputs:
       `aws ecs create-service --load-balancers` step (D16; ECS service
       stays outside CFN).
     Value: !Ref TargetGroup
+
+  TaskExecutionRoleArn:
+    Description: ECS task execution role ARN (referenced in infra/ecs-task-definition.json post-deploy substitution).
+    Value: !GetAtt TaskExecutionRole.Arn
+
+  TaskRoleArn:
+    Description: ECS task role ARN (empty policy; referenced in task definition).
+    Value: !GetAtt TaskRole.Arn
+
+  DeployRoleArn:
+    Description: >-
+      GitHub Actions deploy role ARN. Operator sets this as the
+      `AWS_ROLE_TO_ASSUME` GitHub secret per env.
+    Value: !GetAtt DeployRole.Arn
