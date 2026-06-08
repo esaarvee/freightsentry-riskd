@@ -1,4 +1,6 @@
 {
   "Environment": "production",
-  "LogRetentionDays": "30"
+  "LogRetentionDays": "30",
+  "DbBackupRetentionDays": "7",
+  "DbDeletionProtection": "true"
 }

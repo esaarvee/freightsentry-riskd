@@ -1,4 +1,6 @@
 {
   "Environment": "test",
-  "LogRetentionDays": "7"
+  "LogRetentionDays": "7",
+  "DbBackupRetentionDays": "1",
+  "DbDeletionProtection": "false"
 }

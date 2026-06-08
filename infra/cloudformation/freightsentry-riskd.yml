@@ -21,6 +21,15 @@ Metadata:
           default: Networking
         Parameters:
           - VpcCidr
+      - Label:
+          default: Database
+        Parameters:
+          - DbInstanceClass
+          - DbAllocatedStorage
+          - DbMaxAllocatedStorage
+          - DbMultiAz
+          - DbBackupRetentionDays
+          - DbDeletionProtection
     ParameterLabels:
       Environment:
         default: Deployment environment (test or production)
@@ -28,6 +37,18 @@ Metadata:
         default: CloudWatch log group retention (days)
       VpcCidr:
         default: VPC CIDR block (must not overlap any existing VPC in the target region)
+      DbInstanceClass:
+        default: RDS instance class
+      DbAllocatedStorage:
+        default: Initial DB storage (GiB)
+      DbMaxAllocatedStorage:
+        default: Storage autoscaling ceiling (GiB)
+      DbMultiAz:
+        default: Multi-AZ standby
+      DbBackupRetentionDays:
+        default: Automated backup retention (days)
+      DbDeletionProtection:
+        default: Deletion protection
 
 Parameters:
 
@@ -60,6 +81,58 @@ Parameters:
       first deploy and overrides per env if needed. Fallbacks documented:
       10.2.0.0/16, 172.20.0.0/16. Subnet CIDRs are derived via !Cidr
       (no separate subnet-CIDR parameters).
+
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+      - db.t4g.large
+      - db.m6g.large
+      - db.m6g.xlarge
+    Description: >-
+      RDS instance class. db.t4g.micro is the pre-launch single-tenant
+      default; scale up as throughput requires. Larger classes available
+      via parameter override; no template change needed.
+
+  DbAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+    Description: Initial provisioned storage in GiB (gp3). Autoscales up to DbMaxAllocatedStorage.
+
+  DbMaxAllocatedStorage:
+    Type: Number
+    Default: 100
+    MinValue: 20
+    MaxValue: 16384
+    Description: Storage autoscaling ceiling in GiB. Must be >= DbAllocatedStorage.
+
+  DbMultiAz:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Multi-AZ standby. Default false at pre-launch single-tenant scale.
+      Production should flip to true once traffic justifies the ~2x cost.
+
+  DbBackupRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Automated backup retention. Production default 7; test overrides to 1.
+
+  DbDeletionProtection:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Deletion protection. Production default true; test overrides to false
+      so test stacks can be torn down without manual unprotect.
 
 Resources:
 
@@ -335,6 +408,111 @@ Resources:
           Value: !Ref Environment
 
   # ---------------------------------------------------------------
+  # C4 — RDS PostgreSQL
+  # Master credentials are CFN-generated into DbMasterSecret at
+  # freightsentry-riskd/DB_MASTER (D18 naming; uppercase per F5).
+  # Runtime app uses a separate riskd_app_login DSN at
+  # freightsentry-riskd/DATABASE_URL (created empty in C1; populated
+  # post-deploy by operator after alembic runtime-roles migration).
+  # The TaskExecutionRole (C6) does NOT grant runtime access to
+  # DB_MASTER — alembic uses operator's own AWS creds (D18).
+  # DeletionPolicy: Snapshot + UpdateReplacePolicy: Snapshot protect
+  # data against accidental delete or replacement-triggering changes.
+  # RecoveryWindowInDays omitted on DbMasterSecret per STATUS.md
+  # 2026-06-08 (not a valid Properties field; API default = 30 days).
+  # ---------------------------------------------------------------
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: riskd RDS subnet group (private subnets across 2 AZs)
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: riskd PostgreSQL 16 parameter group (defaults; tunables added per scale-up plan)
+      Family: postgres16
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DbMasterSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/DB_MASTER
+      Description: >-
+        RDS master credentials (username: riskd). Used by alembic
+        migrations only — operator fetches with their own AWS creds.
+        NOT accessible to the runtime TaskExecutionRole (D18). Host /
+        port / dbname populated by DbSecretAttachment after DbInstance.
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"riskd"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: freightsentry-riskd
+      Engine: postgres
+      EngineVersion: '16.9'
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbAllocatedStorage
+      MaxAllocatedStorage: !Ref DbMaxAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: riskd
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DbMasterSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DbMasterSecret}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      DBParameterGroupName: !Ref DbParameterGroup
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: !Ref DbMultiAz
+      BackupRetentionPeriod: !Ref DbBackupRetentionDays
+      DeletionProtection: !Ref DbDeletionProtection
+      EnablePerformanceInsights: false
+      # AutoMinorVersionUpgrade false because EngineVersion is pinned to a
+      # specific minor (16.9). If AWS auto-bumped minor in the maintenance
+      # window, the next `aws cloudformation deploy` would revert the engine
+      # back to 16.9 — fighting AWS and risking downtime. Operator opts into
+      # minor upgrades via parameter override + intentional stack-update.
+      AutoMinorVersionUpgrade: false
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  DbSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbMasterSecret
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
+  # ---------------------------------------------------------------
   # C1 resources (ECR, log group, secret containers)
   # ---------------------------------------------------------------
 
@@ -481,3 +659,17 @@ Outputs:
   PrivateSubnetIds:
     Description: Comma-separated private subnet IDs (for ECS tasks in C7 and DB subnet group in C4).
     Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+
+  DbEndpointAddress:
+    Description: RDS endpoint hostname (operator constructs ALEMBIC_DATABASE_URL with this).
+    Value: !GetAtt DbInstance.Endpoint.Address
+
+  DbEndpointPort:
+    Description: RDS endpoint port.
+    Value: !GetAtt DbInstance.Endpoint.Port
+
+  DbMasterSecretArn:
+    Description: >-
+      ARN of the RDS master credentials secret. Operator fetches with
+      own AWS creds for alembic migrations; NOT readable by runtime task.
+    Value: !Ref DbMasterSecret
