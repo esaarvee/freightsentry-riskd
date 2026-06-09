@@ -312,6 +312,66 @@ post-launch follow-up. scripts/calibration/ is deleted in 7E.3;
 these tests would land in scripts/replay_validation.py's existing
 test_replay_validation.py if added.
 
+## 2026-06-09 — IP2Proxy LITE actual extracted BIN is 1.5 GiB, not the ~50 MB stated in the brief
+
+Discovered by: implementer during Pattern B-lite Amendment 2 F3 verification
+Location: REPORT_INFRA_CFN.md Part 2 upstreams table + docs/verification-pattern-b-lite.md V-9 row "IP2Proxy LITE PX11 (extracted BIN) 20 MB / ~50 MB"
+Severity: low (caught pre-execution; plan recalibrated)
+Observation: Live verification of `/Users/drshott/PX11.zip` reports the
+inner `IP2PROXY-LITE-PX11.BIN` member at 1,610,484,245 bytes (1.5 GiB)
+uncompressed; the ZIP itself is 82 MB. The brief sourced "~50 MB" from
+either an older IP2Proxy LITE release or a stale reference. The
+discrepancy is ~32×. Plan amendments: raw ZIP floor 20 MB → 30 MB;
+new extracted-BIN floor 500 MB; `atomic_replace` signature split into
+bytes-form + streaming-form (`atomic_replace_stream`) since loading
+1.5 GiB into a Python `bytes` object would OOM the refresh task on
+small Fargate sizings.
+Suggested action: future verification-phase rows for binary-data
+sources should pull live file size via a one-shot upstream probe
+rather than echoing brief-sourced approximations. Especially relevant
+for any source whose post-extract size exceeds 100 MB (the implicit
+threshold above which in-memory handling is no longer safe).
+
+## 2026-06-09 — IP2Location download endpoint enforces 5/24h per-token quota
+
+Discovered by: implementer during Pattern B-lite F3 verification
+Location: https://www.ip2location.com/download/?token=<TOKEN>&file=PX11LITEBIN
+Severity: low
+Observation: After three probe attempts within ~15 minutes on
+2026-06-09, the endpoint returned a 56-byte ASCII body starting
+`THIS FILE CAN ONLY BE DOWNLOADED 5 TIMES WITHIN…` (truncated; full
+window is 24h). Quota is per-token, not per-IP. Implications for
+Pattern B-lite: refresh cadence 1×/24h leaves 4 slots/day for
+operator-side ad-hoc probes — generous margin. The rate-limit
+response is plain ASCII (not HTML, not redirect to /log-in) and is
+distinguishable by prefix-match. C1 `refresh_ip2proxy` adds an
+explicit `rate_limited` failure_class for this case so ops
+dashboards can split "throttle" from "broken upstream."
+Suggested action: none for code; runbook section in C6 already
+documents the cadence. Possible follow-up: alert on
+`enrich.refresh.failure` with `failure_class="rate_limited"`
+firing more than once per 24h (signals a token-share collision
+or runaway operator probing).
+
+## 2026-06-08 — scripts/fetch_enrichment.py output filenames don't match Enricher loader
+
+Discovered by: implementer during Pattern B-lite verification phase
+Location: scripts/fetch_enrichment.py:58 (writes `aws.json` / `gcp.json`)
+vs app/enrich.py:163 (reads `{provider}.cidr`)
+Severity: low
+Observation: The sync refresh script writes the raw upstream JSON for
+AWS/GCP (`aws.json`, `gcp.json`) but the `Enricher._load_cloud_cidrs`
+loader expects `aws.cidr` / `gcp.cidr` (newline-separated CIDR list,
+one per line). The script has either never been run end-to-end with
+the loader OR was paired with an out-of-tree post-process step that's
+been lost. Pattern B-lite's new async module writes `.cidr` (after
+parsing IPv4 prefixes out of the JSON), so the launch-blocker is
+resolved either way. The sync script remains stale code.
+Suggested action: reconcile post-Pattern-B-lite — either delete
+`scripts/fetch_enrichment.py` (Pattern B-lite supersedes it) or
+extend it with the same JSON-to-CIDR parsing logic so it stays
+viable as an out-of-process cron fallback.
+
 ## 2026-06-05 — test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2 missing 2 rules from the case-2 5-rule compound
 
 Discovered by: implementer during PLAN_PHASE_8A.md 8A.1 (validation step)
