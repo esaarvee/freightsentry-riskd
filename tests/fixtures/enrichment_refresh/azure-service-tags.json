@@ -1,0 +1,55 @@
+{
+  "changeNumber": 217,
+  "cloud": "Public",
+  "values": [
+    {
+      "name": "AzureCloud",
+      "id": "AzureCloud",
+      "properties": {
+        "changeNumber": 92,
+        "region": "",
+        "regionId": 0,
+        "platform": "Azure",
+        "systemService": "",
+        "addressPrefixes": [
+          "192.0.2.0/26",
+          "198.51.100.192/27",
+          "203.0.113.224/28"
+        ],
+        "networkFeatures": []
+      }
+    },
+    {
+      "name": "AzureCloud.eastus",
+      "id": "AzureCloud.eastus",
+      "properties": {
+        "changeNumber": 41,
+        "region": "eastus",
+        "regionId": 1,
+        "platform": "Azure",
+        "systemService": "",
+        "addressPrefixes": [
+          "192.0.2.64/27",
+          "198.51.100.224/28"
+        ],
+        "networkFeatures": []
+      }
+    },
+    {
+      "name": "AzureCloud.westeurope",
+      "id": "AzureCloud.westeurope",
+      "properties": {
+        "changeNumber": 35,
+        "region": "westeurope",
+        "regionId": 13,
+        "platform": "Azure",
+        "systemService": "",
+        "addressPrefixes": [
+          "192.0.2.96/28",
+          "2001:db8:1::/48"
+        ],
+        "networkFeatures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# FireHOL Level 1 — SYNTHETIC TEST FIXTURE (Pattern B-lite C0)
+# Format-valid sample for refresh-module tests; NOT real upstream data.
+# Real FireHOL netsets are 1-2 MB; this stub exercises the loader path
+# only. CIDRs below are RFC-5737 documentation prefixes + RFC-1918
+# private ranges — guaranteed not to overlap with real allocations.
+#
+# Generated: 2026-06-09
+# Source schema: https://github.com/firehol/blocklist-ipsets (format only)
+192.0.2.0/24
+198.51.100.0/24
+203.0.113.0/24
+10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
+198.18.0.0/15
+233.252.0.0/24

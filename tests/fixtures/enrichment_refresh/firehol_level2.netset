@@ -1,0 +1,11 @@
+# FireHOL Level 2 — SYNTHETIC TEST FIXTURE (Pattern B-lite C0)
+# Format-valid sample; NOT real upstream data. See firehol_level1.netset
+# for the synthetic-CIDR rationale.
+#
+# Generated: 2026-06-09
+# Source schema: https://github.com/firehol/blocklist-ipsets (format only)
+192.0.2.128/25
+198.51.100.64/26
+203.0.113.32/27
+100.64.0.0/10
+240.0.0.0/4
