@@ -4,6 +4,16 @@ import asyncpg
 import pytest
 from httpx import AsyncClient
 
+from app import enrichment_refresh as er
+
+
+@pytest.fixture(autouse=True)
+def _reset_enrichment_loaded_state() -> None:
+    """Each /health/ test starts with a clean enrichment-loaded set so
+    the `enrichment` field reflects what THIS test sets up, not bleed
+    from another test."""
+    er._reset_loaded_sources_for_tests()
+
 
 async def test_health_returns_ok(unauth_client: AsyncClient) -> None:
     response = await unauth_client.get("/health/")
@@ -21,12 +31,51 @@ async def test_health_no_auth_required(unauth_client: AsyncClient) -> None:
     assert response.status_code == 200
 
 
+async def test_health_enrichment_degraded_on_cold_start(
+    unauth_client: AsyncClient,
+) -> None:
+    """No sources have refreshed and none are seeded from disk →
+    enrichment="degraded". HTTP 200 stays (per Amendment 1 F2: degraded
+    does NOT affect ALB rotation)."""
+    response = await unauth_client.get("/health/")
+    assert response.status_code == 200
+    assert response.json()["enrichment"] == "degraded"
+
+
+async def test_health_enrichment_ok_after_all_sources_loaded(
+    unauth_client: AsyncClient,
+) -> None:
+    """When every source is marked loaded, the response reports
+    enrichment="ok"."""
+    for name in er._ALL_SOURCE_NAMES:
+        er.mark_source_loaded(name)
+    response = await unauth_client.get("/health/")
+    assert response.status_code == 200
+    assert response.json()["enrichment"] == "ok"
+
+
+async def test_health_enrichment_degraded_on_partial_load(
+    unauth_client: AsyncClient,
+) -> None:
+    """Fewer than all sources marked → still degraded."""
+    er.mark_source_loaded("firehol_level1")
+    er.mark_source_loaded("aws")
+    response = await unauth_client.get("/health/")
+    assert response.status_code == 200
+    assert response.json()["enrichment"] == "degraded"
+
+
 async def test_health_returns_503_on_db_failure(
     unauth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When the SELECT 1 liveness check fails, /health returns 503 with
     ok=false. Load balancers key rotation on status code, so the failure
-    mode must surface as non-2xx."""
+    mode must surface as non-2xx. Enrichment field is omitted from the
+    503 body (DB failure short-circuits before enrichment check)."""
+    # Even with all enrichment loaded, DB failure still returns 503
+    for name in er._ALL_SOURCE_NAMES:
+        er.mark_source_loaded(name)
+
     original_fetchval = asyncpg.Connection.fetchval
 
     async def failing_fetchval(self, query, *args, **kwargs):  # type: ignore[no-untyped-def]
