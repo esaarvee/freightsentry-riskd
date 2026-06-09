@@ -26,6 +26,7 @@ repos:
           - pydantic>=2.7
           - pydantic-settings
           - fastapi
+          - httpx
           - structlog
           - types-PyYAML
 
