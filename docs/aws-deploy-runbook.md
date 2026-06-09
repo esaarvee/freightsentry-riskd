@@ -9,17 +9,28 @@ runbook walks the operator through pasting them in the right places.
 Follow top-to-bottom on first deploy. Each section's checkbox
 prefix `[ ]` is meant to be ticked as you go.
 
-> **⚠ LAUNCH BLOCKER — Pattern B-lite enrichment refresh module.**
-> Deploying the infrastructure (this runbook or the CFN template below)
-> alone does NOT produce a feature-complete service. `app/enrich.py`
-> tolerates missing source files, so the runtime container passes
-> `/health/` and serves `/v1/booking` requests, but every booking gets a
-> dead IP-enrichment row (`is_proxy=False`, `is_vpn=False`,
-> `country=None`, etc.) and every rule conditioned on IP-fraud signals
-> fires on False. A separate follow-up pass implements
-> `app/enrichment_refresh.py` (runtime download from FireHOL / MaxMind /
-> IP2Location) — must land before production launch. See
-> `infra/cloudformation/README.md` § Launch Blocker for detail.
+> **Historical: Pattern B-lite enrichment refresh module — RESOLVED.**
+> The Pattern B-lite refresh module landed on 2026-06-09 (`feat/refactor`,
+> PBL C0–C6). The runtime container's lifespan now spawns a 24h refresh
+> task that downloads FireHOL / MaxMind / IP2Proxy / cloud-CIDR feeds
+> into `ENRICHMENT_DATA_DIR` and atomically swaps a freshly-loaded
+> `Enricher` on each successful tick. The `/health/` response exposes an
+> `enrichment: "ok" | "degraded"` field — degraded does NOT change the
+> HTTP status code, so the ALB target stays in rotation while sources
+> warm up. See [`.ai/enrichment.md`](../.ai/enrichment.md) § Refresh
+> module for the current architecture and the per-source download
+> contract.
+>
+> Operator action before first production deploy: populate the
+> `freightsentry-riskd/MAXMIND_LICENSE_KEY` and
+> `freightsentry-riskd/IP2PROXY_DOWNLOAD_TOKEN` secret containers (CFN
+> step 4) so the MaxMind + IP2Proxy paths produce successful refresh
+> ticks. FireHOL + cloud-CIDR feeds refresh without secrets.
+>
+> Disk budget: `ENRICHMENT_DATA_DIR` needs ≥3.5 GiB free at any moment
+> (IP2Proxy LITE BIN is ~1.6 GiB; atomic-replace tempfile peaks at 2×
+> that during the swap). ECS Fargate ephemeral storage default 20 GiB
+> is comfortable.
 
 ## IaC-managed resources (alternative to manual Phase A)
 

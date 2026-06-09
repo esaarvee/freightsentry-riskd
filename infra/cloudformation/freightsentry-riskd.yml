@@ -381,7 +381,9 @@ Resources:
   #   - ALB: needs to talk to target ECS tasks (8000/tcp).
   #   - ECS task: needs ECR pulls, Secrets Manager, RDS, CloudWatch
   #     Logs, and NAT-bound enrichment upstreams (raw.githubusercontent
-  #     .com / MaxMind / IP2Location per Pattern B-lite launch blocker).
+  #     .com / MaxMind / IP2Location / Microsoft / Cloudflare consumed
+  #     by app/enrichment_refresh.py — see .ai/enrichment.md § Refresh
+  #     module).
   #   - RDS: AWS docs recommend NOT restricting egress on DB instances
   #     (backups + Performance Insights + other AWS services need it).
   # ---------------------------------------------------------------
@@ -898,8 +900,9 @@ Resources:
     Properties:
       Name: freightsentry-riskd/MAXMIND_LICENSE_KEY
       Description: >-
-        MaxMind GeoLite2 license key. Populated post-deploy. Required
-        by Pattern B-lite enrichment refresh module (launch blocker).
+        MaxMind GeoLite2 license key. Populated post-deploy. Consumed
+        by the Pattern B-lite enrichment refresh module
+        (app/enrichment_refresh.py).
       SecretString: '{"placeholder":"populate via aws secretsmanager put-secret-value"}'
       Tags:
         - Key: Project

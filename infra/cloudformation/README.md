@@ -4,13 +4,24 @@ Additive Infrastructure-as-Code for the riskd service. Coexists with the manual 
 
 ---
 
-> ## ⚠ LAUNCH BLOCKER — Pattern B-lite enrichment refresh module
+> ## Historical: Pattern B-lite enrichment refresh module
 >
-> **Deploying this template alone does NOT produce a feature-complete service.** The riskd container starts and passes `/health/`, but `app/enrich.py` lazy-loads MaxMind GeoLite2, IP2Proxy LITE, and FireHOL netsets at first use — and on a fresh deploy with no enrichment files, every booking gets an `EnrichmentRow` with `is_proxy=False`, `is_vpn=False`, `is_tor=False`, `fh_level1/2=False`, `is_cloud=False`, `is_datacenter=False`, and `country=None`. Every rule conditioned on those signals fires on False; only deterministic non-IP rules produce signal. The system looks healthy and accepts requests but is functionally degraded.
+> **Status: RESOLVED on 2026-06-09 (branch `feat/refactor`).** The
+> Pattern B-lite enrichment refresh module landed across PBL C0–C6
+> commits (fixtures + module + lifespan integration + health probe +
+> EMF metrics + end-to-end integration tests + this docs sweep). See
+> [`.ai/enrichment.md`](../../.ai/enrichment.md) § Refresh module for
+> the current architecture and [`app/enrichment_refresh.py`](../../app/enrichment_refresh.py)
+> for the implementation.
 >
-> Resolution: a separate follow-up pass implements `app/enrichment_refresh.py` (runtime download from upstreams: FireHOL via `raw.githubusercontent.com`, MaxMind via `download.maxmind.com` keyed on `MAXMIND_LICENSE_KEY`, IP2Proxy via `www.ip2location.com` keyed on `IP2PROXY_DOWNLOAD_TOKEN`) with a 24h refresh loop and a health-probe hook that reports `degraded` until first refresh succeeds. CFN-only output of THIS pass provides the NAT egress (C2) and the license-key secret containers (C1) the future module needs.
->
-> **Do NOT promote to production until the Pattern B-lite module ships.**
+> Pre-Pattern-B-lite context (preserved for audit): deploying this
+> template alone did NOT produce a feature-complete service. The
+> riskd container started and passed `/health/`, but `app/enrich.py`
+> lazy-loaded MaxMind GeoLite2, IP2Proxy LITE, and FireHOL netsets at
+> first use, and on a fresh deploy with no enrichment files every
+> booking got an `EnrichmentRow` with all IP-fraud fields default.
+> CFN provides the NAT egress (C2) and the license-key secret
+> containers (C1) that the Pattern B-lite module consumes at runtime.
 
 ---
 
@@ -158,7 +169,7 @@ aws secretsmanager put-secret-value \
   --region <REGION>
 ```
 
-These are dormant until the Pattern B-lite enrichment refresh module ships (launch blocker above).
+These are consumed by the Pattern B-lite enrichment refresh module (see `app/enrichment_refresh.py` and `.ai/enrichment.md` § Refresh module). Empty values cause MaxMind / IP2Proxy refresh attempts to skip with `failure_class="other"` and a `"no license key configured"` / `"no token configured"` log; FireHOL + cloud-CIDR refresh continues independently. Populate the secrets post-deploy so the refresh loop's MaxMind + IP2Proxy paths produce successful ticks.
 
 ### 5. First image push + ECS service creation
 
@@ -302,7 +313,7 @@ The platform-app uses a different conventions baseline. Differences are intentio
 
 ## Carry-forward / future work
 
-- **LAUNCH BLOCKER**: Pattern B-lite enrichment refresh app module — see banner at top.
+- **RESOLVED (post-CFN-pass)**: Pattern B-lite enrichment refresh app module — landed across PBL C0–C6 commits on 2026-06-09 (`feat/refactor`). See [`.ai/enrichment.md`](../../.ai/enrichment.md) § Refresh module and [`app/enrichment_refresh.py`](../../app/enrichment_refresh.py).
 - **Operator-driven**: first test-region deploy; iterate template if discrepancies surface.
 - **Optional follow-ups (not blocking launch)**:
   - Auto-scaling configurations (target tracking on CPU / request count).

@@ -95,16 +95,35 @@ class Enricher:
 
 `updated_at` checked at lookup: if older than 14 days, row is stale and re-enriched on the next request. Operator may force-refresh via `scripts/fetch_enrichment.py --rebuild-ip <ip>`.
 
-### Refresh script
+### Refresh module
 
-`scripts/fetch_enrichment.py` downloads fresh source files into `data/enrichment/`:
+`app/enrichment_refresh.py` (Pattern B-lite, landed 2026-06-09 across PBL C0–C6) runs an in-process async refresh task spawned by the FastAPI lifespan. Each tick:
 
-- MaxMind: requires `MAXMIND_LICENSE_KEY`. URL pattern in `.ai/decisions.md`.
-- FireHOL: public Git raw URLs; no auth.
-- IP2Proxy: requires `IP2PROXY_DOWNLOAD_TOKEN`.
-- Cloud CIDRs: public URLs per provider; AWS auto-fetches latest; Azure scrapes the dated JSON filename from the Microsoft download page.
+1. Concurrently fetches all 9 sources via `httpx.AsyncClient` with bounded retries + jittered exponential backoff:
+   - FireHOL Level 1 + Level 2 (`raw.githubusercontent.com`, no auth)
+   - MaxMind GeoLite2 City + ASN (`download.maxmind.com`, keyed on `MAXMIND_LICENSE_KEY`)
+   - IP2Proxy LITE PX11 (`www.ip2location.com`, keyed on `IP2PROXY_DOWNLOAD_TOKEN`; 5/24h per-token quota)
+   - AWS / GCP / Azure / Cloudflare cloud-CIDR feeds (public URLs; Azure scrapes the dated JSON filename from `microsoft.com/en-us/download/details.aspx?id=56519`)
 
-Runs out-of-process: as ECS scheduled task in production (Phase 6), or local cron in dev. App reads from `data/enrichment/` (loader path configurable via `ENRICHMENT_DATA_DIR`).
+2. Each downloader applies **two-stage sanity floors**: a raw-bytes floor on the upstream response (catches HTTP 503 / rate-limit / login-redirect bodies — 30 MB minimum for IP2Proxy ZIP, ~50 KB to ~30 MB depending on source), then a post-parse floor on the extracted artifact (catches "JSON parses but the IPv4 prefix list is empty"; 5 KB to 500 MB depending on source). A skipped floor surfaces as `RefreshResult{status="skipped_sanity_floor"}` and preserves the existing on-disk artifact.
+
+3. Each downloader writes via `atomic_replace` (bytes-form, for sources < 100 MB) or `atomic_replace_stream` (1 MiB chunk streaming, for IP2Proxy's 1.6 GB extracted BIN — never loads the full BIN into a Python `bytes` object). The tempfile lives in the same directory as the target so `os.rename` is atomic on POSIX.
+
+4. IP2Proxy uses **magic-byte detection** before extraction: `PK\x03\x04` → ZIP path (extract via `zipfile.ZipFile.open("IP2PROXY-LITE-PX11.BIN")`), `\x1f\x8b` → tar.gz fallback, `<!`/`<?`/`<h` → `failure_class="upstream_html"` (token rejected, redirected to login), `THIS FILE CAN ONLY BE DOWNLOADED` prefix → `failure_class="rate_limited"`.
+
+5. On ≥1 successful download per tick, the loop builds a new `Enricher(data_dir)` instance, eagerly loads its sources via `_load_sources()` on a worker thread (MaxMind / IP2Proxy C-extensions open file handles), and atomically swaps `app.state.enricher = new_enricher`. In-flight `enrich()` callers stay on the OLD instance until they finish; refcount → 0 then closes the prior MaxMind / IP2Proxy handles via their C-extension finalizers. No locks; no segfault risk; no enrich-path latency cost.
+
+6. `/health/` exposes an `enrichment: "ok" | "degraded"` field. `"ok"` iff every source has either successfully refreshed at least once OR was present on disk at startup (hybrid Pattern A defense). Degraded does NOT change the HTTP status code — the ALB target stays in rotation while sources warm up.
+
+7. Observability: every per-source outcome emits a CloudWatch EMF metric (`enrich.refresh.success` with `duration_ms` + `bytes_written`; `enrich.refresh.failure` with `failure_class` dimension across `network` / `parse_error` / `rate_limited` / `upstream_html` / `other`; `enrich.refresh.skipped_sanity_floor` with `bytes_attempted` + `floor_bytes`). License keys never appear in log fields, metric dimensions, exception messages, or RefreshResult fields — sentinel-string tests pin the invariant.
+
+**Refresh cadence**: 24h between ticks. IP2Location's 5/24h per-token quota gives 4 slots/day of headroom for operator-side ad-hoc probes.
+
+**Disk budget**: `ENRICHMENT_DATA_DIR` needs ≥3.5 GiB free (IP2Proxy LITE BIN is ~1.6 GiB; atomic-replace tempfile peaks at 2× that during the swap). ECS Fargate ephemeral storage default 20 GiB is comfortable.
+
+**Cancellation**: lifespan shutdown cancels the refresh task; the task swallows `CancelledError`, cleans any `*.tmp.*` orphans in `ENRICHMENT_DATA_DIR`, and re-raises. The pool stays open until after the refresh task is fully drained so the task's final log calls have a working context.
+
+**Out-of-process fallback**: `scripts/fetch_enrichment.py` is retained as a manual / cron-driven option (synchronous `urllib`-based; predates Pattern B-lite). Known issues: it saves AWS/GCP JSON without parsing to the `.cidr` form the Enricher reads, and saves IP2Proxy as `.BIN` without ZIP-extracting. See `.claude/BUGS.md` for the reconciliation note. The in-process refresh module is the recommended path.
 
 ---
 
