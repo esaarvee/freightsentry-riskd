@@ -151,6 +151,26 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     ),
     "enrich.cache_hit": MetricSpec(synthetic_count=True),
     "enrich.cache_miss": MetricSpec(synthetic_count=True),
+    "enrich.refresh.success": MetricSpec(
+        dimensions=("source_name",),
+        metrics=(
+            ("duration_ms", "Milliseconds"),
+            ("bytes_written", "Bytes"),
+        ),
+        synthetic_count=True,
+    ),
+    "enrich.refresh.failure": MetricSpec(
+        dimensions=("source_name", "failure_class"),
+        synthetic_count=True,
+    ),
+    "enrich.refresh.skipped_sanity_floor": MetricSpec(
+        dimensions=("source_name",),
+        metrics=(
+            ("bytes_attempted", "Bytes"),
+            ("floor_bytes", "Bytes"),
+        ),
+        synthetic_count=True,
+    ),
     "admin.decision_lookup": MetricSpec(
         dimensions=("tenant_id", "request_type"),
         synthetic_count=True,

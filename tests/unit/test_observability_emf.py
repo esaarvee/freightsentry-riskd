@@ -330,3 +330,114 @@ def test_every_metric_spec_produces_emf_block(event_name: str) -> None:
     if spec.synthetic_count:
         names = {m["Name"] for m in cw["Metrics"]}
         assert "count" in names
+
+
+# ---------------------------------------------------------------------------
+# PBL C4 — enrich.refresh.{success,failure,skipped_sanity_floor}
+# ---------------------------------------------------------------------------
+
+
+def test_enrich_refresh_success_emits_emf_with_dims_and_metrics() -> None:
+    """enrich.refresh.success: source_name dimension; duration_ms +
+    bytes_written + count metrics."""
+    event: dict[str, Any] = {
+        "event": "enrich.refresh.success",
+        "metric": True,
+        "source_name": "firehol_level1",
+        "duration_ms": 1234.5,
+        "bytes_written": 524288,
+    }
+    result = emf_processor(None, "info", event)
+    cw = _emf_block(result)
+    assert cw["Dimensions"] == [["source_name"]]
+    metric_names = {m["Name"] for m in cw["Metrics"]}
+    assert metric_names == {"duration_ms", "bytes_written", "count"}
+    metric_units = {m["Name"]: m.get("Unit") for m in cw["Metrics"]}
+    assert metric_units["duration_ms"] == "Milliseconds"
+    assert metric_units["bytes_written"] == "Bytes"
+    assert metric_units["count"] == "Count"
+    # source_name stays in the event dict (CloudWatch uses it for the
+    # dimension lookup at ingest time)
+    assert result["source_name"] == "firehol_level1"
+
+
+@pytest.mark.parametrize(
+    "failure_class",
+    ["network", "parse_error", "rate_limited", "upstream_html", "other"],
+)
+def test_enrich_refresh_failure_dim_taxonomy(failure_class: str) -> None:
+    """enrich.refresh.failure dimensions: source_name + failure_class.
+    Every value in the failure_class taxonomy lands as a discrete EMF
+    dimension value, enabling per-class alerting."""
+    event: dict[str, Any] = {
+        "event": "enrich.refresh.failure",
+        "metric": True,
+        "source_name": "ip2proxy",
+        "failure_class": failure_class,
+    }
+    result = emf_processor(None, "info", event)
+    cw = _emf_block(result)
+    assert cw["Dimensions"] == [["source_name", "failure_class"]]
+    metric_names = {m["Name"] for m in cw["Metrics"]}
+    assert metric_names == {"count"}
+    assert result["failure_class"] == failure_class
+
+
+def test_enrich_refresh_skipped_sanity_floor_emits_byte_metrics() -> None:
+    """enrich.refresh.skipped_sanity_floor: source_name dimension;
+    bytes_attempted + floor_bytes + count metrics. The byte values let
+    dashboards trend "how far below floor is upstream serving" over
+    time."""
+    event: dict[str, Any] = {
+        "event": "enrich.refresh.skipped_sanity_floor",
+        "metric": True,
+        "source_name": "ip2proxy_extracted",
+        "bytes_attempted": 1024,
+        "floor_bytes": 500_000_000,
+    }
+    result = emf_processor(None, "info", event)
+    cw = _emf_block(result)
+    assert cw["Dimensions"] == [["source_name"]]
+    metric_units = {m["Name"]: m.get("Unit") for m in cw["Metrics"]}
+    assert metric_units == {
+        "bytes_attempted": "Bytes",
+        "floor_bytes": "Bytes",
+        "count": "Count",
+    }
+
+
+def test_enrich_refresh_emf_does_not_leak_license_keys() -> None:
+    """Defense-in-depth: even if a future change accidentally passed
+    license-key bytes into a log event, the EMF processor only promotes
+    fields listed in the MetricSpec to dimensions / metric values. The
+    sentinel key in an unauthorized field should not surface in the
+    EMF block."""
+    sentinel = "SENTINEL-LICENSE-KEY-DO-NOT-LOG-1234567890"
+    event: dict[str, Any] = {
+        "event": "enrich.refresh.success",
+        "metric": True,
+        "source_name": "ip2proxy",
+        "duration_ms": 1000.0,
+        "bytes_written": 1_000_000,
+        # Hostile injection attempt:
+        "license_key": sentinel,
+        "url": f"https://download.example.com/?token={sentinel}",
+    }
+    result = emf_processor(None, "info", event)
+    cw = _emf_block(result)
+    # Dimensions: only source_name (license_key is NOT a declared dim)
+    assert cw["Dimensions"] == [["source_name"]]
+    # Metrics: declared 2 + synthetic count (license_key not promoted)
+    metric_names = {m["Name"] for m in cw["Metrics"]}
+    assert metric_names == {"duration_ms", "bytes_written", "count"}
+    # The injected fields pass through to the log record (so an emergency
+    # `caplog` capture would see them — that's the structlog convention)
+    # but the EMF metric pipeline doesn't promote them to dimensions or
+    # metric values, which is the disclosure path that matters at scale.
+    import json as _json
+
+    emf_json = _json.dumps(result["_aws"])
+    assert sentinel not in emf_json, (
+        "EMF block must not contain license-key strings — only the "
+        "explicitly-declared MetricSpec fields should reach EMF"
+    )
