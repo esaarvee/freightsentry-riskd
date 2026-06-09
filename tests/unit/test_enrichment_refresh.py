@@ -13,6 +13,7 @@ records or RefreshResult fields.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -878,6 +879,348 @@ class TestLoadedSources:
 # ---------------------------------------------------------------------------
 # License-key sanitization
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# refresh_all_once + refresh_loop (PBL C2)
+# ---------------------------------------------------------------------------
+
+
+class _StubAppState:
+    """Minimal stand-in for `fastapi.FastAPI.app.state` so refresh_all_once
+    can swap `enricher` without an actual FastAPI instance."""
+
+    def __init__(self, enricher: object) -> None:
+        self.enricher = enricher
+
+
+class _StubApp:
+    def __init__(self, enricher: object) -> None:
+        self.state = _StubAppState(enricher)
+
+
+def _mock_client_factory(
+    handler: Callable[[httpx.Request], httpx.Response],
+) -> Callable[[], httpx.AsyncClient]:
+    def factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    return factory
+
+
+class TestRefreshAllOnce:
+    async def test_all_success_swaps_enricher(
+        self,
+        tmp_path: Path,
+        low_floors: None,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Every source returns its fixture; after the tick the swap
+        happens AND every source is marked loaded."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "firehol_level1" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level1.netset"))
+            if "firehol_level2" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level2.netset"))
+            if "GeoLite2-City" in url:
+                return httpx.Response(200, content=_read_fixture("GeoLite2-City.tar.gz"))
+            if "GeoLite2-ASN" in url:
+                return httpx.Response(200, content=_read_fixture("GeoLite2-ASN.tar.gz"))
+            if "ip2location.com" in url:
+                return httpx.Response(200, content=_read_fixture("IP2PROXY-LITE-PX11.zip"))
+            if "ip-ranges.amazonaws.com" in url:
+                return httpx.Response(200, content=_read_fixture("ip-ranges.json"))
+            if "gstatic.com" in url:
+                return httpx.Response(200, content=_read_fixture("cloud.json"))
+            if "microsoft.com/en-us/download" in url:
+                return httpx.Response(
+                    200,
+                    content=(
+                        b'href="https://download.microsoft.com/download/abc/'
+                        b'ServiceTags_Public_20260609.json"'
+                    ),
+                )
+            if "ServiceTags_Public" in url:
+                return httpx.Response(200, content=_read_fixture("azure-service-tags.json"))
+            if "cloudflare.com" in url:
+                return httpx.Response(200, content=_read_fixture("ips-v4.txt"))
+            return httpx.Response(500, content=b"unmocked url")
+
+        monkeypatch.setattr(er, "_build_http_client", _mock_client_factory(handler))
+
+        pre = object()  # sentinel pre-swap enricher
+        app = _StubApp(pre)
+        results = await er.refresh_all_once(tmp_path, synthetic_settings, app)
+
+        success_names = {r.source_name for r in results if r.status == "success"}
+        assert success_names == set(er._ALL_SOURCE_NAMES), (
+            f"some sources failed: {[(r.source_name, r.status) for r in results]}"
+        )
+        # Swap happened
+        assert app.state.enricher is not pre
+        # Every source marked loaded
+        assert er.all_sources_loaded_at_least_once()
+
+    async def test_mixed_outcome_partial_load(
+        self,
+        tmp_path: Path,
+        low_floors: None,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """4 sources succeed, the rest fail (network or status). Swap
+        still happens (≥1 success); only the 4 successful sources mark
+        loaded."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            # Only FireHOL L1+L2 and AWS+Cloudflare succeed
+            if "firehol_level1" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level1.netset"))
+            if "firehol_level2" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level2.netset"))
+            if "ip-ranges.amazonaws.com" in url:
+                return httpx.Response(200, content=_read_fixture("ip-ranges.json"))
+            if "cloudflare.com" in url:
+                return httpx.Response(200, content=_read_fixture("ips-v4.txt"))
+            # Everything else 503
+            return httpx.Response(503, content=b"")
+
+        monkeypatch.setattr(er, "_build_http_client", _mock_client_factory(handler))
+
+        pre = object()
+        app = _StubApp(pre)
+        results = await er.refresh_all_once(tmp_path, synthetic_settings, app)
+
+        succeeded = {r.source_name for r in results if r.status == "success"}
+        failed = {r.source_name for r in results if r.status == "failed"}
+        assert succeeded == {"firehol_level1", "firehol_level2", "aws", "cloudflare"}
+        assert "maxmind_city" in failed
+        # Swap still happened
+        assert app.state.enricher is not pre
+        # Only successful sources marked loaded
+        assert er.loaded_sources_snapshot() == frozenset(succeeded)
+
+    async def test_all_failed_no_swap(
+        self,
+        tmp_path: Path,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If no source succeeds, the Enricher is NOT swapped — the
+        existing instance keeps serving."""
+        monkeypatch.setattr(
+            er, "_build_http_client", _mock_client_factory(_const_response(503, b""))
+        )
+
+        pre = object()
+        app = _StubApp(pre)
+        results = await er.refresh_all_once(tmp_path, synthetic_settings, app)
+        assert all(r.status == "failed" for r in results)
+        assert app.state.enricher is pre, "no swap when zero successes"
+
+    async def test_unexpected_exception_dropped_from_results(
+        self,
+        tmp_path: Path,
+        low_floors: None,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If a downloader raises an exception that escapes its own
+        handler (a defense-in-depth path), the gather captures it,
+        refresh_all_once logs it, and drops it from results — no crash."""
+
+        async def crashing_refresh(*_args: object, **_kwargs: object) -> er.RefreshResult:
+            msg = "simulated unexpected"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(er, "refresh_firehol_level1", crashing_refresh)
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=_read_fixture("ips-v4.txt"))
+
+        monkeypatch.setattr(er, "_build_http_client", _mock_client_factory(handler))
+
+        pre = object()
+        app = _StubApp(pre)
+        results = await er.refresh_all_once(tmp_path, synthetic_settings, app)
+        # Crashing source dropped from results
+        assert all(r.source_name != "firehol_level1" for r in results)
+        # Other sources still in results — one less than the total source set
+        assert len(results) == len(er._ALL_SOURCE_NAMES) - 1
+
+
+class TestRefreshLoop:
+    async def test_cancellation_clean_no_orphans(
+        self,
+        tmp_path: Path,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Spawn the loop, let one tick run (all sources 503 → no swap),
+        cancel, await — confirm no orphan tempfiles in data_dir."""
+        monkeypatch.setattr(
+            er, "_build_http_client", _mock_client_factory(_const_response(503, b""))
+        )
+        # Shorten the inter-tick sleep so the test doesn't wait 24h
+        monkeypatch.setattr(er, "_REFRESH_INTERVAL_SECONDS", 0.05)
+        # Plant an orphan tempfile to confirm the cleanup runs
+        orphan = tmp_path / "firehol_level1.netset.tmp.deadbeef"
+        orphan.write_bytes(b"leftover")
+
+        pre = object()
+        app = _StubApp(pre)
+        task = asyncio.create_task(er.refresh_loop(tmp_path, synthetic_settings, app))
+        # Give it a tick + a partial sleep
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # Orphan tempfile cleaned
+        assert not orphan.exists()
+        assert list(tmp_path.glob("*.tmp.*")) == []
+
+    async def test_tick_error_does_not_crash_loop(
+        self,
+        tmp_path: Path,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If `refresh_all_once` raises an unexpected exception, the
+        loop catches it and continues to the next tick."""
+        tick_count = 0
+
+        async def failing_then_ok_once(
+            _data_dir: Path, _settings: Settings, _app: object
+        ) -> list[er.RefreshResult]:
+            nonlocal tick_count
+            tick_count += 1
+            if tick_count == 1:
+                msg = "simulated tick failure"
+                raise RuntimeError(msg)
+            return []
+
+        monkeypatch.setattr(er, "refresh_all_once", failing_then_ok_once)
+        monkeypatch.setattr(er, "_REFRESH_INTERVAL_SECONDS", 0.01)
+
+        pre = object()
+        app = _StubApp(pre)
+        task = asyncio.create_task(er.refresh_loop(tmp_path, synthetic_settings, app))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert tick_count >= 2, "loop should have run a second tick after the failure"
+
+
+class TestCowConcurrencyInvariant:
+    """Pin the Amendment 1 F2 CoW concurrency invariant: a reference to
+    the OLD Enricher remains FUNCTIONAL (loaded pytricia tries still
+    respond to membership checks; internal handles not closed) AFTER
+    `app.state.enricher` is swapped, so concurrent in-flight `enrich()`
+    calls don't fault on closed handles."""
+
+    async def test_pre_swap_reference_stays_usable_after_swap(
+        self,
+        tmp_path: Path,
+        low_floors: None,
+        synthetic_settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            url = str(request.url)
+            if "firehol_level1" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level1.netset"))
+            if "firehol_level2" in url:
+                return httpx.Response(200, content=_read_fixture("firehol_level2.netset"))
+            if "GeoLite2-City" in url:
+                return httpx.Response(200, content=_read_fixture("GeoLite2-City.tar.gz"))
+            if "GeoLite2-ASN" in url:
+                return httpx.Response(200, content=_read_fixture("GeoLite2-ASN.tar.gz"))
+            if "ip2location.com" in url:
+                return httpx.Response(200, content=_read_fixture("IP2PROXY-LITE-PX11.zip"))
+            if "ip-ranges.amazonaws.com" in url:
+                return httpx.Response(200, content=_read_fixture("ip-ranges.json"))
+            if "gstatic.com" in url:
+                return httpx.Response(200, content=_read_fixture("cloud.json"))
+            if "microsoft.com/en-us/download" in url:
+                return httpx.Response(
+                    200,
+                    content=(
+                        b'href="https://download.microsoft.com/download/abc/'
+                        b'ServiceTags_Public_20260609.json"'
+                    ),
+                )
+            if "ServiceTags_Public" in url:
+                return httpx.Response(200, content=_read_fixture("azure-service-tags.json"))
+            if "cloudflare.com" in url:
+                return httpx.Response(200, content=_read_fixture("ips-v4.txt"))
+            return httpx.Response(500, content=b"unmocked")
+
+        monkeypatch.setattr(er, "_build_http_client", _mock_client_factory(handler))
+
+        from app.enrich import Enricher
+
+        # Warmup tick to land fixture files on disk.
+        warmup_app = _StubApp(object())
+        await er.refresh_all_once(tmp_path, synthetic_settings, warmup_app)
+        er._reset_loaded_sources_for_tests()
+
+        # Build the pre-swap Enricher, eagerly load its sources.
+        pre_enricher = Enricher(data_dir=tmp_path)
+        pre_enricher._load_sources()
+        assert pre_enricher._loaded is True
+
+        # Baseline: pre-swap _lookup() returns an EnrichmentRow without
+        # raising. This call exercises whichever of the source handles
+        # successfully loaded (varies by which C extensions are
+        # installed; the test runs both with and without
+        # pytricia/maxminddb/ip2proxy).
+        baseline_row = pre_enricher._lookup("192.0.2.1")
+        assert baseline_row.ip == "192.0.2.1"
+
+        # Trigger the swap
+        app = _StubApp(pre_enricher)
+        await er.refresh_all_once(tmp_path, synthetic_settings, app)
+        assert app.state.enricher is not pre_enricher, "expected CoW swap"
+
+        # CoW invariant: the pre-swap instance is STILL functional after
+        # the swap. _lookup() must not raise (closed handles would
+        # surface as ValueError / segfault on MaxMind C extensions; this
+        # call would crash the test interpreter if the swap had any
+        # teardown side effect on the old instance).
+        post_swap_row = pre_enricher._lookup("192.0.2.1")
+        assert post_swap_row.ip == "192.0.2.1"
+        # And the loaded sentinel was not mutated by the swap
+        assert pre_enricher._loaded is True
+
+    async def test_log_tick_summary_counts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pin the _log_tick_summary count math so a regression that
+        e.g. double-counted failed or dropped the skipped bucket would
+        fail the assertion."""
+        results = [
+            er.RefreshResult(source_name="firehol_level1", status="success"),
+            er.RefreshResult(source_name="firehol_level2", status="success"),
+            er.RefreshResult(source_name="maxmind_city", status="failed", failure_class="network"),
+            er.RefreshResult(source_name="aws", status="skipped_sanity_floor"),
+        ]
+        with structlog.testing.capture_logs() as captured:
+            er._log_tick_summary(results)
+        summaries = [r for r in captured if r.get("event") == "enrich.refresh.tick_complete"]
+        assert len(summaries) == 1
+        s = summaries[0]
+        assert s["success_count"] == 2
+        assert s["failed_count"] == 1
+        assert s["skipped_sanity_floor_count"] == 1
+        assert s["total"] == 4
 
 
 class TestLicenseKeySanitization:

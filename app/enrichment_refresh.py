@@ -945,3 +945,148 @@ async def refresh_cloudflare(client: httpx.AsyncClient, target_dir: Path) -> Ref
         return _log_failure(source_name, "other", _safe_str_exc(exc))
     duration_ms = (time.perf_counter() - start) * 1000.0
     return _log_success(source_name, written, duration_ms)
+
+
+# ----------------------------------------------------------------------------
+# Refresh loop + per-tick orchestration (PBL C2)
+# ----------------------------------------------------------------------------
+
+
+def _build_http_client() -> httpx.AsyncClient:
+    """Construct the per-tick `httpx.AsyncClient`. Tests monkeypatch this
+    module-level function to inject `httpx.MockTransport`, keeping the
+    refresh loop unit-testable without live network."""
+    timeout = httpx.Timeout(_DEFAULT_HTTP_TIMEOUT, read=_DEFAULT_IP2P_TIMEOUT)
+    return httpx.AsyncClient(timeout=timeout)
+
+
+async def _run_all_sources(
+    client: httpx.AsyncClient, data_dir: Path, settings: Settings
+) -> list[RefreshResult]:
+    """Run all 9 downloaders concurrently. Per-source failures are caught
+    inside each downloader and surface as RefreshResult; the gather here
+    uses `return_exceptions=True` only as defense-in-depth for any
+    exception that escapes a downloader (would be a bug). Unexpected
+    exceptions are logged and dropped from the result list."""
+    tasks: list[asyncio.Task[RefreshResult]] = [
+        asyncio.create_task(refresh_firehol_level1(client, data_dir)),
+        asyncio.create_task(refresh_firehol_level2(client, data_dir)),
+        asyncio.create_task(refresh_maxmind_city(client, data_dir, settings)),
+        asyncio.create_task(refresh_maxmind_asn(client, data_dir, settings)),
+        asyncio.create_task(refresh_ip2proxy(client, data_dir, settings)),
+        asyncio.create_task(refresh_aws(client, data_dir)),
+        asyncio.create_task(refresh_gcp(client, data_dir)),
+        asyncio.create_task(refresh_azure(client, data_dir)),
+        asyncio.create_task(refresh_cloudflare(client, data_dir)),
+    ]
+    raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+    results: list[RefreshResult] = []
+    for r in raw_results:
+        if isinstance(r, BaseException):
+            _log.warning(
+                "enrich.refresh.unexpected_exception",
+                error_class=_safe_str_exc(r),
+            )
+            continue
+        results.append(r)
+    return results
+
+
+def _log_tick_summary(results: list[RefreshResult]) -> None:
+    """One aggregate log line per tick. Counts success / failed /
+    skipped_sanity_floor by status; success ratio is the headline ops
+    indicator. Per-source detail is in the individual EMF metrics."""
+    success = sum(1 for r in results if r.status == "success")
+    failed = sum(1 for r in results if r.status == "failed")
+    skipped = sum(1 for r in results if r.status == "skipped_sanity_floor")
+    _log.info(
+        "enrich.refresh.tick_complete",
+        success_count=success,
+        failed_count=failed,
+        skipped_sanity_floor_count=skipped,
+        total=len(results),
+    )
+
+
+def _cleanup_orphan_tempfiles(data_dir: Path) -> None:
+    """Best-effort cleanup of orphan tempfiles left by interrupted
+    refreshes. Called on lifespan-shutdown cancellation."""
+    if not data_dir.exists():
+        return
+    with contextlib.suppress(OSError):
+        for tmp in data_dir.glob("*.tmp.*"):
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+
+
+async def refresh_all_once(
+    data_dir: Path,
+    settings: Settings,
+    app: object,
+) -> list[RefreshResult]:
+    """One refresh tick: seed loaded-sources from disk (hybrid Pattern A
+    defense), run all 9 downloaders concurrently, atomically swap
+    `app.state.enricher` with a freshly-loaded instance if any source
+    succeeded (CoW per Amendment 1 F2 — concurrent enrich() calls finish
+    on the OLD instance; refcount → 0 closes its handles via __del__).
+
+    `app` is typed as `object` to avoid a hard dependency on FastAPI in
+    this module; the only attribute used is `app.state.enricher`. The
+    lifespan integration in `app/main.py` passes the real FastAPI app.
+    """
+    # Imported lazily to avoid a circular import at module load time
+    # (app.enrich does not import enrichment_refresh, but the inverse
+    # being inline-import-only keeps the module-load DAG tidy).
+    from app.enrich import Enricher
+
+    seed_loaded_from_disk(data_dir)
+    async with _build_http_client() as client:
+        results = await _run_all_sources(client, data_dir, settings)
+
+    successes = [r for r in results if r.status == "success"]
+    for r in successes:
+        mark_source_loaded(r.source_name)
+
+    # Swap only when this tick produced new data. If nothing succeeded,
+    # the prior Enricher (which may have lazy-loaded disk-resident files
+    # earlier) continues to serve — no degradation, no unnecessary churn.
+    if successes:
+        new_enricher = Enricher(data_dir=data_dir)
+        await asyncio.to_thread(new_enricher._load_sources)
+        app.state.enricher = new_enricher  # type: ignore[attr-defined]
+        _log.info(
+            "enrich.refresh.enricher_swapped",
+            success_count=len(successes),
+        )
+    return results
+
+
+async def refresh_loop(
+    data_dir: Path,
+    settings: Settings,
+    app: object,
+) -> None:
+    """Forever refresh loop. Runs `refresh_all_once` then sleeps
+    `_REFRESH_INTERVAL_SECONDS` (24h). Catches CancelledError on
+    lifespan shutdown, cleans orphan tempfiles, and re-raises so the
+    awaiting `asyncio.gather` observes cancellation cleanly.
+
+    Any per-tick error other than CancelledError is logged but does not
+    crash the loop — the next tick proceeds."""
+    try:
+        while True:
+            try:
+                results = await refresh_all_once(data_dir, settings, app)
+                _log_tick_summary(results)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _log.warning(
+                    "enrich.refresh.tick_error",
+                    error_class=_safe_str_exc(exc),
+                )
+            await asyncio.sleep(_REFRESH_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        _log.info("enrich.refresh.cancelled")
+        _cleanup_orphan_tempfiles(data_dir)
+        raise
