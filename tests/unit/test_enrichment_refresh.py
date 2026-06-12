@@ -69,6 +69,21 @@ def synthetic_settings() -> Settings:
     )  # type: ignore[call-arg]
 
 
+@pytest.fixture
+def _stub_binary_loads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the MaxMind/IP2Proxy binary loads for the swap / result-handling
+    orchestration tests, so they exercise the refresh flow without depending on
+    whether the small binary fixtures parse under the installed maxminddb /
+    IP2Proxy versions. NOT used by the CoW test
+    (``test_pre_swap_reference_stays_usable_after_swap``) or
+    ``TestLoadSourcesResilience`` — those run the real
+    ``Enricher._load_{maxmind,ip2proxy}`` graceful-degradation guard."""
+    from app.enrich import Enricher
+
+    monkeypatch.setattr(Enricher, "_load_maxmind", lambda self: None)
+    monkeypatch.setattr(Enricher, "_load_ip2proxy", lambda self: None)
+
+
 def _read_fixture(name: str) -> bytes:
     return (FIXTURES_DIR / name).read_bytes()
 
@@ -915,6 +930,7 @@ class TestRefreshAllOnce:
         low_floors: None,
         synthetic_settings: Settings,
         monkeypatch: pytest.MonkeyPatch,
+        _stub_binary_loads: None,
     ) -> None:
         """Every source returns its fixture; after the tick the swap
         happens AND every source is marked loaded."""
@@ -1028,6 +1044,7 @@ class TestRefreshAllOnce:
         low_floors: None,
         synthetic_settings: Settings,
         monkeypatch: pytest.MonkeyPatch,
+        _stub_binary_loads: None,
     ) -> None:
         """If a downloader raises an exception that escapes its own
         handler (a defense-in-depth path), the gather captures it,
@@ -1132,6 +1149,11 @@ class TestCowConcurrencyInvariant:
         synthetic_settings: Settings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # No _stub_binary_loads here: this CoW test deliberately runs the real
+        # _load_sources so the pre-swap instance loads whatever the installed
+        # readers allow (the maxmind/ip2proxy guard degrades the small fixtures
+        # to None; the FireHOL/cloud pytricia tries load and are the handles the
+        # CoW invariant checks survive the swap).
         def handler(request: httpx.Request) -> httpx.Response:
             url = str(request.url)
             if "firehol_level1" in url:
@@ -1285,3 +1307,50 @@ class TestLicenseKeySanitization:
         exc = httpx.ConnectError(f"failed to reach https://example.com/x?token={_SENTINEL_IP2P}")
         assert er._safe_str_exc(exc) == "ConnectError"
         assert _SENTINEL_IP2P not in er._safe_str_exc(exc)
+
+
+class TestLoadSourcesResilience:
+    """Guard (graceful degradation): a corrupt / version-incompatible source
+    file degrades like a *missing* one. ``_load_sources`` must not raise, the
+    affected reader stays ``None``, and ``_lookup`` returns a degraded row —
+    rather than crashing the load (and, via lazy load, a booking request) or
+    blocking the refresh swap. Mirrors the already-guarded lookup path."""
+
+    def test_load_sources_tolerates_corrupt_maxmind_and_ip2proxy(self, tmp_path: Path) -> None:
+        # The asserted *_load_failed WARNINGs only fire when the readers are
+        # importable; otherwise _load_{maxmind,ip2proxy} returns at the
+        # ImportError branch before the guarded open. Both are hard deps, so
+        # skip cleanly rather than fail in a degenerate env that lacks them.
+        pytest.importorskip("maxminddb")
+        pytest.importorskip("IP2Proxy")
+        from app.enrich import Enricher
+
+        # Structurally-invalid binaries at the exact paths _load_sources reads.
+        # (Short/garbage content: maxminddb and IP2Proxy both reject these on
+        # open — the same outcome a real corrupt or version-incompatible
+        # download would produce.)
+        (tmp_path / "GeoLite2-City.mmdb").write_bytes(b"not a valid mmdb file")
+        (tmp_path / "GeoLite2-ASN.mmdb").write_bytes(b"not a valid mmdb file")
+        (tmp_path / "IP2PROXY-LITE-PX11.BIN").write_bytes(b"not a valid bin")
+
+        enricher = Enricher(data_dir=tmp_path)
+        with structlog.testing.capture_logs() as captured:
+            enricher._load_sources()  # must NOT raise
+
+        # Sentinel set; bad readers degraded to None.
+        assert enricher._loaded is True
+        assert enricher._mm_city is None
+        assert enricher._mm_asn is None
+        assert enricher._ip2p is None
+
+        # Each failure is observable (WARNING per source), error type only —
+        # no exception message that could leak a path/secret.
+        events = {r.get("event") for r in captured}
+        assert "enrich.maxmind_city_load_failed" in events
+        assert "enrich.maxmind_asn_load_failed" in events
+        assert "enrich.ip2proxy_load_failed" in events
+
+        # Lookup degrades gracefully: no geo/proxy signals, no raise.
+        row = enricher._lookup("192.0.2.1")
+        assert row.ip == "192.0.2.1"
+        assert row.country is None

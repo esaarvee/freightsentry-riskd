@@ -111,11 +111,32 @@ class Enricher:
             _log.warning("enrich.maxmind_unavailable", reason="maxminddb not installed")
             return
         if city_path.exists():
-            self._mm_city = maxminddb.open_database(str(city_path))
+            try:
+                self._mm_city = maxminddb.open_database(str(city_path))
+            except Exception as exc:
+                # A corrupt / version-incompatible mmdb degrades like a
+                # missing one: leave the reader None so geo signals return
+                # None (no spurious positives) rather than crashing the
+                # load (and, via lazy load, a booking request) or blocking
+                # the refresh swap. Observable via this WARNING.
+                self._mm_city = None
+                _log.warning(
+                    "enrich.maxmind_city_load_failed",
+                    path=str(city_path),
+                    error=type(exc).__name__,
+                )
         else:
             _log.warning("enrich.maxmind_city_missing", path=str(city_path))
         if asn_path.exists():
-            self._mm_asn = maxminddb.open_database(str(asn_path))
+            try:
+                self._mm_asn = maxminddb.open_database(str(asn_path))
+            except Exception as exc:
+                self._mm_asn = None
+                _log.warning(
+                    "enrich.maxmind_asn_load_failed",
+                    path=str(asn_path),
+                    error=type(exc).__name__,
+                )
         else:
             _log.warning("enrich.maxmind_asn_missing", path=str(asn_path))
 
@@ -129,8 +150,21 @@ class Enricher:
         except ImportError:
             _log.warning("enrich.ip2proxy_unavailable", reason="IP2Proxy not installed")
             return
-        self._ip2p = IP2Proxy.IP2Proxy()
-        self._ip2p.open(str(bin_path))
+        ip2p = IP2Proxy.IP2Proxy()
+        try:
+            ip2p.open(str(bin_path))
+        except Exception as exc:
+            # A corrupt / version-incompatible BIN degrades like a missing
+            # one: drop the handle so proxy/threat signals return False
+            # rather than crashing the load/lookup. Observable via WARNING.
+            self._ip2p = None
+            _log.warning(
+                "enrich.ip2proxy_load_failed",
+                path=str(bin_path),
+                error=type(exc).__name__,
+            )
+        else:
+            self._ip2p = ip2p
 
     def _load_firehol(self) -> None:
         try:
