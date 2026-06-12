@@ -11,8 +11,7 @@ Real-time fraud detection SaaS for freight aggregation platforms. Single Python 
 - **IP enrichment + context building**: `.ai/enrichment.md`
 - **Library gotchas**: `.ai/gotchas/index.md`
 - **Workflow (commit cycle, reviewer panel)**: `CLAUDE.md`
-- **Six-phase plan**: `MASTER_PLAN.md`
-- **Phase 1 detailed plan**: `PLAN_PHASE_1.md`
+- **Phase history + decisions**: `docs/history.md`
 - **Project status + mid-run deviations**: `.ai/system-status.md`, `.claude/STATUS.md`
 
 ## Stack
@@ -36,4 +35,4 @@ docker compose exec app pytest tests/ -v --asyncio-mode=auto
 
 ## Project status
 
-Greenfield. Phase 1 in progress (foundation adaptation + skeleton + signal/baseline core). Six-week production-launch target.
+Phases 1-8 complete; pre-launch. Production deploy to `ca-central-1` is the next operator-driven step. See `.ai/system-status.md` for the current phase status and `docs/history.md` for the per-phase narrative.
