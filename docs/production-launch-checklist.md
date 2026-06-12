@@ -47,8 +47,13 @@
 
 ## Phase B — Pre-deploy migrations + tenant bootstrap
 
-- [ ] Run `alembic upgrade head` via one-off ECS task using
-      `ALEMBIC_DATABASE_URL` (superuser DSN).
+- [ ] **First-deploy bootstrap only.** Migrations run automatically as a
+      gated ECS task (`freightsentry-riskd-migrate`) on every `v*` tag-push
+      deploy — see `docs/aws-deploy-runbook.md` §B.1 "Auto-migration on
+      deploy". On the **very first** deploy the automation principal
+      (`MigrationTaskExecutionRole`) and `riskd_app_login` do not exist yet,
+      so run the bootstrap migration once manually: `alembic upgrade head`
+      via a one-off ECS task using `ALEMBIC_DATABASE_URL` (superuser DSN).
 - [ ] Verify `riskd_app_login` role exists in RDS.
 - [ ] Verify `riskd_app` role exists and has NO LOGIN permission.
 - [ ] Verify all 5 post-squash migrations applied (`0001_foundation`
