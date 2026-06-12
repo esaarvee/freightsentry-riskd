@@ -161,11 +161,15 @@ matches.
   - Type: Other type of secret → plaintext
   - Value: `postgresql://riskd_app_login:<RUNTIME_PASSWORD>@<RDS_ENDPOINT>:5432/riskd`
   - Note: `riskd_app_login` is the runtime non-superuser role
-    created in migration 0008 (Phase 5D). The password is
-    distinct from the RDS master password and will be set during
-    the migration step (B.1 below) when the role is created.
-    For now insert a placeholder; rotate to the real password
-    after B.1 completes.
+    created in migration 0005 (Phase 5D). Generate the
+    `<RUNTIME_PASSWORD>` here (`openssl rand -hex 24`) and store
+    the full DSN as the secret value **before** running B.1 —
+    migration 0005 reads `DATABASE_URL` at upgrade time and
+    sets the role's password from it (PBL D2, single source of
+    truth, no post-B.1 ALTER ROLE step). Every subsequent tag-
+    push deploy re-reads this secret and re-runs ALTER ROLE so
+    rotating the password is a one-step: update the secret,
+    push a tag.
   - Tags: `project=freightsentry-riskd`
 - [ ] **Secret 2**: `freightsentry-riskd/HMAC_SECRET`
   - Value: generate via `openssl rand -hex 32`
@@ -337,8 +341,18 @@ Secrets and variables → Actions**:
 
 ### B.1 Run alembic migrations
 
-The runtime role `riskd_app_login` doesn't exist yet — migration
-0008 creates it. Migrations run as the superuser (`riskd`).
+The first deploy creates the runtime role `riskd_app_login` (via
+migration 0005). On every subsequent tag-push deploy, alembic
+re-runs automatically as the gated first step of the deploy
+workflow — see "Auto-migration on deploy" below.
+
+#### First-time bootstrap (one-time)
+
+The CloudFormation `MigrationTaskExecutionRole` (PBL D3) is the
+deploy-pipeline's automated principal for migrations. But on the
+very first deploy that role does not yet exist (CFN hasn't been
+applied), and `riskd_app_login` also doesn't exist. Run the
+bootstrap migration once, from the ECS console, as the operator:
 
 - [ ] **ECS console** → **Clusters** → `freightsentry-riskd-cluster`
       → **Tasks** → **Run task**
@@ -355,6 +369,11 @@ The runtime role `riskd_app_login` doesn't exist yet — migration
         (superuser DSN — migrations need this; the runtime
         DATABASE_URL secret already in the task def is the
         `riskd_app_login` non-superuser DSN)
+      - `DATABASE_URL` = the same DSN you stored in the
+        `freightsentry-riskd/DATABASE_URL` secret in A.5 (PBL D2
+        reads this to set the `riskd_app_login` password from a
+        single source of truth — no manual `ALTER ROLE` step
+        needed)
 - [ ] Run the task. Migration produces a non-zero exit on failure
       → check CloudWatch Logs for the task's stream.
 - [ ] After completion: connect to RDS with the superuser
@@ -364,16 +383,36 @@ The runtime role `riskd_app_login` doesn't exist yet — migration
   - `\dt` shows the expected tables (customers, shipments,
     decisions, …, plus the Phase 6A 0010+0011 additions:
     `tenant_route_baselines` and the new column `customers.registered_country`)
-- [ ] Set the `riskd_app_login` password to match the value
-      embedded in the `freightsentry-riskd/DATABASE_URL` Secrets
-      Manager secret (A.5). Migration 0008 creates the role with
-      a default dev password (`riskd_app_login_dev`) — rotate it
-      for production:
-      ```sql
-      ALTER ROLE riskd_app_login WITH PASSWORD '<NEW_PASSWORD>';
-      ```
-      Then update the secret value in Secrets Manager to use the
-      same password.
+  - Connecting as `riskd_app_login` with the
+    `freightsentry-riskd/DATABASE_URL` password succeeds (the
+    PBL D2 migration set it from the same secret).
+
+#### Auto-migration on deploy (PBL D3-D5)
+
+After the first-deploy bootstrap above, every `v*` tag push runs
+alembic automatically via a dedicated migrate ECS task definition
+(`freightsentry-riskd-migrate`) before the app service update.
+The flow:
+
+1. The deploy workflow registers a new revision of the migrate
+   task def (`infra/ecs-task-definition-migrate.json`) with the
+   tagged image and the `MigrationTaskExecutionRole`.
+2. It calls `aws ecs run-task` against the cluster, derives
+   subnets + security group from the running service (no extra
+   GitHub secrets), and waits for the task to stop.
+3. Exit code 0 → the workflow proceeds to `update-service`.
+   Anything else → the deploy fails with the previous app
+   revision still serving.
+
+The migrate task injects `DB_MASTER` (RDS master Secrets-Manager
+JSON, parsed by `alembic/env.py` from PBL D1) and `DATABASE_URL`
+(used by migration 0005 to set/rotate the `riskd_app_login`
+password — PBL D2). Secret rotation propagates automatically on
+the next deploy.
+
+If a migration ever needs to be run manually outside the deploy
+path (recovery, ad-hoc inspection, downgrade), use the ECS
+console procedure documented above with operator AWS credentials.
 
 ### B.1a Population baseline cold-start (Phase 6A.7 / 6A.8 informational)
 
@@ -606,7 +645,6 @@ validation must preserve this defense — documented in
   above)
 - No CI integration tests (unit + Snyk only; integration tests run
   locally)
-- No auto-migration on deploy (operator one-off task per B.1)
 - No IaC framework (this AWS GUI runbook is the deployment
   mechanism; Terraform/CDK is a Phase 7+ scope)
 - No multi-region (single-region per environment; `ca-central-1`

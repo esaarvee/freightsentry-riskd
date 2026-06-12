@@ -246,7 +246,6 @@ this defense; there is no DB-layer backstop. Documented in
   "Rollback" section).
 - No CI integration tests (unit + Snyk only; integration tests run
   locally against docker-compose Postgres).
-- No auto-migration on deploy (operator one-off ECS task).
 - No IaC (AWS GUI runbook; Terraform/CDK is post-launch scope).
 - Single-region per environment (production = `ca-central-1`).
 - Single-customer case-3 cluster validated (Roulottes Lupien); cluster

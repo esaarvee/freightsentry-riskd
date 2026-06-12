@@ -9,6 +9,18 @@ The detailed AWS GUI runbook at `docs/aws-deploy-runbook.md`
 (Phase 6D.4) walks through console-side role creation and
 attachment.
 
+**PBL D3 note.** A fourth role, `MigrationTaskExecutionRole`, was
+added for the gated migrate-then-deploy flow (PBL D3–D5). It is
+declared in CloudFormation (`infra/cloudformation/freightsentry-riskd.yml`),
+not in this directory — the JSON files here are the legacy hand-
+applied path. The migrate role grants ECR pull + CloudWatch Logs
+write + `secretsmanager:GetSecretValue` on `DbMasterSecret` and
+`DatabaseUrlSecret` only. The runtime task-execution role described
+below remains excluded from `DB_MASTER`, preserving the D18
+invariant. The deploy role (also CFN) gains `ecs:RunTask` scoped to
+the `freightsentry-riskd-migrate:*` task-def family and
+`iam:PassRole` for the migrate execution role.
+
 ## Placeholders
 
 Each JSON contains the following uppercase placeholders. Substitute

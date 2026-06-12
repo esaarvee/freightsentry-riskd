@@ -397,3 +397,49 @@ over-specified at 7C.7 time and a subsequent semantic refinement
 intentionally narrowed which rules fire.
 Suggested action: investigate during 8B test audit OR defer to
 post-launch. NOT caused by 8A squash (schema-equivalent verified).
+
+## 2026-06-12 — defer entrypoint refactor + 3-secret DATABASE_URL composition
+
+Discovered by: implementer during PBL D5 (plan dapper-percolating-glade.md)
+Location: infra/ecs-task-definition.json, infra/ecs-task-definition-migrate.json, alembic/env.py
+Severity: low
+Observation: PBL D1–D5 wired the deploy pipeline to inject DB_MASTER
+(JSON) as the migrate task's master DSN and read DATABASE_URL as the
+single source of truth for the `riskd_app_login` password. A future
+refactor could go further: the runtime app's container could compose
+DATABASE_URL itself from three smaller secrets (master credentials,
+endpoint, runtime password) at entrypoint time — removing the
+manual A.5 step in the runbook where the operator constructs and
+stores the full DSN. Skipped in PBL D-series to keep the scope
+tight: PBL D-series is "automate migrations and rotate the
+riskd_app_login password automatically"; entrypoint composition is
+a separate concern with its own design surface (entrypoint script,
+how the app handles transient secret-fetch failures, whether to
+keep the existing single-secret path for backwards-compat).
+Suggested action: schedule as a follow-up after PBL D-series ships
+and the auto-migration path has been exercised against the test
+region for a few deploys.
+
+## 2026-06-12 — CFN role names env-suffixed but task-defs use unsuffixed names
+
+Discovered by: senior-engineer-reviewer during PBL D5 cycle 1
+Location: infra/cloudformation/freightsentry-riskd.yml (RoleName uses `-${Environment}` suffix) vs infra/ecs-task-definition.json + infra/ecs-task-definition-migrate.json + .github/workflows/deploy.yml (use bare `freightsentry-riskd-task-exec` / `freightsentry-riskd-task` / `freightsentry-riskd-migrate-exec`)
+Severity: medium
+Observation: The CFN template names IAM roles with a `-${Environment}`
+suffix (e.g. `freightsentry-riskd-task-exec-${Environment}`,
+`freightsentry-riskd-migrate-exec-${Environment}`). All three task
+definitions and the deploy workflow string-build ARNs against the
+unsuffixed role name. If the deployed CFN stack has any non-empty
+Environment value, register-task-definition will fail with "role does
+not exist" until the operator reconciles. This drift pre-existed PBL
+D5 (the runtime task-def has the same issue with TaskExecutionRole +
+TaskRole) — PBL D5 amplifies the surface by one (the new migrate
+exec role). The fact that the deploy presumably worked before
+suggests the stack was deployed with Environment="" or the operator
+created unsuffixed aliases — either way, undocumented.
+Suggested action: either (a) make the task-defs read role ARNs from
+CFN outputs via the workflow (one extra describe-stacks per deploy)
+or (b) drop the `-${Environment}` suffix from the CFN RoleName fields
+so the IDs match the task-defs. Option (b) is the lower-friction fix.
+Verify against the actually-deployed stack first to avoid surprising
+a working setup.
