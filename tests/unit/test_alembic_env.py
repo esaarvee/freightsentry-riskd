@@ -8,6 +8,7 @@ alembic import to avoid the top-level context access.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import sys
@@ -35,7 +36,11 @@ def _load_env_module(monkeypatch: pytest.MonkeyPatch) -> Any:
         ),
         is_offline_mode=lambda: True,
         configure=lambda **k: None,
-        begin_transaction=lambda: None,
+        # Importing env.py runs run_migrations_offline() under this stub
+        # (is_offline_mode=True), which does `with context.begin_transaction()`.
+        # Return a real context manager so the import-time dispatch is a no-op
+        # rather than raising `with None`.
+        begin_transaction=lambda: contextlib.nullcontext(),
         run_migrations=lambda: None,
     )
     stub.context = fake_context  # type: ignore[attr-defined]
