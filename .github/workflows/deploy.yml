@@ -117,6 +117,95 @@ jobs:
           echo "revision_arn=$REVISION_ARN" >> "$GITHUB_OUTPUT"
           echo "registered: $REVISION_ARN"
 
+      - name: Register migrate task definition revision (PBL D5)
+        id: register-migrate-task-def
+        env:
+          ECR_URL: ${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          # Same envsubst pattern as the app task-def step, with one
+          # extra var. MIGRATION_TASK_EXEC_ROLE_ARN is the CFN-output
+          # role created in PBL D3; the role name is deterministic so
+          # we string-build the ARN here instead of reading the CFN
+          # output (avoids a describe-stacks round-trip).
+          export ACCOUNT_ID REGION
+          export IMAGE_URI="$ECR_URL:$VERSION"
+          export MIGRATION_TASK_EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-migrate-exec"
+          envsubst '${ACCOUNT_ID} ${REGION} ${IMAGE_URI} ${MIGRATION_TASK_EXEC_ROLE_ARN}' \
+              < infra/ecs-task-definition-migrate.json \
+              > migrate-task-def.json
+          MIGRATE_REVISION_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file://migrate-task-def.json \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+          echo "migrate_revision_arn=$MIGRATE_REVISION_ARN" >> "$GITHUB_OUTPUT"
+          echo "registered migrate: $MIGRATE_REVISION_ARN"
+
+      - name: Run migrate task + gate on exit 0 (PBL D5)
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          SERVICE: ${{ secrets.ECS_SERVICE }}
+          MIGRATE_REVISION_ARN: ${{ steps.register-migrate-task-def.outputs.migrate_revision_arn }}
+        run: |
+          set -euo pipefail
+          # Derive awsvpcConfiguration from the running app service so
+          # the migrate task lands in the same private subnets and
+          # security group as the runtime. Avoids adding subnets/SG
+          # GitHub secrets that would drift from the CFN-managed VPC.
+          NETCFG=$(aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --query 'services[0].networkConfiguration' \
+              --output json)
+          if [ -z "$NETCFG" ] || [ "$NETCFG" = "null" ]; then
+              echo "ERROR: could not read networkConfiguration from service $SERVICE" >&2
+              exit 1
+          fi
+
+          TASK_ARN=$(aws ecs run-task \
+              --cluster "$CLUSTER" \
+              --task-definition "$MIGRATE_REVISION_ARN" \
+              --launch-type FARGATE \
+              --network-configuration "$NETCFG" \
+              --query 'tasks[0].taskArn' \
+              --output text)
+          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
+              echo "ERROR: run-task returned no taskArn" >&2
+              exit 1
+          fi
+          echo "migrate task: $TASK_ARN"
+
+          # Block until the task stops. tasks-stopped polls every 6s
+          # for up to 100 attempts = 10-min ceiling, comfortably
+          # inside the workflow's 30-min timeout-minutes.
+          aws ecs wait tasks-stopped \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN"
+
+          # Surface the migrate-container exit code. Any non-zero
+          # fails the deploy job BEFORE update-service runs — the app
+          # service keeps serving the previous revision until the next
+          # successful deploy.
+          EXIT=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].containers[0].exitCode' \
+              --output text)
+          STOP_REASON=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].stoppedReason' \
+              --output text)
+          echo "migrate exit code: $EXIT (stoppedReason: $STOP_REASON)"
+          if [ "$EXIT" != "0" ]; then
+              echo "ERROR: migrate task exited $EXIT — aborting deploy. Service not updated; previous revision continues to serve." >&2
+              exit 1
+          fi
+          echo "migrate succeeded; proceeding to app service update"
+
       - name: Update ECS service + wait for stability
         env:
           CLUSTER: ${{ secrets.ECS_CLUSTER }}
@@ -128,6 +217,9 @@ jobs:
           # revision, which is correct in serial deploys but races
           # against any concurrent registration. Explicit ARN is
           # immune to that race and matches the runbook's pattern.
+          # Per PBL D5 this step runs ONLY after the migrate task
+          # above reported exit 0 — a migration failure short-circuits
+          # the deploy without touching the app service.
           aws ecs update-service \
               --cluster "$CLUSTER" \
               --service "$SERVICE" \
