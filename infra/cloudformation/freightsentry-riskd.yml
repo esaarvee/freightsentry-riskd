@@ -458,10 +458,14 @@ Resources:
   # Master credentials are CFN-generated into DbMasterSecret at
   # freightsentry-riskd/DB_MASTER (D18 naming; uppercase per F5).
   # Runtime app uses a separate riskd_app_login DSN at
-  # freightsentry-riskd/DATABASE_URL (created empty in C1; populated
-  # post-deploy by operator after alembic runtime-roles migration).
-  # The TaskExecutionRole (C6) does NOT grant runtime access to
-  # DB_MASTER — alembic uses operator's own AWS creds (D18).
+  # freightsentry-riskd/DATABASE_URL (populated by operator after the
+  # initial alembic runtime-roles migration; PBL D2 makes subsequent
+  # rotations automatic via the migrate task).
+  # The runtime TaskExecutionRole (C6) does NOT grant access to
+  # DB_MASTER. Per PBL D3, the dedicated MigrationTaskExecutionRole
+  # (C6) is the only automated principal allowed to read DB_MASTER,
+  # and only on the deploy path. Operator-run alembic (manual
+  # recovery, ad-hoc inspection) still uses operator AWS creds.
   # DeletionPolicy: Snapshot + UpdateReplacePolicy: Snapshot protect
   # data against accidental delete or replacement-triggering changes.
   # RecoveryWindowInDays omitted on DbMasterSecret per STATUS.md
@@ -499,9 +503,10 @@ Resources:
     Properties:
       Name: freightsentry-riskd/DB_MASTER
       Description: >-
-        RDS master credentials (username: riskd). Used by alembic
-        migrations only — operator fetches with their own AWS creds.
-        NOT accessible to the runtime TaskExecutionRole (D18). Host /
+        RDS master credentials (username: riskd). Read by the
+        deploy-path MigrationTaskExecutionRole (PBL D3) and by
+        operator-run alembic (manual recovery). NOT accessible to the
+        runtime TaskExecutionRole — D18 invariant preserved. Host /
         port / dbname populated by DbSecretAttachment after DbInstance.
       GenerateSecretString:
         SecretStringTemplate: '{"username":"riskd"}'
@@ -655,8 +660,14 @@ Resources:
   # D18 enforcement: TaskExecutionRole grants secretsmanager:GetSecretValue
   # on an EXPLICIT 4-ARN list, NOT the wildcard `freightsentry-riskd/*`
   # the existing manual policy used. DB_MASTER is intentionally excluded
-  # — runtime must not read superuser credentials. Alembic migrations
-  # are run by the operator using their own AWS credentials.
+  # — the runtime app must not be able to read superuser credentials.
+  #
+  # PBL D3 (deploy-path-only D18 reversal): alembic migrations now run
+  # automatically per deploy via a dedicated MigrationTaskExecutionRole
+  # (below). That role is the ONLY automated principal with DB_MASTER
+  # access; the runtime TaskExecutionRole stays clean. Operator-run
+  # alembic (manual recovery, ad-hoc inspection) still uses the
+  # operator's own AWS credentials.
   # ---------------------------------------------------------------
 
   TaskExecutionRole:
@@ -725,6 +736,61 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  # PBL D3: dedicated execution role for the migrate task definition.
+  # This is the ONLY automated-deploy IAM principal allowed to read
+  # DbMasterSecret (and DatabaseUrlSecret, the source of the
+  # riskd_app_login password the migration provisions). The runtime
+  # TaskExecutionRole above is intentionally NOT extended — the D18
+  # invariant "runtime role cannot read master credentials" stays
+  # intact; we accept the D18 reversal scoped strictly to this role
+  # and only on the deploy path. alembic itself makes zero AWS API
+  # calls so the task role can stay the existing empty TaskRole.
+  MigrationTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-migrate-exec-${Environment}'
+      Description: ECS execution role for the alembic migrate task - pulls image, writes logs, reads DB_MASTER + DATABASE_URL (PBL D3 - deploy-path-only D18 reversal).
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: migrate-execution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ECRAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: ECRImagePull
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/freightsentry-riskd'
+              - Sid: CloudWatchLogsWrite
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/freightsentry-riskd:*'
+              - Sid: SecretsManagerReadMigrationSecrets
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DbMasterSecret
+                  - !Ref DatabaseUrlSecret
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -775,12 +841,23 @@ Resources:
                   - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/freightsentry-riskd-cluster-${Environment}/*'
                   - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/freightsentry-riskd-cluster-${Environment}/*'
                   - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/freightsentry-riskd-cluster-${Environment}'
+              # PBL D3: run the migrate task def as a one-shot Fargate task
+              # ahead of update-service. Scoped to the migrate family so the
+              # deploy role cannot launch arbitrary task definitions.
+              - Sid: ECSRunMigrateTask
+                Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/freightsentry-riskd-migrate:*'
               - Sid: IAMPassRoleForEcs
                 Effect: Allow
                 Action: iam:PassRole
                 Resource:
                   - !GetAtt TaskExecutionRole.Arn
                   - !GetAtt TaskRole.Arn
+                  # PBL D3: migrate task def attaches MigrationTaskExecutionRole
+                  # as its executionRoleArn; iam:PassRole is required for the
+                  # deploy role to register / run that task definition.
+                  - !GetAtt MigrationTaskExecutionRole.Arn
                 Condition:
                   StringEquals:
                     iam:PassedToService: ecs-tasks.amazonaws.com
@@ -996,6 +1073,13 @@ Outputs:
   TaskExecutionRoleArn:
     Description: ECS task execution role ARN (referenced in infra/ecs-task-definition.json post-deploy substitution).
     Value: !GetAtt TaskExecutionRole.Arn
+
+  MigrationTaskExecutionRoleArn:
+    Description: >-
+      Execution role ARN for the alembic migrate task definition
+      (PBL D3). Substituted into infra/ecs-task-definition-migrate.json
+      by the deploy workflow as ${MIGRATION_TASK_EXEC_ROLE_ARN}.
+    Value: !GetAtt MigrationTaskExecutionRole.Arn
 
   TaskRoleArn:
     Description: ECS task role ARN (empty policy; referenced in task definition).
