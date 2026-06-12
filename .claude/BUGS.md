@@ -461,3 +461,31 @@ mapping the two-layer consumption graph.
 Suggested action: Phase 9 — either wire phone_prefix/email_domain
 consistently across both call sites (and add consuming rules) or
 document both stat-dicts as reserved/unused baseline dimensions.
+
+## 2026-06-13 — Pre-existing full-suite test failures (integration isolation + scoring; not in the unit gate)
+
+Discovered by: doc-staleness-audit (during the operator-authorized "fix pre-existing tests first" detour that unblocked the unit gate)
+Location:
+  - tests/integration/test_per_tenant_maturity_overrides.py (5): test_default_thresholds_score_is_baseline, test_maturity_age_days_override_makes_younger_customer_mature, test_maturity_shipments_override_reduces_threshold, test_combined_overrides_score_matches_expected, test_empty_config_tenant_uses_defaults
+  - tests/integration/test_feedback_chain_e2e.py (2): test_chain_origin_previously_rejected_fires_on_next_booking, test_chain_email_previously_rejected_fires_on_next_booking
+  - tests/integration/test_concurrent_baseline_writes.py (1): test_concurrent_booking_and_feedback_serialise
+  - tests/unit/test_enrichment_refresh.py::TestCowConcurrencyInvariant::test_log_tick_summary_counts (1) — UNIT test, but fails ONLY when integration tests run first in a full `pytest tests/` run; passes in `pytest tests/unit/` (the pre-commit gate).
+Severity: medium
+Observation: All of these FAIL at HEAD baseline (commit bf9c881, before the
+alembic-stub + enrichment-guard test fixes) and are UNRELATED to those fixes
+— verified by a stash/baseline diff: full suite went 25 -> 9 failures, every
+one fixed was a target of this work, zero regressions introduced. The 9
+leftovers are NOT in the pre-commit gate (`pytest tests/unit/` = 937 passed);
+they only surface in a full `pytest tests/` run. The maturity failures assert
+a clean baseline score (e.g. `assert resp["score"] < 0.05`) but observe a
+saturated 1.0, with `enrich.cache_hit` for IPs seeded by other tests — i.e.
+cross-test state leaking through the shared Postgres DB. This looks like a
+test-isolation gap (no per-test truncation / fresh-DB in the ad-hoc
+docker-compose DB used here), not a production-logic bug — but it is NOT
+root-caused yet. `test_log_tick_summary_counts` is purely an ordering-pollution
+artifact (global state mutated by an earlier integration test).
+Suggested action: post-phase — investigate integration-test isolation
+(per-test DB truncation or transactional rollback fixtures), then re-run the
+full suite against the canonical harness to confirm these are environment/
+isolation artifacts vs. real regressions. Do NOT block the doc-staleness phase
+on them (out of scope; not in the unit gate).
