@@ -72,7 +72,7 @@ Primary fraud-evaluation entity. Auto-created on first booking (implicit registr
 - `fraud_confirmed_count` int NOT NULL DEFAULT `0` — drives trust score
 - `total_shipments` int NOT NULL DEFAULT `0` — monotonic lifetime count
 - `created_at` timestamptz NOT NULL DEFAULT `now()`
-- `registered_country` varchar(2) NULL — comment: "ISO 3166-1 alpha-2 country code supplied by platform integration on booking commits. Drives case-3b detection via the customer_country_triangle_mismatch derivation (build_context) and the tenant_route_baselines population (6A.7 upsert). Pydantic enforces shape at ingress (CustomerData.registered_country, ^[A-Z]{2}$)."
+- `registered_country` varchar(2) NULL — comment: "ISO 3166-1 alpha-2 country code supplied by platform integration on booking commits. Drives case-3b detection via the customer_destination_country_mismatch_outbound derivation (build_context) and the tenant_route_baselines population (6A.7 upsert). Pydantic enforces shape at ingress (CustomerData.registered_country, ^[A-Z]{2}$)."
 
 No `shipment_volume_30d` column. 30-day counts compute on demand from `shipments`.
 

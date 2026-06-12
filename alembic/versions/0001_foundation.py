@@ -130,7 +130,7 @@ CREATE INDEX ix_customers_tenant_id ON customers (tenant_id);
 COMMENT ON COLUMN customers.registered_country IS
     'ISO 3166-1 alpha-2 country code supplied by platform integration on '
     'booking commits. Drives case-3b detection via the '
-    'customer_country_triangle_mismatch derivation (build_context) and the '
+    'customer_destination_country_mismatch_outbound derivation (build_context) and the '
     'tenant_route_baselines population (6A.7 upsert). Pydantic enforces shape '
     'at ingress (CustomerData.registered_country, ^[A-Z]{2}$).';
 
