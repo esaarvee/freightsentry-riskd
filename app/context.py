@@ -130,7 +130,7 @@ def _outbound_destination_mismatch(
     AND differ. The Roulottes Lupien attack shape is customer ships
     outside their declared country in the DESTINATION only (origin
     can match customer country). The symmetric triangle-mismatch
-    (deleted in 7C.3) required customer_country to differ from BOTH
+    (deleted in 7C.2) required customer_country to differ from BOTH
     origin and destination — too narrow for the empirical attack.
 
     Null/empty handling: returns False when either input is None or
@@ -251,8 +251,9 @@ async def build_context(
     # Phase 6A.2 — shipment country intermediates (Pydantic Address.country
     # structured-field passthrough). Used by route-unfamiliar derivation
     # below. Intentionally NOT added to ctx — never referenced by rule
-    # conditions directly. The triangle-mismatch derivation (Phase 6A.5)
-    # also reads from these intermediates.
+    # conditions directly. The asymmetric outbound-destination-mismatch
+    # derivation (`_outbound_destination_mismatch`, Phase 7C.2) reads
+    # `shipment_destination_country` from these.
     shipment_origin_country = payload.shipment.origin.country
     shipment_destination_country = payload.shipment.destination.country
     netblock = netblock_24(str(source_ip))
