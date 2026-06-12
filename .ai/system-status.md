@@ -12,6 +12,7 @@ For per-phase historical narrative, decisions, and outcome records, see [`docs/h
 - **No production logs, no production telemetry yet.** Phase 5C wired EMF-formatted JSON to stdout for the CloudWatch sink. Phase 6 wired the rule-fire and decision metrics; Phase 7 added held-booking + case-2/case-3 metrics. Live observability begins when production traffic starts.
 - **Latency claims validated under staging load only.** Phase 5C load test against the staging Docker Compose stack confirmed the <200 ms p95 ceiling; production re-measurement happens post-launch.
 - **Operator runbooks** in [`docs/`](../docs/) describe the launched-system procedures. The production-launch-checklist and AWS deploy runbook are the active operational references.
+- **Post-Phase-8 refactor (Pattern B-lite).** Enrichment sources auto-refresh in-process ([`app/enrichment_refresh.py`](../app/enrichment_refresh.py) + the FastAPI lifespan refresh loop), with `/health` reporting `enrichment: "ok" | "degraded"`. Deploys run a gated `freightsentry-riskd-migrate` ECS task — exit-0-gated before the app rollout — on every `v*` tag push ([`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)).
 
 ## Phase status
 
@@ -65,4 +66,4 @@ The launch is operator-driven, not Claude-driven. The 5-month FPR observation wi
 
 [`.claude/BUGS.md`](../.claude/BUGS.md) captures tangential issues discovered mid-task. The operator drains at phase boundaries; resolved items receive a `RESOLVED: <commit>` annotation; deferred items get a `DEFERRED to <plan>` annotation.
 
-Last updated: 2026-06-05 (Phase 8 complete; production launch pending operator action).
+Last updated: 2026-06-13 (Phase 8 complete; post-Phase-8 Pattern B-lite refactor landed enrichment auto-refresh + gated migrate-on-deploy; production launch pending operator action).
