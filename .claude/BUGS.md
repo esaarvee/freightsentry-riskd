@@ -443,3 +443,21 @@ or (b) drop the `-${Environment}` suffix from the CFN RoleName fields
 so the IDs match the task-defs. Option (b) is the lower-friction fix.
 Verify against the actually-deployed stack first to avoid surprising
 a working setup.
+
+## 2026-06-13 — phone_prefix_stats never populated; email_domain_stats booking-only
+
+Discovered by: dead-capability-audit during REFACTOR_PLAN_dead-capability-audit.md Phase 1
+Location: app/baseline.py (add_observation phone_prefix/email_domain params) vs app/api/booking.py:208 + app/api/feedback.py:420 (call sites)
+Severity: low
+Observation: CustomerBaseline.add_observation accepts phone_prefix and
+email_domain params, but no call site passes phone_prefix (both the
+booking endpoint and the feedback fold omit it), so phone_prefix_stats
+is never written. email_domain_stats is populated on the booking path
+(booking.py passes email_domain_val) but NOT on the feedback fold
+(feedback.py omits email_domain). Neither stat-dict feeds any
+ALLOWED_CONTEXT_FIELDS field, so this is a latent baseline-dimension
+gap, not a dead rule-field — no current scoring impact. Surfaced while
+mapping the two-layer consumption graph.
+Suggested action: Phase 9 — either wire phone_prefix/email_domain
+consistently across both call sites (and add consuming rules) or
+document both stat-dicts as reserved/unused baseline dimensions.
