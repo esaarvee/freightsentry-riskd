@@ -63,7 +63,7 @@
       the booking platform sends `customer.registered_country`
       (ISO 3166-1 alpha-2) and `shipment.origin_via_carrier_dropoff`
       (bool) in production booking payloads. Case-3b detection signals
-      (`customer_country_triangle_mismatch`,
+      (`customer_destination_country_mismatch_outbound`,
       `shipment_route_rare_for_tenant`) are no-ops until these
       structured fields flow. Until then, the case-3b compound rules
       cannot fire on real traffic.

@@ -423,7 +423,7 @@ console procedure documented above with operator AWS credentials.
       (`cold_start_population_baseline_rare_with_carrier_dropoff`)
       does NOT fire (cold-start gate at `RARITY_MIN_OBSERVATIONS = 100`).
       Acceptable cold-start behavior; the simple case-3b compound
-      (`cold_start_country_triangle_with_carrier_dropoff`) fires
+      (`cold_start_outbound_carrier_dropoff`) fires
       independently once platform integration supplies
       `customer.registered_country` + `origin_via_carrier_dropoff`.
 
