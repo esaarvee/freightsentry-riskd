@@ -245,6 +245,21 @@ async def submit_feedback(
         # customer counter delta + audit-trail INSERT, all in one
         # transaction.
         if payload.label in _REJECTED_SET:
+            # Canonical lock order: lock the `customers` row BEFORE the
+            # `customer_baselines` FOR UPDATE. This branch also updates
+            # customers.flagged_count/fraud_confirmed_count later in the
+            # same transaction, so it locks BOTH rows. The booking path
+            # acquires them customers-first (upsert_customer precedes the
+            # baseline FOR UPDATE in build_context); acquiring them in the
+            # reverse order here deadlocked with a concurrent booking for
+            # the same customer (each held one row and waited for the
+            # other). See .ai/conventions.md "lock order". Taking the
+            # customers lock first makes the two paths agree.
+            await conn.execute(
+                "SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
+                prior["customer_id"],
+                auth.tenant_id,
+            )
             # FOR UPDATE on customer_baselines serialises concurrent
             # feedback POSTs for the same customer.
             baseline = await CustomerBaseline.load(

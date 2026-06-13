@@ -22,7 +22,8 @@ from typing import Any
 import asyncpg
 from httpx import AsyncClient
 
-from tests.conftest import seeded_ip_enrichment
+from app import db as app_db
+from tests.conftest import seeded_ip_enrichment, set_test_tenant_id
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _FEEDBACK_PATH = "/api/v1/shipments/feedback"
@@ -132,6 +133,109 @@ async def test_concurrent_booking_and_feedback_serialise(
         entry = ip_stats["203.0.113.70"]
         assert entry["n"] >= 2.0
         assert entry["r_n"] >= 1.0
+
+
+async def _wait_until_a_backend_blocks(probe: asyncpg.Connection, timeout: float = 5.0) -> None:
+    """Poll pg_locks until some backend is waiting on a lock (granted=false).
+
+    Used to deterministically order a forced lock-interleave: we proceed
+    only once the feedback request has reached — and blocked on — its
+    first row lock.
+
+    The count is instance-global (any ungranted lock), which is sound only
+    because integration tests run sequentially on a session-scoped event
+    loop — no unrelated backend contends concurrently. If the suite ever
+    runs in parallel against one DB (xdist), scope this to the feedback
+    backend (join pg_stat_activity on pid) to avoid a false early proceed."""
+    for _ in range(int(timeout / 0.05)):
+        waiting = await probe.fetchval("SELECT count(*) FROM pg_locks WHERE NOT granted")
+        if waiting and waiting > 0:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("no backend blocked on a lock within timeout")
+
+
+async def test_feedback_acquires_customers_lock_before_baselines_no_deadlock(
+    unauth_client: AsyncClient,
+    db_conn: asyncpg.Connection,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """Deterministic regression for the booking-vs-feedback deadlock (T5).
+
+    Forces the exact opposite-order interleave that deadlocked before the
+    fix, using a holder connection that mimics the booking path's lock
+    order (customers FIRST, then customer_baselines):
+
+      1. holder: BEGIN; lock the `customers` row FOR UPDATE.
+      2. fire a `rejected` feedback POST for the same customer; wait until
+         its backend blocks on a row lock.
+      3. holder: lock the `customer_baselines` row FOR UPDATE, then commit.
+
+    With the fix (feedback locks customers BEFORE baselines), step 2 blocks
+    feedback on the `customers` row held by the holder while it holds
+    nothing; step 3's baselines lock is free, the holder commits and
+    releases customers, and feedback completes → 200. With the OLD order
+    (feedback locks baselines first, then customers), step 2 leaves
+    feedback holding baselines and waiting on customers, so step 3
+    deadlocks (holder wants baselines, feedback wants customers) and
+    Postgres aborts one side with DeadlockDetectedError. The assertion
+    below (feedback returns 200) fails RED on the old order.
+    """
+    token, tenant_id = seeded_api_token
+    async with seeded_ip_enrichment(db_conn, "203.0.113.73", asn_org="Comcast"):
+        seed = await unauth_client.post(
+            _BOOKING_PATH,
+            json=_booking_payload(request_id="lockorder-seed", source_ip="203.0.113.73"),
+            headers=_headers(token),
+        )
+        assert seed.status_code == 200, seed.text
+        cust_id = await db_conn.fetchval(
+            "SELECT id FROM customers WHERE tenant_id = $1 AND external_id = $2",
+            tenant_id,
+            "conc-cust",
+        )
+
+        holder = await app_db._pool.acquire()
+        try:
+            await set_test_tenant_id(holder, tenant_id)
+            tx = holder.transaction()
+            await tx.start()
+            # Step 1 — holder locks customers first (booking-path order).
+            await holder.execute(
+                "SELECT 1 FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
+                cust_id,
+                tenant_id,
+            )
+            # Step 2 — fire feedback and wait until it blocks on a row lock.
+            fb_task = asyncio.create_task(
+                unauth_client.post(
+                    _FEEDBACK_PATH,
+                    json=_feedback_payload(
+                        request_id="lockorder-fb", target="lockorder-seed", label="rejected"
+                    ),
+                    headers=_headers(token),
+                )
+            )
+            try:
+                await _wait_until_a_backend_blocks(db_conn)
+                # Step 3 — holder now takes baselines. Deadlocks iff feedback
+                # holds baselines while waiting on customers (the old order).
+                await holder.execute(
+                    "SELECT 1 FROM customer_baselines WHERE customer_id = $1 AND tenant_id = $2 "
+                    "FOR UPDATE",
+                    cust_id,
+                    tenant_id,
+                )
+                await tx.commit()
+            except BaseException:
+                await tx.rollback()
+                raise
+            fb_resp = await fb_task
+        finally:
+            await app_db._pool.release(holder)
+
+        assert fb_resp.status_code == 200, fb_resp.text
+        assert fb_resp.json()["applied"] is True
 
 
 async def test_concurrent_feedback_replays_idempotent(
