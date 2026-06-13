@@ -20,11 +20,11 @@ class Address(BaseModel):
 
     address: str
     city: str | None = None
-    # Phase 6A.5: ISO 3166-1 alpha-2 validation when not None. Two-letter
+    # ISO 3166-1 alpha-2 validation when not None. Two-letter
     # uppercase code or None. Eliminates the composite-key collision
     # risk (lane_stats / country_route_stats use "||"-separated composite
     # keys; unbounded country strings could collide via crafted "||"
-    # values per 6A.2 security-auditor informational note).
+    # values).
     country: str | None = Field(default=None, min_length=2, max_length=2, pattern=r"^[A-Z]{2}$")
     postal_code: str | None = None
 
@@ -35,18 +35,13 @@ class CustomerData(BaseModel):
     external_id: str
     registered_address: str | None = None
     business_name: str | None = None
-    # Phase 6A.5 + 7C.2: structured country signal for case-3b
-    # detection (cold_start_outbound_carrier_dropoff). ISO 3166-1
-    # alpha-2 uppercase code or None. Platform integration supplies the
-    # field on production booking payloads; replay corpora inject ground
-    # truth where known (CA for Roulottes Lupien census; null for
-    # case-2 and approved corpora). Structured field rejects address-
-    # string parsing on purpose — format variation across users / forms /
-    # platforms makes parsers silently unreliable (same family of
-    # problem that dropped address-string-matching signals earlier).
-    # The originally-paired symmetric triangle compound was replaced in
-    # 7C.2 by the asymmetric outbound compound; this field's consumer
-    # rule is now cold_start_outbound_carrier_dropoff.
+    # Structured country signal for case-3b detection (consumed by
+    # cold_start_outbound_carrier_dropoff). ISO 3166-1 alpha-2 uppercase
+    # code or None. Platform integration supplies the field on production
+    # booking payloads; replay corpora inject ground truth where known.
+    # Structured field rejects address-string parsing on purpose —
+    # format variation across users / forms / platforms makes parsers
+    # silently unreliable.
     registered_country: str | None = Field(
         default=None, min_length=2, max_length=2, pattern=r"^[A-Z]{2}$"
     )
@@ -74,24 +69,23 @@ class ShipmentData(BaseModel):
     destination: Address
     value: Decimal = Field(..., ge=Decimal("0"))
     channel: str
-    # Phase 4B: ISO 4217 currency code; defaults to USD so Phase 1-3 payloads
-    # are accepted unchanged. Allowed-list check against tenant_config runs
-    # at request time in app/api/booking.py (4B.3) — Pydantic enforces shape
-    # only.
+    # ISO 4217 currency code; defaults to USD. Allowed-list check against
+    # tenant_config runs at request time in app/api/booking.py — Pydantic
+    # enforces shape only.
     currency: str = Field(default="USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
-    # Phase 6A.1: case-3 fraud signal. True when the shipment was dropped at
+    # case-3 fraud signal. True when the shipment was dropped at
     # a carrier facility rather than picked up from the origin address. The
     # case-3 attack pattern spoofs the customer's real address as ship-from
     # for credibility but cannot have a carrier pick up there, so the
     # attacker drops at the carrier facility. Defaults False so existing
-    # Phase 1-5 payloads are accepted unchanged; platform integration ships
-    # the structured signal post-Phase-6 (see docs/production-launch-checklist.md
+    # payloads are accepted unchanged; platform integration ships
+    # the structured signal (see docs/production-launch-checklist.md
     # Phase B).
     origin_via_carrier_dropoff: bool = False
 
 
 class ContactData(BaseModel):
-    """PII fields. HMAC at ingress lands 1D.1 (signal_helpers.hmac_hex)."""
+    """PII fields. HMAC at ingress via signal_helpers.hmac_hex."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -132,7 +126,7 @@ class BookingResponse(BaseModel):
 
 
 # =============================================================================
-# Modification endpoint (Phase 3A)
+# Modification endpoint
 # =============================================================================
 
 ModificationType = Literal["destination", "value", "recipient", "service_level", "pickup_time"]
@@ -155,15 +149,15 @@ class ModificationRequest(BaseModel):
     original_request_id: str = Field(..., min_length=1, max_length=128)
     modification_ts: datetime
     modification_type: ModificationType
-    # shape varies by modification_type; validated by build_modification_context (3A.4)
+    # shape varies by modification_type; validated by build_modification_context
     new_value: dict[str, Any]
 
     source_ip: IPv4Address | None = None
     user: ModificationUser | None = None
     reason: str | None = Field(None, max_length=512)
-    # Phase 4B: applies to the modification evaluation, not the prior
+    # Applies to the modification evaluation, not the prior
     # shipment. Currency-aware value-tier rules consult this. Defaults to
-    # USD for backward compatibility.
+    # USD.
     currency: str = Field(default="USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
 
@@ -180,7 +174,7 @@ class ModificationResponse(BaseModel):
 
 
 # =============================================================================
-# Feedback endpoint (Phase 3B)
+# Feedback endpoint
 # =============================================================================
 
 FeedbackLabel = Literal["approved", "rejected", "fraud_confirmed"]
