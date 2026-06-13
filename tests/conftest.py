@@ -26,6 +26,7 @@ from typing import Any
 import asyncpg
 import pytest
 import pytest_asyncio
+import structlog
 from httpx import ASGITransport, AsyncClient
 
 from app import db as app_db
@@ -134,6 +135,48 @@ def load_payload() -> Callable[[str], dict[str, Any]]:
         return data
 
     return _load
+
+
+def _uncache_structlog_proxies() -> None:
+    """Drop the per-proxy `bind` override that `cache_logger_on_first_use`
+    installs. `BoundLoggerLazyProxy.bind` overwrites itself with a closure
+    returning a *compiled* cached logger (its processor chain frozen at
+    first-use). Once an integration test triggers the lifespan
+    (`configure_logging` → caching True), the module-level `_log` proxies
+    cache and thereafter ignore `capture_logs()` (which mutates the live
+    config in place). Deleting the instance-level `bind` restores the
+    class method, so the next use re-binds against the current config.
+    Walk loaded `app.*` modules for proxy attributes."""
+    import sys
+
+    from structlog._config import BoundLoggerLazyProxy
+
+    for mod_name, mod in list(sys.modules.items()):
+        if not (mod_name == "app" or mod_name.startswith("app.")) or mod is None:
+            continue
+        for val in list(vars(mod).values()):
+            if isinstance(val, BoundLoggerLazyProxy) and "bind" in vars(val):
+                del val.__dict__["bind"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_structlog() -> None:
+    """T3: production `app/logging.py` configures structlog with
+    `cache_logger_on_first_use=True` — a deliberate perf choice that stays
+    in prod. Once an integration test triggers the app lifespan (which
+    calls `configure_logging`), the module-level `_log` proxies cache a
+    compiled bound logger and thereafter bypass
+    `structlog.testing.capture_logs()` — the event prints to stdout and
+    the capture list is empty. That made `test_log_tick_summary_counts`
+    (and other capture_logs tests) fail only when they ran after a
+    lifespan-triggering test.
+
+    Before each test: disable caching (preserving the live processor-list
+    instance so capture_logs' in-place mutation keeps working) and drop any
+    stale per-proxy cache. Test-harness only; production config is
+    unchanged."""
+    structlog.configure(cache_logger_on_first_use=False)
+    _uncache_structlog_proxies()
 
 
 @pytest.fixture(autouse=True)
