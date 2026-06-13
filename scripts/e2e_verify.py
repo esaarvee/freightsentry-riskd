@@ -413,8 +413,7 @@ async def step_4_case2(
 
     Skip-with-warning if a customer's baseline doesn't reach the
     _CASE2_MIN_BASELINE_N threshold (some warmup bookings may land REVIEW
-    for unrelated cold-start reasons; baseline gates on ALLOW only per
-    Phase 7C.11).
+    for unrelated cold-start reasons; baseline gates on ALLOW only).
     """
     start = time.monotonic()
     detections = 0

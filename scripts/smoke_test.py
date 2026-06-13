@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 6D smoke test — post-deploy verification of /booking/evaluate.
+"""Smoke test — post-deploy verification of /booking/evaluate.
 
 Sends a known-good BookingRequest payload to the deployed ALB endpoint
 with a tenant token, then asserts the response shape:
@@ -14,7 +14,7 @@ Exit 0 on success, 1 on any assertion failure. Failure detail is
 printed to stderr for the deploy.yml workflow log + ECS console
 operator to triage.
 
-Used by the Phase 6D.8 deploy workflow as the post-rollout
+Used by the deploy workflow as the post-rollout
 verification gate; also runnable locally for operator-side checks.
 
 Usage:
@@ -22,7 +22,7 @@ Usage:
         --base-url https://<your-alb-or-domain> \\
         --tenant-token $SMOKE_TENANT_TOKEN
 
-The payload is currency=CAD per the Phase 6B project default. The
+The payload is currency=CAD per the project default. The
 test tenant the operator provisioned at runbook step B.2 should
 have `allowed_currencies` including CAD.
 """
@@ -62,10 +62,9 @@ _LATENCY_CEILING_SECONDS = 5.0
 def _post_booking(base_url: str, token: str, request_id: str) -> tuple[int, float, dict[str, Any]]:
     """POST the smoke payload; return (status_code, elapsed_seconds, body_dict).
 
-    Uses stdlib urllib.request to avoid any third-party dep (Phase 6D.1
-    HEALTHCHECK pattern — the smoke test runs in the GitHub Actions
-    runner which may have a minimal Python; stdlib-only keeps the
-    workflow dependency-free).
+    Uses stdlib urllib.request to avoid any third-party dep (the smoke
+    test runs in the GitHub Actions runner which may have a minimal
+    Python; stdlib-only keeps the workflow dependency-free).
     """
     payload = {**_SMOKE_PAYLOAD, "request_id": request_id}
     data = json.dumps(payload).encode("utf-8")

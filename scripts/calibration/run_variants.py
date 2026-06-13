@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Phase 7B variant comparison runner (initially 4 variants;
-Variant E added 2026-06-04 after the initial 4 missed targets).
+"""Variant comparison runner.
 
 Generates five rule-file variants (A/B/C/D/E), runs the replay
 orchestrator against three corpora for each variant, and writes
 aggregate result JSON files to a results directory.
 
-THIS SCRIPT IS PHASE 7 EPHEMERA. Tracked during Phase 7 only; deleted
-in Phase 7E commit 7E.3. Variant rule files live in /tmp; result
-aggregates live in /tmp; ONLY the final docs/replay-validation.md
-section gets committed (and that's done by hand, NOT by this script).
+Ephemeral calibration script; not part of the production service.
+Variant rule files and result aggregates live in /tmp; only the final
+docs/replay-validation.md section is committed (by hand).
 
-Variants (Phase 7B):
+Variants:
 
   A — Tightened maturity gate, weights unchanged
       unfamiliar_ip_country_for_origin: gate >= 30; weight 0.3
@@ -30,7 +28,7 @@ Variants (Phase 7B):
       unknown_destination_address: append
         AND shipment_value > shipment_value_threshold_medium
 
-  E — Asymmetric split (added 2026-06-04 after A/B/C/D missed targets):
+  E — Asymmetric split:
       IPC takes D-style secondary signal compound (most FPR-reducing)
       DEST takes A-style gate tightening to >= 30 (gentler)
       Both weights unchanged. Hypothesis: IPC drives more of the
@@ -49,7 +47,7 @@ report compiled offline.
 
 The host's app/rules.yaml is NEVER mutated. The variant is pushed
 INTO the container's filesystem; the host tree stays clean throughout
-the orchestrator's lifetime, so 7B never produces dirty git state.
+the orchestrator's lifetime, so it never produces dirty git state.
 
 Safety: clean working tree is a precondition (checked before any
 mutation); try/finally guarantees container baseline restoration on
@@ -303,7 +301,7 @@ def _run_replay_for_corpus(
 ) -> None:
     """Invoke scripts/replay_validation.py as a subprocess. Raises
     CalledProcessError on non-zero exit. Default concurrency=20
-    matches Phase 5D's verified-good steady-state."""
+    matches the verified-good steady-state from load testing."""
     subprocess.run(
         [
             sys.executable,

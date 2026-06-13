@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Phase 5C.4 baseline latency measurement.
+"""Baseline latency measurement.
 
 Sends synthetic booking + modification + feedback requests against the
 local docker-compose stack and reports per-endpoint p50/p95/p99 +
-mean. Captures the latency baseline AFTER 5B (cache lands) and AFTER
-5C.2 (EMF processor wires in), so the measurement reflects the
-production runtime shape that 5D.3's load test will compare against.
+mean. Captures the latency baseline with the cache and EMF processor
+in place, so the measurement reflects the production runtime shape
+that the load test compares against.
 
 Usage:
     docker compose up -d
@@ -19,12 +19,13 @@ Usage:
         [--concurrency 50] \\
         [--json-out docs/baseline-phase-5c.json]
 
-The headroom gate (per Phase 5C.4 plan):
+The headroom gate:
 - If any endpoint p95 > 200ms: STOP. The cache + EMF processor changes
   should not degrade latency this much; surface to STATUS.md.
 - If any endpoint p95 >= 170ms (less than 30ms headroom): YELLOW FLAG.
-  5D's role transition + RLS overhead may push the load test over the
-  200ms gate. Surface to the operator before 5D.3 runs.
+  The downstream load test's role transition + RLS overhead may push
+  it over the 200ms gate; surface to the operator before running the
+  load test.
 - If all endpoints p95 < 170ms: green.
 
 Exit codes:

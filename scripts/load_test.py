@@ -1,4 +1,4 @@
-"""Phase 5D.3 locust load test harness.
+"""Locust load test harness.
 
 Sends booking + modification + feedback traffic against the local
 docker-compose stack with a synthetic mix approximating production
@@ -12,9 +12,9 @@ traffic:
   - ~2% idempotent replay (re-POST same booking/modification/feedback
     request_id) — exercises the cache hit path
 
-5D.3 ships the harness; 5D.4 executes it against the live local stack
-(running under `riskd_app_login` per 5D.2) at 100 RPS sustained for
-60+ seconds and compares against the 5C.4 baseline.
+Run against the live local stack (under the `riskd_app_login` role)
+at 100 RPS sustained for 60+ seconds, then compare against the
+measured baseline.
 
 Usage:
     docker compose up -d

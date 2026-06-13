@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Tenant onboarding utility (Phase 4A.5).
+"""Tenant onboarding utility.
 
 Creates a tenant row + an initial API token + writes an initial
 TenantConfig (optionally loaded from a JSON file). Idempotent —
 re-runs on the same `--external-id` (interpreted as `tenants.name`
-for the Phase 4 schema) update the config JSONB and surface the
+for the current schema) update the config JSONB and surface the
 existing tenant id without creating a duplicate.
 
 Usage:
@@ -18,10 +18,10 @@ The script prints the token ONCE on stdout — operator must capture
 it immediately. Subsequent runs without `--rotate-token` print only
 the tenant id; no token is reprinted.
 
-Phase 4 limitations:
+Limitations:
 - No FK to `app_users.role` here — admin onboarding via this script
   is out of scope. Operator can INSERT into `app_users` manually for
-  admin principals; Phase 5+ may add an `--admin-user` flag.
+  admin principals.
 - Token printed in plaintext to stdout. Production usage should pipe
   to a secret manager rather than store the stdout output.
 

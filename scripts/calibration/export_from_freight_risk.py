@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Phase 7 freight_risk → NDJSON export script.
+"""freight_risk → NDJSON export script.
 
 Reads the sibling freight_risk SQLite database read-only and writes
 three NDJSON corpora to an operator-supplied output directory
 (default /tmp/riskd-replay/). Each line is a BookingRequest payload
 that the replay orchestrator (scripts/replay_validation.py) consumes.
 
-THIS SCRIPT IS PHASE 7 EPHEMERA. Tracked during Phase 7 only; deleted
-in commit 7E.3. NEVER produces output inside the repo tree; output
-paths are /tmp by default.
+Ephemeral calibration script; not part of the production service.
+NEVER produces output inside the repo tree; output paths are /tmp by
+default.
 
 Customer-country derivation (priority order, per-record):
   1. Explicit country column on a customers table — N/A in the
@@ -36,8 +36,8 @@ Per-corpus hardcoded overrides:
   - case-2 + approved: derivation result for customer country;
     shipment.origin_via_carrier_dropoff = False.
 
-All corpora: shipment.currency = "CAD" (Phase 6B project default;
-freight_risk total values are currency-implicit).
+All corpora: shipment.currency = "CAD" (project default; freight_risk
+total values are currency-implicit).
 
 Usage:
     python3 scripts/calibration/export_from_freight_risk.py \\
@@ -90,7 +90,7 @@ class CorpusSpec:
     where_clause: str
     sample_size: int | None  # None = full census
     case3_overrides: bool
-    # Phase 7C.9: warmup-vs-measurement methodology. When True, the
+    # warmup-vs-measurement methodology. When True, the
     # exporter emits K=WARMUP_K pre-March-31 legitimate bookings per
     # measurement customer BEFORE the measurement records, so the
     # customer's accumulated baseline (and the new ASN rule's
@@ -126,8 +126,8 @@ _CORPORA: tuple[CorpusSpec, ...] = (
     CorpusSpec(
         slug="case3",
         filename="case3_census.ndjson",
-        # Exact match per the Phase 6C / 7A.2 plan; the plan-specified
-        # literal text is the operator's ground-truth notes string.
+        # Exact-match literal: the operator's ground-truth notes string
+        # (must match verbatim).
         where_clause=(
             "f.feedback='reject' AND f.notes='Roulottes Lupien — entire customer history fraud (user-confirmed)'"
         ),
@@ -344,7 +344,7 @@ def _fetch_warmup_rows(
     k: int = WARMUP_K,
 ) -> list[sqlite3.Row]:
     """Fetch up to K most-recent legitimate pre-March-31 bookings per
-    customer_id. Used by 7C.9 warmup methodology: each customer's
+    customer_id. Used by the warmup methodology: each customer's
     accumulated baseline is populated by these bookings BEFORE the
     measurement records arrive, so the new ASN rule's cold-start
     gate reflects production-realistic conditions during replay.

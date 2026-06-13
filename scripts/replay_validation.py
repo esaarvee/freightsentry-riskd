@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay-validation orchestrator (Phase 7A.1 rewrite).
+"""Replay-validation orchestrator.
 
 Reads a corpus NDJSON file from an operator-supplied directory, POSTs
 each payload to the local freightsentry-riskd booking endpoint, captures
@@ -7,14 +7,14 @@ the decision + score + triggered_rules + latency, and writes AGGREGATE
 results (decision counts, per-rule fire counts, latency percentiles) to
 a JSON file. Throttled at 50 concurrent in-flight requests by default.
 
-Per Phase 7's "aggregate stats only" policy, this orchestrator does NOT
+Per the "aggregate stats only" policy, this orchestrator does NOT
 emit per-record content in the output JSON. Per-record content (request
 id, triggered_rules list per booking) stays in memory during the run
 and is summarized into aggregates before serialization.
 
 The corpus files are NDJSON (one BookingRequest payload per line). The
 corpus directory is supplied via --corpus-dir (no hardcoded path).
-Operator typically populates the directory via the Phase 7 export
+Operator typically populates the directory via the export
 script (scripts/calibration/export_from_freight_risk.py) writing to
 /tmp/riskd-replay/.
 
@@ -39,7 +39,7 @@ Usage (compare two pre-computed result files):
 
 --rules records WHICH rule file the operator believes the server has
 loaded; it is NOT a runtime swap (the FastAPI app loads rules at
-lifespan startup). Variant orchestration (Phase 7B run_variants.py)
+lifespan startup). Variant orchestration (run_variants.py)
 restarts the app between variants and passes the variant path via
 --rules so the output JSON carries the variant identity for audit.
 
@@ -112,7 +112,7 @@ class ReplayResults:
     errors: int = 0
     transactions: list[TransactionResult] = field(default_factory=list)
     error_details: list[dict[str, Any]] = field(default_factory=list)
-    # Phase 7C.9 warmup-vs-measurement split. Warmup decisions are
+    # warmup-vs-measurement split. Warmup decisions are
     # recorded but EXCLUDED from decision_distribution / per_rule
     # _fire_counts / latency_summary — those aggregates reflect
     # measurement-only outcomes. Warmup's side-effect (baseline
@@ -172,7 +172,7 @@ class ReplayResults:
             "decision_distribution": self.decision_distribution(),
             "per_rule_fire_counts": self.per_rule_fire_counts(),
             "latency_ms": self.latency_summary(),
-            # Phase 7C.9 warmup summary. Aggregate decision counts on
+            # warmup summary. Aggregate decision counts on
             # warmup records (excluded from the primary aggregates).
             "warmup_summary": {
                 "requested": self.warmup_requested,
@@ -246,7 +246,7 @@ async def _post_one(
     *,
     is_warmup: bool = False,
 ) -> None:
-    # Phase 7C.9: strip orchestrator-internal metadata fields
+    # strip orchestrator-internal metadata fields
     # (prefixed with `_`) before POSTing. BookingRequest is
     # extra="forbid"; sending `_replay_role` would 422 the request.
     booking_payload = {k: v for k, v in payload.items() if not k.startswith("_")}
@@ -327,7 +327,7 @@ async def run_replay(
         rules_file_recorded=rules_path_recorded,
     )
     sem = asyncio.Semaphore(concurrency)
-    # Phase 7C.9: split warmup and measurement records, process warmup
+    # split warmup and measurement records, process warmup
     # FIRST and wait for completion before any measurement records hit
     # the booking endpoint. Warmup's purpose is to populate the
     # customer baseline before measurement evaluates against it; the
