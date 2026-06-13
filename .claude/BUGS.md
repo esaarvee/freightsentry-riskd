@@ -489,3 +489,20 @@ Suggested action: post-phase — investigate integration-test isolation
 full suite against the canonical harness to confirm these are environment/
 isolation artifacts vs. real regressions. Do NOT block the doc-staleness phase
 on them (out of scope; not in the unit gate).
+
+## 2026-06-13 — Dependency lock drift: uv.lock pins structlog 25.5.0, pip resolves 26.1.0
+
+Discovered by: test-soundness pass (T3 structlog review) during REFACTOR_PLAN_test-soundness.md commit 3
+Location: uv.lock vs pyproject.toml (and .github/workflows/test.yml which installs via `pip install -e ".[dev,test]"`)
+Severity: low
+Observation: uv.lock pins structlog==25.5.0, but a fresh `pip install -e
+".[dev,test]"` (the path the Dockerfile and CI use — uv.lock-based
+reproducible install is deferred per 6D.1) resolves structlog==26.1.0.
+The two versions' internals relevant to the T3 fix
+(BoundLoggerLazyProxy at structlog._config, cache_logger_on_first_use
+bind override) are identical, so the harness fix is stable across both.
+But the broader lock-vs-installed drift means CI and local envs do not
+match uv.lock — the same class of risk .ai/conventions.md calls out for
+the ruff pre-commit rev. Likely affects more than structlog.
+Suggested action: Phase 9 — adopt uv.lock-based install in CI/Dockerfile
+(or re-resolve uv.lock to current and pin the pre-commit/test envs to it).
