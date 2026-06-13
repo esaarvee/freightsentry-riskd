@@ -111,8 +111,8 @@ def parse_condition(source: str) -> Callable[[Mapping[str, Any]], bool]:
         try:
             result = eval(code, {"__builtins__": {}}, frozen_env)
         except NameError as exc:
-            # Missing Context field — fail loud at request time. (Rule
-            # loader in 1D.7 validates names at startup, so this only
+            # Missing Context field — fail loud at request time. (The
+            # rule loader validates names at startup, so this only
             # fires on a programming error.)
             msg = f"rule condition referenced unknown field: {exc}"
             raise DSLError(msg) from exc

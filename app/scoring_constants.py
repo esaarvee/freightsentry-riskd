@@ -1,7 +1,7 @@
 """Layer 2 account-prior constants and the maturity helper.
 
-Values are Design-Context-fixed for Phase 2; Phase 4 introduces
-per-tenant override via tenants.config. These constants are not in
+Values are Design-Context-fixed defaults; per-tenant override is
+available via tenants.config. These constants are not in
 app/rules.yaml because they're scoring-formula machinery, not rule
 parameters; rules.yaml continues to own allow_max / block_min only.
 

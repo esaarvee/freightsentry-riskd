@@ -11,9 +11,7 @@ DSL vocabulary. Adding a new rule with a new field requires:
   2. Populating the field in `app.context.build_context`
   3. Documenting it in `.ai/rules.md` § DSL Context fields
 
-Phase 1 set only — Phase 2 adds trust-conditional + customer-lock-in
-+ recipient-overlap fields. See `.ai/decisions.md` § Rule catalogue
-target.
+See `.ai/decisions.md` § Rule catalogue target.
 """
 
 from __future__ import annotations
@@ -60,7 +58,7 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "ip2p_threat_spam",
         "ip2p_threat_any",
         "is_residential_asn",
-        # Phase 7C.6 — case-2 learning-based ASN deviation. True iff
+        # case-2 learning-based ASN deviation. True iff
         # enrichment-derived asn_org is non-None AND customer past
         # the cold-start gate AND the asn_org is novel to the
         # customer's accumulated ip_asn_stats baseline.
@@ -87,7 +85,7 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "value_zscore",
         "cadence_zscore_hours",
         "is_abnormally_dormant",
-        # Phase 2B Layer-2 / 2C-rule inputs
+        # Layer-2 rule inputs
         "customer_locked_cloud_api",
         "customer_locked_web_only",
         "days_since_last_booking",
@@ -98,50 +96,47 @@ ALLOWED_CONTEXT_FIELDS: frozenset[str] = frozenset(
         "is_email_blocklisted",
         "is_email_suspicious_pattern",
         "is_phone_dummy_pattern",
-        # Modification (3A) — populated by build_modification_context
+        # Modification — populated by build_modification_context
         "modification_time_since_booking",  # Literal: within_30_min | within_1_hour | within_24_hours | 1_to_7_days | over_7_days
         "modification_magnitude",  # float in [0.0, +inf); fraction for value-type, 0/1 for categorical
         "modification_direction",  # Literal: familiar | unfamiliar | blocked | unknown
         "modification_velocity_1h",  # int — count of this customer's modifications in last 1h
         "modification_velocity_24h",  # int — count of this customer's modifications in last 24h
         "modification_type",  # Literal: destination | value | recipient | service_level | pickup_time. Booking-path default is the "none" sentinel (matches no enum value), keeping modification rules structurally dormant on bookings — see app/context.py BOOKING_PATH_MODIFICATION_DEFAULTS.
-        # Previously rejected (3B) — populated by build_context from baseline state
+        # Previously rejected — populated by build_context from baseline state
         "email_previously_rejected",  # bool — email_hmac present in baseline.rejected_email_hmacs
         "phone_previously_rejected",  # bool — phone_hmac present in baseline.rejected_phone_hmacs
         "origin_previously_rejected",  # bool — baseline.origin_stats[origin_key].r_n > 0
         "ip_previously_rejected",  # bool — baseline.ip_stats[ip].r_n > 0
-        # Currency-normalized thresholds (Phase 4B) — populated by build_context
-        # from tenant_config.value_caps via resolve_value_caps. 4B.5 rewrites
-        # the 7 currency-implicit rules to consult these instead of literals.
+        # Currency-normalized thresholds — populated by build_context
+        # from tenant_config.value_caps via resolve_value_caps.
         "shipment_currency",  # str — 3-letter ISO 4217 code from payload.shipment.currency
         "shipment_value_threshold_high",  # float — caps[currency]["high"]
         "shipment_value_threshold_new_user",  # float — caps[currency]["new_user"]
         "shipment_value_threshold_medium",  # float — caps[currency]["medium"]
         "shipment_value_threshold_low",  # float — caps[currency]["low"]
-        # Phase 6A.2 — case-3a signals. origin_via_carrier_dropoff is a
+        # case-3a signals. origin_via_carrier_dropoff is a
         # passthrough from payload.shipment; shipment_route_unfamiliar_for_customer
         # is derived from baseline.country_route_stats via
         # _derive_route_unfamiliar in app/context.py.
         "origin_via_carrier_dropoff",
         "shipment_route_unfamiliar_for_customer",
-        # Phase 6A.5 — case-3b signals. customer_registered_country is a
+        # case-3b signals. customer_registered_country is a
         # structured-field passthrough from payload.customer (ISO 3166-1
-        # alpha-2). Phase 7C.2 replaced the symmetric triangle-mismatch
-        # with the asymmetric outbound-destination check (Roulottes
-        # Lupien attack shape) per the Phase 7B empirical record.
+        # alpha-2). The outbound-destination check is asymmetric, matching
+        # the Roulottes Lupien attack shape.
         "customer_registered_country",
-        # Phase 7C.2 — case-3b asymmetric mismatch. True iff
+        # case-3b asymmetric mismatch. True iff
         # customer.registered_country and shipment.destination.country
         # are both truthy AND differ. Powers
         # cold_start_outbound_carrier_dropoff.
         "customer_destination_country_mismatch_outbound",
-        # Phase 6A.8 — case-3b sophisticated signal. Derived from
+        # case-3b sophisticated signal. Derived from
         # tenant_route_baselines via derive_route_rarity. True iff the
         # current (customer_country, origin_country, destination_country)
         # triple is <2% of the tenant's population AND tenant has
         # >=100 observations across all triples. Feeds the case-3b
-        # cold_start_population_baseline_rare_with_carrier_dropoff
-        # rule (6A.9).
+        # cold_start_population_baseline_rare_with_carrier_dropoff rule.
         "shipment_route_rare_for_tenant",
     }
 )

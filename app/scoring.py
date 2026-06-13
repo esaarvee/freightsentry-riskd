@@ -1,4 +1,4 @@
-"""3-layer noisy-OR scorer — Phase 2 ships Layer 1 + Layer 2 + Layer 3.
+"""3-layer noisy-OR scorer — Layer 1 + Layer 2 + Layer 3.
 
 Layer 1 (hard-block short-circuit): the first rule with `action: BLOCK`
 that fires returns immediately with `score = 1.0, decision = BLOCK`.
@@ -81,9 +81,8 @@ def _maturity_with_overrides(
     """Maturity formula consulting tenant-supplied thresholds.
 
     Mirrors app/scoring_constants.py::maturity but with caller-supplied
-    thresholds instead of module-level constants. Phase 2A formula is
-    UNCHANGED: multiplicative age_frac * ship_frac (per decisions.md
-    Layer 2 amendment).
+    thresholds instead of module-level constants. Multiplicative
+    age_frac * ship_frac (per decisions.md Layer 2 amendment).
     """
     age_frac = min(max(age_days, 0) / age_threshold, 1.0)
     ship_frac = min(max(total_shipments, 0) / ship_threshold, 1.0)
@@ -115,8 +114,8 @@ def _apply_cold_start_grace(
     first customers. The 0.5 multiplier softens scoring during the grace
     window, biasing toward REVIEW rather than BLOCK.
 
-    The 0.5 multiplier is hardcoded — Phase 6 staging replay measures
-    FPR impact and may revise.
+    The 0.5 multiplier is hardcoded; staging replay may revise it after
+    measuring FPR impact.
 
     Per-customer cold-start is handled separately by Layer 2 base_prior;
     `cold_start_grace_days` is tenant-wide.
@@ -177,7 +176,7 @@ def score(
 ) -> ScoringResult:
     # Layer 1 — hard-block short-circuit. Bypasses Layer 2 entirely.
     # tenant_config is NOT consulted on the BLOCK fast-path — see
-    # test_layer_1_short_circuit_does_not_consult_tenant_config (4C.1).
+    # test_layer_1_short_circuit_does_not_consult_tenant_config.
     for rule in ruleset.rules:
         if rule.action != "BLOCK":
             continue
@@ -194,7 +193,7 @@ def score(
                 risk_factors=(_to_factor(rule),),
             )
 
-    # Layer 2 — account prior with per-tenant maturity overrides (4C.1).
+    # Layer 2 — account prior with per-tenant maturity overrides.
     age_threshold, ship_threshold, k = _resolved_maturity_constants(tenant_config)
     m = _maturity_with_overrides(
         age_days=customer_state.account_age_days,
