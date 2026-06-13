@@ -19,13 +19,14 @@ from httpx import AsyncClient
 from app.auth import AuthContext, require_api_token
 from app.main import app
 from tests.conftest import _cleanup_tenant, seed_tenant_created_days_ago, set_test_tenant_id
+from tests.ips import BLACKLISTED_IP, CLEAN_IP
 
 
 def _booking(
     *,
     request_id: str,
     customer: str,
-    source_ip: str = "192.0.2.90",
+    source_ip: str = CLEAN_IP,
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
@@ -233,7 +234,7 @@ async def test_grace_does_not_affect_layer_1_block(
     tenant_id = await seed_tenant_created_days_ago(
         db_conn, days_ago=1, config={"cold_start_grace_days": 30}
     )
-    test_ip = "192.0.2.91"
+    test_ip = BLACKLISTED_IP
     await db_conn.execute(
         """
         INSERT INTO ip_enrichment (ip, fh_level1, fh_level2, is_tor, country, lat, lon)

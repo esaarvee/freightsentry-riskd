@@ -30,6 +30,7 @@ import structlog
 from httpx import AsyncClient
 
 from tests.conftest import seeded_ip_enrichment
+from tests.ips import CLEAN_IP
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 
@@ -237,7 +238,7 @@ async def test_velocity_burst_from_one_ip_trips_ip_velocity_high_ui(
     headers = {"Authorization": f"Bearer {token}"}
     await _seed_established_customer(db_conn, tenant_id, external_id="vel-cust")
 
-    burst_ip = "198.51.100.55"
+    burst_ip = CLEAN_IP
 
     # Send 11 bookings; the 12th will see >10 prior in the last hour.
     now = datetime.now(tz=UTC)
@@ -271,9 +272,7 @@ async def test_clean_baseline_no_rules_fire(
     with no rules firing. Confirms the pipeline doesn't false-positive
     on the simplest case."""
     token, _ = seeded_api_token
-    payload = _seed_payload(
-        request_id="clean-1", source_ip="198.51.100.100", customer_id="clean-cust"
-    )
+    payload = _seed_payload(request_id="clean-1", source_ip=CLEAN_IP, customer_id="clean-cust")
     response = await unauth_client.post(
         _BOOKING_PATH, json=payload, headers={"Authorization": f"Bearer {token}"}
     )

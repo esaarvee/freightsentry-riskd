@@ -19,6 +19,7 @@ from httpx import AsyncClient
 from app.auth import AuthContext, require_api_token
 from app.main import app
 from tests.conftest import _cleanup_tenant, set_test_tenant_id
+from tests.ips import BLACKLISTED_IP, CLEAN_IP
 
 
 def _booking(
@@ -26,7 +27,7 @@ def _booking(
     request_id: str,
     customer: str,
     user: str = "user-mat",
-    source_ip: str = "192.0.2.80",
+    source_ip: str = CLEAN_IP,
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
@@ -251,7 +252,7 @@ async def test_overrides_do_not_affect_layer_1_block(
             }
         ),
     )
-    test_ip = "192.0.2.81"
+    test_ip = BLACKLISTED_IP
     await db_conn.execute(
         """
         INSERT INTO ip_enrichment (ip, fh_level1, fh_level2, is_tor, country, lat, lon)

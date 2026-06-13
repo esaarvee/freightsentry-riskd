@@ -32,6 +32,7 @@ import asyncpg
 from httpx import AsyncClient
 
 from tests.conftest import seeded_ip_enrichment
+from tests.ips import CLEAN_IP, CLEAN_IP_2, CLEAN_IP_3, CLEAN_IP_4
 
 _BOOKING_PATH = "/api/v1/shipments/booking/evaluate"
 _FEEDBACK_PATH = "/api/v1/shipments/feedback"
@@ -40,7 +41,7 @@ _FEEDBACK_PATH = "/api/v1/shipments/feedback"
 def _booking_payload(
     request_id: str,
     *,
-    source_ip: str = "203.0.113.50",
+    source_ip: str = CLEAN_IP,
     customer_id: str = "gating-cust",
     channel: str = "web",
     value: float = 250.00,
@@ -192,12 +193,10 @@ async def test_review_band_booking_does_not_fold_to_baseline(
     pre_ips = await _load_ip_stats(db_conn, tenant_id, customer_db_id)
     pre_value_n = await _load_value_n(db_conn, tenant_id, customer_db_id)
 
-    payload = _booking_payload(
-        request_id="gating-test1-review", source_ip="198.51.100.10", channel="api"
-    )
+    payload = _booking_payload(request_id="gating-test1-review", source_ip=CLEAN_IP, channel="api")
     async with seeded_ip_enrichment(
         db_conn,
-        "198.51.100.10",
+        CLEAN_IP,
         asn_org="Comcast",
         country="US",
         is_cloud=False,
@@ -221,7 +220,7 @@ async def test_review_band_booking_does_not_fold_to_baseline(
     assert post_ips == pre_ips, "REVIEW/BLOCK booking must NOT add to ip_stats"
     assert post_value_n == pre_value_n, "REVIEW/BLOCK booking must NOT update value_n"
     assert "Comcast" not in post_asn
-    assert "198.51.100.10" not in post_ips
+    assert CLEAN_IP not in post_ips
 
 
 # ---------------------------------------------------------------------------
@@ -249,11 +248,11 @@ async def test_approved_feedback_on_review_booking_folds_to_baseline(
     customer_db_id = await _seed_established_customer_with_tight_baseline(db_conn, tenant_id)
 
     payload = _booking_payload(
-        request_id="gating-test3-review", source_ip="198.51.100.11", channel="api"
+        request_id="gating-test3-review", source_ip=CLEAN_IP_2, channel="api"
     )
     async with seeded_ip_enrichment(
         db_conn,
-        "198.51.100.11",
+        CLEAN_IP_2,
         asn_org="Comcast",
         country="US",
         is_cloud=False,
@@ -281,7 +280,7 @@ async def test_approved_feedback_on_review_booking_folds_to_baseline(
     post_ips = await _load_ip_stats(db_conn, tenant_id, customer_db_id)
     assert "Comcast" in post_asn, "approve feedback must fold ASN into baseline"
     assert post_asn["Comcast"]["n"] == 1.0
-    assert "198.51.100.11" in post_ips
+    assert CLEAN_IP_2 in post_ips
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +302,7 @@ async def test_allow_booking_then_approved_feedback_does_not_double_add(
     # Brand-new customer + clean payload — should land in ALLOW.
     payload = _booking_payload(
         request_id="gating-test4-allow",
-        source_ip="203.0.113.40",
+        source_ip=CLEAN_IP,
         customer_id="clean-allow-cust",
         channel="web",
     )
@@ -355,13 +354,13 @@ async def test_rejected_then_approved_does_not_fold(
 
     payload = _booking_payload(
         request_id="gating-test5-review",
-        source_ip="198.51.100.12",
+        source_ip=CLEAN_IP_3,
         customer_id="gating-cust-test5",
         channel="api",
     )
     async with seeded_ip_enrichment(
         db_conn,
-        "198.51.100.12",
+        CLEAN_IP_3,
         asn_org="Comcast",
         country="US",
         is_cloud=False,
@@ -412,11 +411,11 @@ async def test_rejected_then_approved_does_not_fold(
     # ip_stats does get r_n bumped by the rejected feedback's
     # add_rejected_observation (test 6 covers the fresh-entry shape).
     # Here we pin that the approved feedback (skipped) did NOT bump n.
-    assert "198.51.100.12" in post_ips, "rejected feedback should have created fresh ip_stats entry"
-    assert post_ips["198.51.100.12"]["n"] == 0.0, (
+    assert CLEAN_IP_3 in post_ips, "rejected feedback should have created fresh ip_stats entry"
+    assert post_ips[CLEAN_IP_3]["n"] == 0.0, (
         "approved was monotonicity-skipped; n must NOT have been bumped"
     )
-    assert post_ips["198.51.100.12"]["r_n"] == 1.0, "rejected feedback should leave r_n=1"
+    assert post_ips[CLEAN_IP_3]["r_n"] == 1.0, "rejected feedback should leave r_n=1"
     # value_n unchanged from the seeded baseline (20).
     assert post_value_n == 20.0, "approved was skipped; value_n unchanged"
 
@@ -442,13 +441,13 @@ async def test_rejected_on_non_folded_booking_creates_fresh_entries(
 
     payload = _booking_payload(
         request_id="gating-test6-review",
-        source_ip="198.51.100.13",
+        source_ip=CLEAN_IP_4,
         customer_id="gating-cust-test6",
         channel="api",
     )
     async with seeded_ip_enrichment(
         db_conn,
-        "198.51.100.13",
+        CLEAN_IP_4,
         asn_org="Verizon",
         country="US",
         is_cloud=False,
@@ -462,7 +461,7 @@ async def test_rejected_on_non_folded_booking_creates_fresh_entries(
 
         # Pre-feedback: the IP is NOT in ip_stats (gated booking).
         pre_ips = await _load_ip_stats(db_conn, tenant_id, customer_db_id)
-        assert "198.51.100.13" not in pre_ips
+        assert CLEAN_IP_4 not in pre_ips
 
         rejected_feedback = _feedback_payload(
             "gating-test6-rejected", "gating-test6-review", "rejected"
@@ -477,10 +476,10 @@ async def test_rejected_on_non_folded_booking_creates_fresh_entries(
 
     # Post-feedback: fresh entry created with r_n=1, n=0.
     post_ips = await _load_ip_stats(db_conn, tenant_id, customer_db_id)
-    assert "198.51.100.13" in post_ips, (
+    assert CLEAN_IP_4 in post_ips, (
         "add_rejected_observation must create a fresh entry even when "
         "the key was missing pre-feedback"
     )
-    entry = post_ips["198.51.100.13"]
+    entry = post_ips[CLEAN_IP_4]
     assert entry["r_n"] == 1.0, "rejected feedback must set r_n=1 on fresh entry"
     assert entry["n"] == 0.0, "fresh-entry n must be 0.0 (never folded as positive)"

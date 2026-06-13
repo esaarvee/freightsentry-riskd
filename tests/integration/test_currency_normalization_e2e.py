@@ -30,6 +30,7 @@ from httpx import AsyncClient
 from app.auth import AuthContext, require_api_token
 from app.main import app
 from tests.conftest import create_extra_tenant, set_test_tenant_id
+from tests.ips import CLEAN_IP, FIREHOL_L2_IP
 
 
 async def _set_tenant_config(
@@ -54,7 +55,7 @@ def _booking(
     currency: str = "USD",
     customer: str = "cust-cn",
     user: str = "user-cn",
-    source_ip: str = "192.0.2.70",
+    source_ip: str = CLEAN_IP,
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
@@ -263,11 +264,11 @@ async def test_threat_intel_high_value_uses_medium_threshold_per_currency(
     """CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) + value=2500 + ip in threat list → threat_intel_high_value
     fires (medium=2000). Same value in CAD-calibrated tenant (medium=2500) does
     NOT fire."""
-    # Seed an enrichment row marking the IP as FireHOL Level 1 so it shows
-    # up in ip_in_threat_list. blacklisted_ip is a BLOCK rule so Layer 1
-    # would short-circuit — use FireHOL Level 2 instead to keep evaluation
-    # on the Layer 3 path.
-    test_ip = "192.0.2.71"
+    # Seed an enrichment row marking the IP as FireHOL Level 2 so it shows
+    # up in ip_in_threat_list. blacklisted_ip (FireHOL Level 1) is a BLOCK
+    # rule so Layer 1 would short-circuit — use FireHOL Level 2 instead to
+    # keep evaluation on the Layer 3 path.
+    test_ip = FIREHOL_L2_IP
     await db_conn.execute(
         """
         INSERT INTO ip_enrichment (ip, fh_level1, fh_level2, country, lat, lon)
