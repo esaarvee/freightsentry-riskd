@@ -498,8 +498,8 @@ def test_export_payloads_validate_against_booking_request(tmp_path: Path) -> Non
 
 def test_export_seed_determinism(tmp_path: Path) -> None:
     """Two consecutive exports with the same seed produce byte-identical
-    output. This is the contract that lets 7B and 7D measure against
-    the same corpora across runs."""
+    output. This is the contract that lets calibration runs measure
+    against the same corpora across runs."""
     db_path = tmp_path / "fr.db"
     out_a = tmp_path / "a"
     out_b = tmp_path / "b"

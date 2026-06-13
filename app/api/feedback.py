@@ -131,10 +131,11 @@ async def submit_feedback(
         await set_tenant_id(conn, auth.tenant_id)
 
         # Per-request fresh load — kept here for shape consistency with
-        # booking/modification endpoints. No feedback-path consumer in
-        # 4A; 4B+ may consult tenant_config.allowed_currencies if feedback
-        # semantics extend to per-currency thresholds. The underscore
-        # prefix marks the binding as intentionally unused for now.
+        # booking/modification endpoints. No feedback-path consumer
+        # currently; a future consumer may consult
+        # tenant_config.allowed_currencies if feedback semantics extend to
+        # per-currency thresholds. The underscore prefix marks the binding
+        # as intentionally unused for now.
         _tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
         # Tier 1: per-POST idempotency — replay of the same request_id

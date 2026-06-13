@@ -48,8 +48,8 @@ def _build_url() -> str:
     #   1. ALEMBIC_DATABASE_URL — explicit override; local dev + operator-run.
     #   2. DB_MASTER — JSON blob from AWS Secrets Manager (deploy migrate task).
     #   3. DATABASE_URL — legacy fallback (runtime app role; lacks DDL grants
-    #      under post-5D, so this path is only useful pre-5D or for tooling
-    #      that happens to reuse the runtime DSN).
+    #      under the non-superuser runtime role, so this path is only useful
+    #      with a superuser DSN or for tooling that reuses the runtime DSN).
     override = os.environ.get("ALEMBIC_DATABASE_URL")
     if override:
         return _to_psycopg(override)

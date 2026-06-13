@@ -187,7 +187,7 @@ async def evaluate_booking(
         # endpoint folds the deferred observation then (see
         # app/api/feedback.py).
         #
-        # Motivating finding (7D measurement 2026-06-04): case-2
+        # Motivating finding: case-2
         # customer baselines had accumulated 32 distinct ASNs each —
         # including the residential Canadian ISPs the attacks used —
         # because every booking polluted the baseline. The ASN-

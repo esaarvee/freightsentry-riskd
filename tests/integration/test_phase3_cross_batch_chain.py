@@ -71,10 +71,10 @@ async def test_full_chain_booking_modification_feedback_next_booking_triggers_ru
     seeded_api_token: tuple[str, int],
 ) -> None:
     """Full cross-batch chain:
-    1. Booking (3A booking path)
-    2. Modification (3A modification path) — succeeds, persists with
+    1. Booking (booking path)
+    2. Modification (modification path) — succeeds, persists with
        request_type='modification'
-    3. Feedback rejecting the MODIFICATION's request_id (3B feedback
+    3. Feedback rejecting the MODIFICATION's request_id (feedback
        path) — applies; baseline.rejected_email_hmacs += 1,
        ip_stats.r_n += 1, customer flagged_count += 1
     4. Next booking from same customer + same IP + same email triggers
