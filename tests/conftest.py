@@ -1,11 +1,18 @@
 """Shared test fixtures.
 
-Pool initialised once per session; tests share the same asyncpg pool the
-running app would use. Per-test seed cleanup is explicit via the
-`seeded_tenant` / `seeded_api_token` fixtures (commit + delete rather
-than per-test rollback, because the auth dependency in app/auth.py
-acquires a SEPARATE connection from the same pool and won't see
-uncommitted transactional data).
+DB-free `app.state` (ruleset + enricher) is set once per session by the
+autouse `_app_state` fixture — no database needed. The asyncpg pool is
+OPT-IN (the session-scoped `_pool` fixture): it is pulled in transitively
+by every DB-touching fixture (`db_conn`, `client`, `unauth_client`,
+`seeded_*`), so unit tests that don't request a DB fixture never
+initialise it and stay genuinely DB-free (T4). When requested, the pool
+is shared across the session as the running app would use it.
+
+Per-test seed cleanup is explicit via the `seeded_tenant` /
+`seeded_api_token` fixtures (commit + delete rather than per-test
+rollback, because the auth dependency in app/auth.py acquires a SEPARATE
+connection from the same pool and won't see uncommitted transactional
+data).
 """
 
 import json
@@ -140,22 +147,37 @@ def _reset_tenant_config_cache() -> None:
     tenant_config_cache._reset_for_tests()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def _pool() -> AsyncIterator[asyncpg.Pool]:
-    """Initialise the app's asyncpg pool once for the test session.
+@pytest.fixture(scope="session", autouse=True)
+def _app_state() -> None:
+    """DB-free `app.state` setup (ruleset + enricher) for every test.
 
-    Event loop is session-scoped (see pyproject.toml `asyncio_default_*`).
-    `autouse=True` ensures every test has the pool ready even if it
-    doesn't request the fixture explicitly (e.g. direct
-    `require_api_token` calls that hit `get_pool()` internally).
+    Split from the asyncpg pool (T4) so unit tests never require a live
+    database. Tests use httpx ASGITransport which does NOT trigger app
+    lifespan, so we replicate the lifespan's app.state setup here.
+    `init_runtime` reads `rules.yaml` + constructs the Enricher (lazy
+    source load) — no DB connection, so this is safe for DB-free tests.
     """
     settings = get_settings()
-    pool = await init_pool(settings)
-    # Tests use httpx ASGITransport which does NOT trigger app lifespan,
-    # so we replicate the lifespan's app.state setup here.
     ruleset, enricher = init_runtime(settings)
     app.state.ruleset = ruleset
     app.state.enricher = enricher
+
+
+@pytest_asyncio.fixture(scope="session")
+async def _pool() -> AsyncIterator[asyncpg.Pool]:
+    """Opt-in asyncpg pool, initialised once per session.
+
+    T4: NOT autouse. Requested transitively by every DB-touching fixture
+    (`db_conn`, `client`, `unauth_client`, `seeded_*`). Tests that never
+    touch the DB don't pull this in, so the pool is never initialised for
+    them — `app.db._pool` stays None and unit tests are genuinely DB-free.
+    Tests that call `get_pool()` internally without a DB fixture must
+    request `_pool` (or `db_conn`) explicitly.
+
+    Event loop is session-scoped (see pyproject.toml `asyncio_default_*`).
+    """
+    settings = get_settings()
+    pool = await init_pool(settings)
     yield pool
     await close_pool()
 
