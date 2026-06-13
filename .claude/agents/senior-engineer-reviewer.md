@@ -70,6 +70,7 @@ See `.claude/agents/_shared/review-mechanics.md` for the Plan Context check orde
 - No unnecessary abstractions, feature flags, or backwards-compatibility shims
 - Clean imports (ruff handles ordering); no unused variables or dead code
 - Default to writing no comments — only when the *why* is non-obvious
+- **Comment/docstring provenance hygiene** (per `.ai/conventions.md` § Comments): a comment or docstring this commit ADDS or MODIFIES must not introduce a phase/commit/batch/finding ID (`Phase 7C.2`, `PBL C2`, `4B.5`, a commit SHA, `Amendment N FX`) or change-history narrative (previously / changed-from / superseded / `deleted in` / `pre-/post-<batch>`). Comments state the code as it is now; provenance lives in git and the ledgers. This is a must-fix finding (drops below SHIP IT), not a suggestion. Carve-outs (NOT findings): ledger cross-reference pointers (`see .ai/decisions.md §X`), bare forward TODOs without IDs, such tokens inside string-literal VALUES rather than comments, unchanged pre-existing lines, domain terms (`case-3b`, `Layer 2`), and cross-system references (`freight_risk`, `scorer.go`).
 
 ## Output Format
 

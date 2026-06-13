@@ -90,6 +90,7 @@ Single conventions file for the project. Load this for any coding or test-writin
 - Default to writing no comments. Code reads top-to-bottom; names carry meaning.
 - Only add a comment when the *why* is non-obvious: hidden constraint, subtle invariant, workaround for a specific bug.
 - Don't reference the current task, the PR, the operator, or the issue tracker — those rot.
+- No phase/commit/batch/finding IDs and no change-history in comments or docstrings. Describe the code as it is now; provenance lives in git and the ledgers (`.ai/decisions.md`, `docs/history.md`). A pointer like `see .ai/decisions.md §X` is fine; an inlined ID or previously/changed-from/superseded narrative is not. TODOs carry no phase/commit ID.
 
 ### File and directory layout
 

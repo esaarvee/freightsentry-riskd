@@ -58,6 +58,14 @@ Only when `.claude/agents/*.md` is in the diff:
 - Is the scope non-overlapping with sibling reviewers?
 - Are project-specific facts accurate (paths, patterns, recurrence-pattern IDs like C1/D1/P1/P2)?
 
+### 6. Comment/Docstring Provenance Hygiene (per `.ai/conventions.md` § Comments)
+
+Applies to any prose this commit ADDS or MODIFIES in a doc, comment, or docstring. A new or rewritten line that introduces either of the following is a **must-fix finding (REJECT or NEEDS EDITS — never PUBLISH over it)**:
+- A phase/commit/batch/finding ID: `Phase 7C.2`, `PBL C2`, batch tokens like `4B.5` / `6A` / `Pre-4C`, a 7–40-char commit SHA, or an `Amendment N FX` finding-stamp.
+- Change-history narrative: what the code used to do, when/why it changed, what it superseded/replaced/renamed/split/moved-from (`previously`, `originally`, `changed from`, `superseded`, `deleted in`, `as of phase`, `pre-/post-<batch>`).
+
+NOT findings: a ledger cross-reference *pointer* (`see .ai/decisions.md §X`, `docs/history.md`); a bare forward TODO without an ID; a phase/commit ID that already existed on an unchanged line; or such a token inside a string-literal VALUE (assert message, stdout) rather than a comment/docstring. Domain terms (`case-3b`, `Layer 2`) and cross-system references (`freight_risk`, `scorer.go`) are fine. This is the regression guard that keeps the comment-cleanliness pass from un-doing itself on later phased work.
+
 ## Verdict Scale
 
 | Verdict | Meaning |
