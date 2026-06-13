@@ -8,7 +8,7 @@ Covers the endpoint contract surfaces:
 - Cross-tenant isolation: tenant_b token cannot modify tenant_a booking
 - Persisted decision row carries request_type='modification'
 
-Scoring semantics + rule-firing assertions defer to 3A.7 / 3A.8 — this
+Scoring semantics + rule-firing assertions are covered elsewhere — this
 file pins endpoint behaviour, not score outcomes.
 
 Note on idempotency assertions: decisions.score is persisted as
@@ -206,7 +206,7 @@ async def test_modification_of_modification_returns_422(
 ) -> None:
     """A modification whose original_request_id resolves to a prior
     modification (rather than a booking) must be rejected with 422.
-    Phase 3 scope explicitly excludes modify-of-modification."""
+    Scope explicitly excludes modify-of-modification."""
     token, _ = seeded_api_token
     await unauth_client.post(_BOOKING_PATH, json=_booking_payload(), headers=_headers(token))
     first_mod = await unauth_client.post(
@@ -257,7 +257,7 @@ async def test_modification_reusing_booking_request_id_now_succeeds(
     seeded_api_token: tuple[str, int],
     db_conn: asyncpg.Connection,
 ) -> None:
-    """Per 5A.7, the UNIQUE is `(tenant_id, request_type, request_id)`
+    """The UNIQUE is `(tenant_id, request_type, request_id)`
     (migration 0007 / index ux_decisions_tenant_request_type). A
     modification whose request_id matches a prior booking's request_id
     now succeeds — they occupy separate namespaces. Asserts two distinct

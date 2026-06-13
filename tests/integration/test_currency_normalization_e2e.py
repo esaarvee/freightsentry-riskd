@@ -1,21 +1,22 @@
-"""End-to-end currency normalization tests (4B.6).
+"""End-to-end currency normalization tests.
 
 Verifies:
-1. CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) tenants score identically pre/post 4B.5 (the regression
-   invariance is also covered by the existing case-1/case-2 tests).
+1. CAD-default tenants score identically before and after the rule
+   rewrite (the regression invariance is also covered by the existing
+   case-1/case-2 tests).
 2. Multi-currency tenants with calibrated value_caps produce
    currency-correct rule firing.
 3. Cross-tenant currency drift — each request loads its own tenant's
    value_caps.
 4. Modification rule 1 (modification_within_30_min_value_increase) is
    currency-independent (uses modification_magnitude, a fraction).
-5. Allowed-but-unconfigured currency falls back to CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) with a
+5. Allowed-but-unconfigured currency falls back to CAD-default with a
    warning.
 
 NOTE: case-1 + case-2 regression assertions live in
 tests/integration/test_case_1_detection.py and tests/integration/
-test_case_2.py — those exercise CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) tenants and the explicit
-regression check is verified via the full-suite pass at the end of 4B.5.
+test_case_2.py — those exercise CAD-default tenants and the explicit
+regression check is verified via the full-suite pass.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ async def _set_tenant_config(
         json.dumps(config),
         tenant_id,
     )
-    # 5B cache invalidation: the tenants.config UPDATE is otherwise
+    # Cache invalidation: the tenants.config UPDATE is otherwise
     # invisible to the endpoint for up to 60s within a single test run.
     tenant_config_cache._reset_for_tests()
 
@@ -90,7 +91,7 @@ async def _post_booking(
 async def test_usd_high_value_fires_absolute_high_value(
     seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) tenant + value=15000 → absolute_high_value fires (threshold 10000)."""
+    """CAD-default tenant + value=15000 → absolute_high_value fires (threshold 10000)."""
     resp = await _post_booking(
         unauth_client,
         seeded_tenant,
@@ -165,16 +166,16 @@ async def test_cad_value_above_usd_high_below_cad_high_does_not_fire(
 async def test_cross_tenant_value_caps_isolation(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """tenant_a (CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default), high=10000) and tenant_b (USD-elevated,
+    """tenant_a (CAD-default, high=10000) and tenant_b (USD-elevated,
     high=50000) on identical 11000-value bookings: tenant_a fires
     absolute_high_value, tenant_b does NOT. Confirms per-request load."""
     # tenant_b with USD overridden upward. create_extra_tenant handles
     # tenant insert + app.tenant_id wiring + cleanup; we patch the config
     # after creation since the helper doesn't accept a config kwarg.
     async with create_extra_tenant(db_conn, "tenant-b-cn") as other_tenant_id:
-        # Phase 6B: UPDATE replaces config entirely — include
+        # UPDATE replaces config entirely — include
         # allowed_currencies = ["USD", "CAD"] so the test's USD-value-
-        # caps override remains effective (otherwise the post-6B
+        # caps override remains effective (otherwise the project
         # default ["CAD"] would reject the USD payload).
         await db_conn.execute(
             "UPDATE tenants SET config = $1::jsonb WHERE id = $2",
@@ -220,7 +221,7 @@ async def test_allowed_currency_without_caps_falls_back_to_usd_default_with_warn
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Tenant allows JPY but didn't configure value_caps["JPY"]. Resolver falls
-    back to CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) thresholds AND emits the
+    back to CAD-default thresholds AND emits the
     `tenant_config.value_caps.fallback` warning."""
     await _set_tenant_config(db_conn, seeded_tenant, {"allowed_currencies": ["USD", "JPY"]})
     with patch("app.tenant_config._log") as mock_log:
@@ -261,7 +262,7 @@ async def test_multi_rule_composition_usd_at_2500(
 async def test_threat_intel_high_value_uses_medium_threshold_per_currency(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """CAD-default (Phase 6B; numeric thresholds unchanged from prior USD-default) + value=2500 + ip in threat list → threat_intel_high_value
+    """CAD-default + value=2500 + ip in threat list → threat_intel_high_value
     fires (medium=2000). Same value in CAD-calibrated tenant (medium=2500) does
     NOT fire."""
     # Seed an enrichment row marking the IP as FireHOL Level 2 so it shows

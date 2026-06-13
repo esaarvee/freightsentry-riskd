@@ -1,17 +1,17 @@
-"""Integration tests for TenantConfig load wiring across endpoints (4A.6).
+"""Integration tests for TenantConfig load wiring across endpoints.
 
 Confirms that every endpoint loads its own tenant's config per request,
 cross-tenant isolation holds, and per-request fresh load returns
 updated config between calls. Stored-corruption test verifies the
-endpoint's failure mode when JSONB is invalid (no caching layer in
-Phase 4 means subsequent retries also fail until the bad config is
+endpoint's failure mode when JSONB is invalid (no caching layer at
+this layer means subsequent retries also fail until the bad config is
 fixed).
 
-5B note: the spy-based tests below patch `load_tenant_config_cached`
+Note: the spy-based tests below patch `load_tenant_config_cached`
 directly with a spy that delegates to the underlying
 `load_tenant_config`. This BYPASSES the 60s TTL cache so the original
 "endpoint-loads-config" invariants still verify under each request.
-Cache-staleness behavior (production contract) is covered by 5B unit
+Cache-staleness behavior (production contract) is covered by the unit
 tests in `tests/unit/test_tenant_config_cache.py`.
 """
 
@@ -71,7 +71,7 @@ async def test_seeded_config_tenant_booking_succeeds(
 ) -> None:
     """Booking endpoint loads the seeded_tenant config successfully.
 
-    Phase 6B: seeded_tenant fixture now seeds `allowed_currencies =
+    The seeded_tenant fixture seeds `allowed_currencies =
     ["USD", "CAD"]` (multi-currency convenience for the broader
     integration suite). This test asserts that the loader returns
     that exact list, plus the all-None overrides for the remaining
@@ -87,9 +87,9 @@ async def test_seeded_config_tenant_booking_succeeds(
 async def test_custom_config_tenant_booking_succeeds(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Custom override config doesn't break the endpoint (4A doesn't consume yet).
+    """Custom override config doesn't break the endpoint (not consumed yet).
 
-    Phase 6B: seeded_tenant fixture seeds multi-currency by default,
+    The seeded_tenant fixture seeds multi-currency by default,
     so the UPDATE here must preserve allowed_currencies (otherwise the
     USD booking payload gets rejected against the override config)."""
     await db_conn.execute(
@@ -116,7 +116,7 @@ async def test_load_tenant_config_called_with_each_request_tenant_id(
 ) -> None:
     """Patch the loader, alternate tenants, confirm correct tenant_id passed each time."""
 
-    # Create a second tenant (Phase 6B: multi-currency config to match
+    # Create a second tenant (multi-currency config to match
     # the seeded_tenant fixture default).
     other_tenant_id: int = await db_conn.fetchval(
         'INSERT INTO tenants (name, config) VALUES ($1, \'{"allowed_currencies": ["USD", "CAD"]}\'::jsonb) RETURNING id',
@@ -153,11 +153,11 @@ async def test_per_request_fresh_load_reflects_db_update(
 ) -> None:
     """Update tenants.config between two requests; second load reflects
     change. The spy patches `load_tenant_config_cached` and delegates to
-    the underlying `load_tenant_config`, BYPASSING the 60s TTL cache
-    (5B). In production, the second request would hit the cache and
+    the underlying `load_tenant_config`, BYPASSING the 60s TTL cache.
+    In production, the second request would hit the cache and
     return the stale config until the 60s window expires. This test
     verifies the underlying loader invariant; cache-staleness behavior
-    is covered separately by 5B unit tests."""
+    is covered separately by the cache unit tests."""
     captured: list[TenantConfig] = []
     real_loader = tenant_config_module.load_tenant_config
 
@@ -225,7 +225,7 @@ async def test_modification_endpoint_loads_tenant_config(
 async def test_feedback_endpoint_loads_tenant_config(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
-    """Feedback endpoint loads tenant_config (parked variable in 4A)."""
+    """Feedback endpoint loads tenant_config (currently a parked variable)."""
     seen: list[int] = []
     real_loader = tenant_config_module.load_tenant_config
 
@@ -258,12 +258,12 @@ async def test_invalid_stored_jsonb_propagates_validationerror(
     db_conn: asyncpg.Connection, seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Stored config corruption (value_caps missing tier keys) surfaces as
-    pydantic.ValidationError. Phase 4A intentionally has no try/except
-    around the loader — the error propagates through the ASGI transport.
-    Phase 4D admin endpoints + Phase 5 hardening may translate this to a
-    500 response with a structured log entry; for 4A the propagation IS
-    the documented failure mode (stored-data corruption is a
-    configuration error, not a client error)."""
+    pydantic.ValidationError. The loader intentionally has no try/except
+    around it — the error propagates through the ASGI transport.
+    Future hardening may translate this to a 500 response with a
+    structured log entry; today the propagation IS the documented
+    failure mode (stored-data corruption is a configuration error,
+    not a client error)."""
     from pydantic import ValidationError
 
     await db_conn.execute(

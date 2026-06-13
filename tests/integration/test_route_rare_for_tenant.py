@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.8 derive_route_rarity helper.
+"""Unit tests for the derive_route_rarity helper.
 
 Pure-DB exercise against the project's runtime role (riskd_app_login)
 using the seeded_tenant fixture. Covers:

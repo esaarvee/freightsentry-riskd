@@ -24,8 +24,7 @@ golden file:
           print('\\n'.join(sorted(k)))" \\
       > tests/golden/schema.sql
 
-Established in Phase 8A.0 as the equivalence anchor for the 8A.1
-migration squash (11 → 5).
+Serves as the equivalence anchor for the migration squash (11 → 5).
 """
 
 from __future__ import annotations

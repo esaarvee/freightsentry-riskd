@@ -1,7 +1,8 @@
-"""POST /api/v1/shipments/booking/evaluate — stub endpoint (1C.1).
+"""POST /api/v1/shipments/booking/evaluate — stub endpoint.
 
-Phase 1 returns ALLOW 0.0 for every well-formed payload. These tests cover:
-- Happy path returns 200 ALLOW 0.0
+A well-formed payload from a brand-new customer returns ALLOW with the
+account_prior baseline score (0.10). These tests cover:
+- Happy path returns 200 ALLOW
 - Payload validation (422 on invalid input, IPv6 rejection)
 - Idempotency (duplicate request_id returns the same response)
 - Implicit registration (first booking creates customer / enterprise / user)
@@ -43,9 +44,9 @@ async def test_valid_booking_returns_allow_0_0(
     assert response.status_code == 200
     body = response.json()
     assert body["decision"] == "ALLOW"
-    # Phase 2: brand-new customer's first booking gets account_prior = 0.10
+    # A brand-new customer's first booking gets account_prior = 0.10
     # (base_prior = MAX_NEW_ACCOUNT * (1 - maturity=0) = 0.10) with no
-    # Layer 3 rules firing. Pre-Phase-2 this asserted 0.0.
+    # Layer 3 rules firing.
     assert body["score"] == pytest.approx(0.10)
     assert body["classification"] == "GREEN"
     assert body["risk_level"] == "LOW"
@@ -136,8 +137,8 @@ async def test_duplicate_request_id_returns_idempotent(
     assert r2.status_code == 200
     # Decision content matches; score may differ by float-precision after
     # the DB round-trip (NUMERIC column rounds `0.09999999999999998` to
-    # `0.1`). Phase 2's account_prior of 0.10 surfaces the precision
-    # boundary the Phase 1 clean-baseline 0.0 case never reached.
+    # `0.1`). The account_prior of 0.10 surfaces the precision
+    # boundary a clean-baseline 0.0 case would never reach.
     r1_body, r2_body = r1.json(), r2.json()
     assert r1_body["decision"] == r2_body["decision"]
     assert r1_body["classification"] == r2_body["classification"]

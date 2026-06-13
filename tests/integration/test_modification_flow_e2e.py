@@ -1,8 +1,9 @@
-"""End-to-end modification flow tests — scoring outcomes (3A.8).
+"""End-to-end modification flow tests — scoring outcomes.
 
-3A.6 covers the modification endpoint contract surfaces (envelope shape,
-idempotency, 404/422/409, cross-tenant). This file covers the SCORING
-outcomes: that the 8 modification rules from 3A.7 fire correctly when
+The modification endpoint contract surfaces (envelope shape,
+idempotency, 404/422/409, cross-tenant) are covered elsewhere. This
+file covers the SCORING outcomes: that the 8 modification rules fire
+correctly when
 the modification endpoint receives realistic payloads, and that the
 booking endpoint continues to behave as before (no regression from the
 booking-path defaults BOOKING_PATH_MODIFICATION_DEFAULTS).
@@ -425,7 +426,7 @@ async def test_modification_velocity_isolated_by_tenant(
             triggered_a = set(mod_a.json()["triggered_rules"])
             assert "modification_high_velocity_1h" not in triggered_a, triggered_a
 
-        # Phase 5D.2: create_tenant_with_token's finally leaves
+        # create_tenant_with_token's finally leaves
         # app.tenant_id at tenant_b; restore tenant_a so the outer
         # seeded_tenant fixture teardown can DELETE its rows under RLS.
         await set_test_tenant_id(db_conn, tenant_a)

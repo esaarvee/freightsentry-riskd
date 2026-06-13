@@ -1,4 +1,4 @@
-"""Phase 2D.3 — Layer 2 + maturity downweight integration matrix.
+"""Layer 2 + maturity downweight integration matrix.
 
 These tests verify the 3-layer scoring formula composes correctly when
 posted through the booking endpoint. The unit tests in
@@ -279,8 +279,7 @@ async def test_lock_in_rule_fires_against_locked_customer_non_cloud_api(
     """A customer with cloud_share > 0.95 AND api_share > 0.95 AND
     value_n >= 20 is "locked" to cloud-API infrastructure. A subsequent
     API booking from a non-cloud, non-datacenter IP should trip
-    cloud_api_customer_deviation_iptype (the 5-clause case-2 detector
-    from 2C.2)."""
+    cloud_api_customer_deviation_iptype (the 5-clause case-2 detector)."""
     token, tenant_id = seeded_api_token
     non_cloud_ip = "198.51.100.77"
     await seed_customer_with_baseline(

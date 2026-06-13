@@ -1,13 +1,13 @@
-"""End-to-end feedback chain integration tests (3B.6).
+"""End-to-end feedback chain integration tests.
 
 The canonical chain: booking -> feedback -> next-booking-triggers-rule.
-These tests demonstrate that the 3B.5 previously-rejected rules
-actually fire when the feedback endpoint (3B.3) has marked the
-relevant dimensions, with the 3B.4 build_context derivations carrying
+These tests demonstrate that the previously-rejected rules
+actually fire when the feedback endpoint has marked the
+relevant dimensions, with the build_context derivations carrying
 the signal into the next evaluation.
 
-3B.3 integration tests cover the endpoint contract surfaces;
-this file covers the END-TO-END activation chain across two POSTs.
+The feedback-endpoint integration tests cover the endpoint contract
+surfaces; this file covers the END-TO-END activation chain across two POSTs.
 """
 
 from __future__ import annotations
@@ -310,7 +310,7 @@ async def test_cross_tenant_rejection_does_not_leak(
             triggered = set(b_b.json()["triggered_rules"])
             assert "email_previously_rejected_for_customer" not in triggered, triggered
 
-        # Phase 5D.2: create_tenant_with_token's finally leaves
+        # create_tenant_with_token's finally leaves
         # app.tenant_id at tenant_b; restore tenant_a so the outer
         # seeded_tenant fixture teardown can DELETE its rows under RLS.
         await set_test_tenant_id(db_conn, tenant_a)

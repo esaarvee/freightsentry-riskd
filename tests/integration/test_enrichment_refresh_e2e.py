@@ -1,4 +1,4 @@
-"""End-to-end integration tests for Pattern B-lite refresh (PBL C5).
+"""End-to-end integration tests for Pattern B-lite refresh.
 
 Drives a full refresh tick against mocked `httpx.MockTransport` returning
 C0 fixture bytes for every upstream URL pattern. Asserts:

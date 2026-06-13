@@ -1,10 +1,11 @@
-"""Comprehensive cross-tenant integration test sweep (3C.2).
+"""Comprehensive cross-tenant integration test sweep.
 
 Verifies app-layer tenant scoping at every endpoint. The runtime app
-connects as the postgres superuser (RLS dormant per STATUS row 1B.2),
+connects as the postgres superuser (RLS dormant per .claude/STATUS.md),
 so this file exercises the explicit WHERE tenant_id = $N filters that
-are the ACTIVE isolation today. The 3C.3 non-superuser-role test
-exercises RLS enforcement under the Phase-5-ready role.
+are the ACTIVE isolation today. The non-superuser-role test
+(test_rls_enforcement_under_riskd_app.py) exercises RLS enforcement
+under the runtime role.
 
 Scenarios are organized by endpoint and dimension. Each test seeds two
 tenants via create_tenant_with_token, exercises a cross-tenant query

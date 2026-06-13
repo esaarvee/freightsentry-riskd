@@ -578,3 +578,17 @@ code change, out of scope for a comment/docstring-text pass). The _PHASE_2B_ADDI
 constant name is a related out-of-scope phase-token-in-identifier case.
 Suggested action: rename to a count-agnostic, phase-agnostic identifier (e.g.
 test_allowed_context_fields_present / _expected_count) in a separate code commit.
+
+## 2026-06-13 — stale migration numbers (0007/0008/0009/0011) in integration test comments
+
+Discovered by: senior + doc reviewers during comment-cleanliness pass (Commit 8)
+Location: tests/integration/test_rls_enforcement_under_riskd_app.py, test_modification_endpoint.py,
+test_booking_e2e.py (comments referencing migrations 0007/0008/0009/0011)
+Severity: low
+Observation: Several integration-test comments cite migration numbers 0007/0008/0009/0011, but
+the chain was squashed 11->5, so only 0001-0005 exist (riskd_app_login is created in 0005, not
+0008; RLS-on-auth was never created so there is no 0009-drop). These numbers are present on both
+sides of the diff (pre-existing, not introduced by the comment-cleanliness pass) and correcting
+them is a factual-accuracy fix of a different class than ID/history removal — out of scope here.
+Suggested action: update the comments to reference the squashed migration numbers (0001-0005), or
+describe by content, in a follow-up.

@@ -1,14 +1,13 @@
 """Cross-tenant isolation tests for the recipient-overlap SQL boundary.
 
-The recipient-overlap query (`count_recipient_distinct_customers_30d` in
-2B.2) counts distinct customers within the same tenant shipping to the
+The recipient-overlap query (`count_recipient_distinct_customers_30d`)
+counts distinct customers within the same tenant shipping to the
 same destination HMAC. The `tenant_id = $1` filter is the security
 boundary; without it, fraud-pattern information leaks across tenants.
 
-Phase 1's RLS policies are dormant under the superuser connection (see
-.claude/STATUS.md 1B.2 row). Until Phase 5 introduces a non-superuser
-login role, app-layer `tenant_id` filtering is the active control —
-these tests verify the boundary holds at the query level.
+The RLS policies are dormant under the superuser connection (see
+.claude/STATUS.md). Where app-layer `tenant_id` filtering is the active
+control, these tests verify the boundary holds at the query level.
 """
 
 from datetime import UTC, datetime
@@ -105,7 +104,7 @@ async def test_recipient_count_query_isolated_by_tenant(
     in tenant_b. A COUNT(DISTINCT customer_id) for tenant_a on the HMAC
     of D must return 2 (NOT 4) — the tenant_id filter excludes the
     other tenant's rows. This is the security-load-bearing test for the
-    2B.2 recipient-overlap query.
+    recipient-overlap query.
     """
     token_a, tenant_a = seeded_api_token
     headers_a = {"Authorization": f"Bearer {token_a}"}
@@ -135,8 +134,8 @@ async def test_recipient_count_query_isolated_by_tenant(
         dest_hmac = hmac_hex(shared_destination, secret)
 
         # The SECURITY-LOAD-BEARING assertion: tenant-scoped query returns
-        # ONLY tenant_a's customers (2), not the combined set (4). Phase
-        # 5D.2: must switch session app.tenant_id to tenant_a so RLS lets
+        # ONLY tenant_a's customers (2), not the combined set (4). Must
+        # switch session app.tenant_id to tenant_a so RLS lets
         # tenant_a's shipments be read; the tenant_id=$1 SQL filter is
         # still the security boundary being asserted.
         async with with_test_tenant_context(db_conn, tenant_a):
@@ -165,7 +164,7 @@ async def test_recipient_count_query_isolated_by_tenant(
 
         # The combined query (no tenant filter): under RLS, the visible row
         # set is whichever tenant app.tenant_id currently scopes to (here
-        # tenant_b → 2 rows). The 5D.2 RLS layer makes the
+        # tenant_b → 2 rows). The RLS layer makes the
         # "tenant-unscoped" sanity probe redundant — the security boundary
         # is now enforced by the policy, not only the SQL filter — so the
         # sanity check is dropped in favour of asserting both tenant

@@ -1,4 +1,4 @@
-"""E2E integration tests for scripts/tenant_onboard.py (4A.6).
+"""E2E integration tests for scripts/tenant_onboard.py.
 
 Drives the script's `_onboard` async entry directly (rather than via
 subprocess) so we can share the existing asyncpg pool and DB cleanup
@@ -167,7 +167,7 @@ async def test_rotate_token_revokes_prior_token(
         first_token = _extract_token(first.getvalue())
         first_tenant_id = _extract_tenant_id(first.getvalue())
 
-        # Rotate — prior token must be REVOKED (Phase 4A.5 cycle-2 fix).
+        # Rotate — prior token must be REVOKED.
         buf2 = io.StringIO()
         with redirect_stdout(buf2):
             await _onboard(

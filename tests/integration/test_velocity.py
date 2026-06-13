@@ -268,7 +268,7 @@ async def test_velocity_scoped_to_tenant(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2B.2 helpers: distinct-IP diversity + recipient cross-customer overlap
+# Helpers: distinct-IP diversity + recipient cross-customer overlap
 # ---------------------------------------------------------------------------
 
 
@@ -544,7 +544,7 @@ async def test_count_recipient_distinct_customers_30d_excludes_window(
 
 
 # ============================================================================
-# Modification velocity (Phase 3A.5) — counts decisions, not shipments
+# Modification velocity — counts decisions, not shipments
 # ============================================================================
 
 

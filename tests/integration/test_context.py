@@ -1,4 +1,4 @@
-"""Integration tests for build_context — exercises the Phase 2B
+"""Integration tests for build_context — exercises the
 derivations against the production code path.
 
 Each test seeds a CustomerBaseline directly into the DB with controlled
@@ -6,7 +6,7 @@ state (cloud_share / api_share / value_n / last_booking_*), constructs
 the BookingRequest + customer_row inputs build_context expects, then
 calls build_context() and asserts on the returned ctx_env dict.
 
-This is the ONLY layer where the Phase 2B threshold logic is verified
+This is the ONLY layer where the threshold logic is verified
 against the production code: if a future commit weakens `> 0.95` to
 `>= 0.95` in app/context.py, the threshold tests below fail because
 they assert ctx_env values, not inline-recomputed expressions.
@@ -159,7 +159,7 @@ async def _fetch_customer_row(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2B field-set pin — call the real build_context and assert keys
+# Field-set pin — call the real build_context and assert keys
 # ---------------------------------------------------------------------------
 
 
@@ -167,9 +167,9 @@ async def test_build_context_returns_all_expected_fields(
     db_conn: asyncpg.Connection, seeded_tenant: int
 ) -> None:
     """Pinning test: every expected Context field is produced by
-    build_context. The expected set is anchored against the historical
-    Phase 2B addition group plus subsequent additions; if a field is
-    dropped in app/context.py, the intersection assertion fails."""
+    build_context. The expected set is anchored against the full
+    field group; if a field is dropped in app/context.py, the
+    intersection assertion fails."""
     cust_id = await _seed_customer(db_conn, seeded_tenant, "phase2b-pin")
     await _seed_baseline(db_conn, seeded_tenant, cust_id)
     row = await _fetch_customer_row(db_conn, seeded_tenant, cust_id)

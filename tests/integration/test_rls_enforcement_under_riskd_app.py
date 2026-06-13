@@ -1,23 +1,17 @@
-"""Non-superuser RLS enforcement verification (3C.3, refactored 5D.2).
+"""Non-superuser RLS enforcement verification.
 
 This file is the canary that proves `tenant_isolation` policies
 actually enforce when the connection is non-superuser with
 `app.tenant_id` set.
 
-5D.2 mechanism: the `riskd_app_login` role exists per Phase 5D.1
-migration 0008 (LOGIN INHERIT, GRANT riskd_app) and is the runtime
-DATABASE_URL identity for the app. Tests open a fresh asyncpg
-connection as that role using the same parse-from-settings approach
-production endpoints use — no temporary-grant dance, no role-state
-mutation, xdist-safe (no @pytest.mark.serial needed any more).
+Mechanism: the `riskd_app_login` role exists per migration 0008
+(LOGIN INHERIT, GRANT riskd_app) and is the runtime DATABASE_URL
+identity for the app. Tests open a fresh asyncpg connection as that
+role using the same parse-from-settings approach production endpoints
+use — no temporary-grant dance, no role-state mutation, xdist-safe
+(no @pytest.mark.serial needed).
 
-The fixture is unchanged in signature and yields a `riskd_app_login`
-connection; tests still use it the same way.
-
-Pre-5D.2 history: the fixture used to grant LOGIN on the legacy
-`riskd_app` role temporarily and revoke on teardown, because that
-role was NOLOGIN per Phase 1. 5D.1's `riskd_app_login` makes the
-dance obsolete.
+The fixture yields a `riskd_app_login` connection.
 """
 
 from __future__ import annotations
@@ -41,7 +35,7 @@ async def riskd_app_conn() -> AsyncIterator[asyncpg.Connection]:
     """Yield a fresh asyncpg connection as `riskd_app_login`.
 
     Connection parameters: parse host/port/database from
-    `settings.database_url` (which post-5D.2 already points at
+    `settings.database_url` (which already points at
     `riskd_app_login`), so the test connects under the exact runtime
     identity. Password is the local-dev convention from migration
     0008 (`riskd_app_login_dev`). The connection is closed on
@@ -78,7 +72,7 @@ async def two_tenants_with_shipments(
     )
     try:
         for tenant_id in (tenant_a, tenant_b):
-            # 5D.2: switch session app.tenant_id BEFORE the dependent
+            # Switch session app.tenant_id BEFORE the dependent
             # inserts so RLS WITH CHECK accepts them. The fixture
             # connection (db_conn) carries state across iterations,
             # so we explicitly switch each loop.
@@ -158,7 +152,7 @@ async def two_tenants_with_shipments(
             )
         yield tenant_a, tenant_b
     finally:
-        # 5D.2: cleanup DELETEs must run under the tenant's RLS view.
+        # Cleanup DELETEs must run under the tenant's RLS view.
         await set_test_tenant_id(db_conn, tenant_a)
         await _cleanup_tenant(db_conn, tenant_a)
         await set_test_tenant_id(db_conn, tenant_b)
@@ -258,13 +252,11 @@ async def test_rls_blocks_unset_tenant_context(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4D admin endpoint extension — RLS enforces against the SQL patterns
-# the admin endpoints execute. The canary role today is `riskd_app` (NOLOGIN,
-# granted LOGIN per test by the fixture); Phase 5 will create
-# `riskd_app_login` with the same membership, and these tests will pin
-# tenant-isolation invariants under that transition. The FastAPI-layer
-# enforcement matrix lives in tests/integration/test_admin_endpoints.py
-# (which uses dependency-override).
+# Admin endpoint extension — RLS enforces against the SQL patterns
+# the admin endpoints execute. The canary role is `riskd_app_login`, the
+# runtime identity, and these tests pin tenant-isolation invariants under
+# it. The FastAPI-layer enforcement matrix lives in
+# tests/integration/test_admin_endpoints.py (which uses dependency-override).
 # ---------------------------------------------------------------------------
 
 
@@ -349,7 +341,7 @@ async def test_rls_admin_baseline_lookup_scoped_by_tenant(
     """
     tenant_a, tenant_b = two_tenants_with_shipments
     # Resolve both tenants' customer_id values under the db_conn (which
-    # is also under RLS post-5D.2). Switch app.tenant_id per lookup so
+    # is also under RLS). Switch app.tenant_id per lookup so
     # each tenant's row is visible.
     await set_test_tenant_id(db_conn, tenant_b)
     tenant_b_customer_id: int = await db_conn.fetchval(

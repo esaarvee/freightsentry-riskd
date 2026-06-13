@@ -1,7 +1,7 @@
-"""Request-time currency validation tests (4B.3).
+"""Request-time currency validation tests.
 
 Covers both booking and modification endpoints — Pydantic enforces ISO 4217
-shape at the model layer; 4B.3 adds allowed-list enforcement against
+shape at the model layer; allowed-list enforcement runs against
 tenant_config.allowed_currencies. 9 tests total (5 booking + 4 modification).
 """
 
@@ -61,7 +61,7 @@ async def _set_allowed_currencies(
         json.dumps({"allowed_currencies": currencies}),
         tenant_id,
     )
-    # 5B cache invalidation: the tenants.config UPDATE is otherwise
+    # Cache invalidation: the tenants.config UPDATE is otherwise
     # invisible to the endpoint for up to 60s within a single test run.
     tenant_config_cache._reset_for_tests()
 
@@ -75,11 +75,10 @@ async def test_booking_no_currency_field_succeeds_against_multi_currency_default
     seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Backward compat: existing payloads without `currency` default to USD
-    at the Pydantic layer. Phase 6B: the seeded_tenant fixture seeds
+    at the Pydantic layer. The seeded_tenant fixture seeds
     allowed_currencies=["USD","CAD"] so the USD payload default is in the
-    allowed list. 200. (Pre-6B this test exercised "USD-only default
-    tenant accepts USD payload"; post-6B the project-default tenant
-    config is CAD-only but the fixture preserves USD acceptance.)"""
+    allowed list. 200. (The project-default tenant config is CAD-only,
+    but the fixture preserves USD acceptance.)"""
     app.dependency_overrides[require_api_token] = lambda: AuthContext(
         tenant_id=seeded_tenant, role="tenant"
     )
@@ -99,13 +98,11 @@ async def test_booking_cad_only_tenant_eur_currency_rejected_with_400(
     """A tenant configured single-currency (CAD only) rejects a non-allowed
     payload currency (EUR) with 400 and the allowed-list in the message.
 
-    Phase 6B notes: the seeded_tenant fixture now seeds multi-currency
+    The seeded_tenant fixture seeds multi-currency
     (USD + CAD) for the broader integration suite. This test explicitly
     overrides to CAD-only via _set_allowed_currencies to exercise the
-    single-currency-tenant-rejects-non-allowed path. Pre-6B the same
-    semantics held with USD as the default-only currency rejecting CAD;
-    post-6B the symmetric test is CAD-only rejecting EUR (a currency the
-    seeded_tenant never includes)."""
+    single-currency-tenant-rejects-non-allowed path: a CAD-only tenant
+    rejects EUR (a currency the seeded_tenant never includes)."""
     await _set_allowed_currencies(db_conn, seeded_tenant, ["CAD"])
     app.dependency_overrides[require_api_token] = lambda: AuthContext(
         tenant_id=seeded_tenant, role="tenant"
@@ -162,8 +159,7 @@ async def test_booking_explicit_usd_against_multi_currency_default_tenant_succee
     seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Explicit currency=USD works against the seeded_tenant fixture
-    (Phase 6B: fixture seeds USD+CAD; pre-6B the same test exercised
-    the USD-only default-tenant happy path)."""
+    (which seeds USD+CAD)."""
     app.dependency_overrides[require_api_token] = lambda: AuthContext(
         tenant_id=seeded_tenant, role="tenant"
     )
@@ -186,7 +182,7 @@ async def test_modification_no_currency_succeeds_against_multi_currency_default_
     seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Modification payload without `currency` defaults to USD at the
-    Pydantic layer; the seeded_tenant fixture (Phase 6B: USD+CAD) allows
+    Pydantic layer; the seeded_tenant fixture (USD+CAD) allows
     USD. 404 because original booking doesn't exist (loader + currency
     check pass first)."""
     app.dependency_overrides[require_api_token] = lambda: AuthContext(
@@ -248,7 +244,7 @@ async def test_modification_explicit_usd_succeeds(
     seeded_tenant: int, unauth_client: AsyncClient
 ) -> None:
     """Explicit currency=USD works against the seeded_tenant fixture
-    (Phase 6B: USD+CAD). 404 for missing original (currency check
+    (USD+CAD). 404 for missing original (currency check
     passes, loader path takes over)."""
     app.dependency_overrides[require_api_token] = lambda: AuthContext(
         tenant_id=seeded_tenant, role="tenant"

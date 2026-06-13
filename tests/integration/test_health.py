@@ -35,7 +35,7 @@ async def test_health_enrichment_degraded_on_cold_start(
     unauth_client: AsyncClient,
 ) -> None:
     """No sources have refreshed and none are seeded from disk →
-    enrichment="degraded". HTTP 200 stays (per Amendment 1 F2: degraded
+    enrichment="degraded". HTTP 200 stays (degraded
     does NOT affect ALB rotation)."""
     response = await unauth_client.get("/health/")
     assert response.status_code == 200

@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.7 tenant_route_baselines update path.
+"""Unit tests for the tenant_route_baselines update path.
 
 Pure-DB exercise of update_tenant_route_baseline against the project's
 runtime role (riskd_app_login). Covers:
@@ -8,8 +8,7 @@ runtime role (riskd_app_login). Covers:
 - distinct triples insert as distinct rows
 
 Uses the seeded_tenant fixture for tenant lifecycle + app.tenant_id +
-cleanup (which now includes tenant_route_baselines per Phase 6A.6
-cleanup-list addition).
+cleanup (which includes tenant_route_baselines).
 """
 
 from __future__ import annotations

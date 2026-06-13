@@ -1,4 +1,4 @@
-"""Integration tests for Phase 6A.7 — end-to-end booking → tenant_route_baselines.
+"""Integration tests for end-to-end booking → tenant_route_baselines.
 
 Exercises the full /api/v1/shipments/booking/evaluate path with structured
 country data + asserts the population baseline row materializes with the

@@ -2,7 +2,7 @@
 
 These tests exercise the full request → upsert → persist flow against
 the JSON payload fixtures in tests/fixtures/payloads/. They cover the
-gaps test-reviewer flagged on 1C.1 (repeat-booking COALESCE,
+gaps test-reviewer flagged (repeat-booking COALESCE,
 total_shipments increment beyond 1, value=0 boundary) plus cross-tenant
 isolation and RLS-policy structural checks.
 """
@@ -41,8 +41,8 @@ async def test_minimal_payload_persists_required_rows(
     # Decision-outcome assertions removed: this test verifies persistence
     # of the customer/user/shipment/decision rows. The booking_minimal
     # fixture (channel=api, non-cloud IP, brand-new customer) deterministic-
-    # ally trips Phase 2C.3 rules and lands in REVIEW; a dedicated decision-
-    # band integration test belongs alongside 2D threshold-tuning work,
+    # ally trips lock-in rules and lands in REVIEW; a dedicated decision-
+    # band integration test belongs alongside threshold-tuning work,
     # not here. The status_code check above confirms the endpoint accepted
     # the payload.
 
@@ -123,9 +123,8 @@ async def test_full_payload_does_not_persist_contact_fields(
     seeded_api_token: tuple[str, int],
     load_payload: Callable[[str], dict[str, Any]],
 ) -> None:
-    """Phase 1: contact fields (all 4 — origin/destination email + phone)
+    """Contact fields (all 4 — origin/destination email + phone) are
     accepted by Pydantic but neither HMAC'd nor persisted anywhere.
-    HMAC-at-ingress + baseline writes land in 1D.1 + 1D.3.
 
     This is defense-in-depth against future PII leaks — scans every
     text/JSONB column on tenant-scoped tables that touched this request,
@@ -323,8 +322,8 @@ async def test_cross_tenant_external_id_collision(
 
 
 # ---------------------------------------------------------------------------
-# RLS policy structural check (enforcement is dormant under Phase 1 superuser
-# per .claude/STATUS.md; Phase 5 role transition activates it).
+# RLS policy structural check (enforcement is dormant under the superuser
+# connection per .claude/STATUS.md; the runtime-role transition activates it).
 # ---------------------------------------------------------------------------
 
 
@@ -335,7 +334,7 @@ async def test_rls_policies_exist_on_tenant_scoped_tables(
     update this expected set AND get a tenant_isolation policy in the
     migration. The assertion is intentionally strict (set equality, not
     superset)."""
-    # Migration 0009 (Phase 5D) dropped RLS from api_tokens and app_users to
+    # Migration 0009 dropped RLS from api_tokens and app_users to
     # break the auth-lookup chicken-and-egg under the runtime non-superuser
     # role. Auth tables are tenant-isolated at the app layer (auth dependency
     # binds AuthContext.tenant_id from the row), not at the RLS layer.
@@ -347,7 +346,7 @@ async def test_rls_policies_exist_on_tenant_scoped_tables(
         "decisions",
         "feedback",
         "customer_baselines",
-        # Phase 6A.6 — migration 0011 adds tenant_route_baselines with
+        # Migration 0011 adds tenant_route_baselines with
         # tenant_isolation RLS for case-3b population baseline subsystem.
         "tenant_route_baselines",
     }

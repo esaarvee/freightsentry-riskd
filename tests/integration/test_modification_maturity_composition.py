@@ -1,8 +1,8 @@
-"""Maturity + modification rule composition integration test (3D.3).
+"""Maturity + modification rule composition integration test.
 
-Phase 2A wired Layer 2: maturity-sensitive rule weights get downweighted
-by `(1 - maturity)`-style factor when the customer is "young" (thin
-baseline). Phase 3A.7 added 8 modification rules; some are
+Layer 2 downweights maturity-sensitive rule weights
+by a `(1 - maturity)`-style factor when the customer is "young" (thin
+baseline). The 8 modification rules include some that are
 maturity-sensitive (destination_change_pre_pickup, high_velocity_24h,
 dormant_customer, recipient_change, destination_change_residential_asn),
 others are not (within_30_min_value_increase, high_velocity_1h,
@@ -12,7 +12,7 @@ These tests prove the two systems compose correctly: maturity-sensitive
 modification rules downweight for thin baselines and fire at full
 weight for mature ones; non-maturity-sensitive rules fire at full
 weight regardless. Per-batch tests cannot demonstrate this because the
-composition spans 2A (maturity) + 3A.7 (modification rules).
+composition spans the maturity layer and the modification rules.
 """
 
 from __future__ import annotations

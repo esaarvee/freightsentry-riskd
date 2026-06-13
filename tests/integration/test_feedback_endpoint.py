@@ -4,7 +4,7 @@ Covers endpoint contract surfaces — per-POST idempotency, label
 monotonicity, baseline + counter writes, 404 on unknown target,
 cross-tenant 404, modification-decision feedback. Chain semantics
 (feedback → next booking triggers previously-rejected rule) lives in
-tests/integration/test_feedback_chain_e2e.py at 3B.6.
+tests/integration/test_feedback_chain_e2e.py.
 """
 
 from __future__ import annotations

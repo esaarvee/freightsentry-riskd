@@ -1,4 +1,4 @@
-"""Phase 7C.11 — customer baseline accumulation gated on ALLOW band.
+"""Customer baseline accumulation gated on ALLOW band.
 
 Five tests pinning the deferred-observation semantics:
 
@@ -183,7 +183,7 @@ async def test_review_band_booking_does_not_fold_to_baseline(
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """Phase 7C.11 — REVIEW-band booking holds in pending state.
+    """REVIEW-band booking holds in pending state.
     The baseline's ip_asn_stats / ip_stats / value_n stay at their
     pre-booking values."""
     token, tenant_id = seeded_api_token
@@ -241,7 +241,7 @@ async def test_approved_feedback_on_review_booking_folds_to_baseline(
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """Phase 7C.11 — operator-confirmed legitimate booking that landed
+    """Operator-confirmed legitimate booking that landed
     in REVIEW band gets folded into the customer baseline at feedback
     time. The new ASN/IP appears in ip_asn_stats/ip_stats post-feedback."""
     token, tenant_id = seeded_api_token
@@ -293,7 +293,7 @@ async def test_allow_booking_then_approved_feedback_does_not_double_add(
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """Phase 7C.11 — when the booking already landed in ALLOW band,
+    """When the booking already landed in ALLOW band,
     the baseline was folded at booking time. A later `approved`
     feedback against the same booking must NOT re-add (would double-
     count). The new branch's `decision_band != "ALLOW"` guard
@@ -342,7 +342,7 @@ async def test_rejected_then_approved_does_not_fold(
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """Phase 7C.11 — once a booking is rejected, subsequent `approved`
+    """Once a booking is rejected, subsequent `approved`
     feedback is NOT label-stronger and the monotonicity gate
     short-circuits before the fold ever runs. The baseline reflects
     the rejected state (r_n=1, n=0 on the relevant stat-dict entries
@@ -430,7 +430,7 @@ async def test_rejected_on_non_folded_booking_creates_fresh_entries(
     db_conn: asyncpg.Connection,
     seeded_api_token: tuple[str, int],
 ) -> None:
-    """Phase 7C.11 concern #4 — when `rejected` feedback comes in for a
+    """When `rejected` feedback comes in for a
     booking whose baseline state is empty (gated REVIEW/BLOCK at
     booking time), `add_rejected_observation` correctly creates fresh
     entries with r_n=1, n=0. Pins the missing-key fresh-entry contract."""

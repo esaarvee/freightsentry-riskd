@@ -1,4 +1,4 @@
-"""End-to-end integration tests for cold-start grace period (4C.4).
+"""End-to-end integration tests for cold-start grace period.
 
 Grace mechanism: during the grace window after tenant onboarding, the
 maturity formula multiplies its result by 0.5. After the window, no

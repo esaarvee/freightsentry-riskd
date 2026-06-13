@@ -1,4 +1,4 @@
-"""Integration coverage for the 5B in-process tenant-config cache under
+"""Integration coverage for the in-process tenant-config cache under
 real DB load. The unit tests in `tests/unit/test_tenant_config_cache.py`
 mock the loader; this file exercises the production code path
 end-to-end with a real asyncpg connection per coroutine.

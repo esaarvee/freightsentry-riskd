@@ -1,4 +1,4 @@
-"""Concurrent baseline-writes integration tests (3B.7).
+"""Concurrent baseline-writes integration tests.
 
 A booking POST and a feedback POST for the same customer issued in
 parallel must both succeed without interleaved state. The booking

@@ -64,15 +64,15 @@ async def seed_tenant_created_days_ago(
 ) -> int:
     """Insert a tenant whose created_at is exactly `days_ago` days ago.
 
-    Used by Phase 4C integration tests for the cold-start grace mechanism
-    which measures the grace window from `tenants.created_at`. Returns
-    the new tenant_id. Caller is responsible for cleanup (typically via
+    Used by cold-start grace mechanism integration tests, which measure
+    the grace window from `tenants.created_at`. Returns the new
+    tenant_id. Caller is responsible for cleanup (typically via
     _cleanup_tenant).
 
-    Phase 6B: auto-injects allowed_currencies = ["USD", "CAD"] unless
-    the caller's config explicitly overrides — matches the
-    seeded_tenant fixture default so integration tests POSTing USD
-    payloads continue to work post-6B without per-test edits.
+    Auto-injects allowed_currencies = ["USD", "CAD"] unless the
+    caller's config explicitly overrides — matches the seeded_tenant
+    fixture default so integration tests POSTing USD payloads continue
+    to work without per-test edits.
     """
     merged = {"allowed_currencies": ["USD", "CAD"]}
     if config:
@@ -100,13 +100,13 @@ _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # Single source of truth for cascade-cleanup. Reverse-FK order so children
 # delete before parents. Add new tenant-scoped tables here, NOT inline in
 # each fixture — duplicating this list across fixtures is how cleanup
-# drifts (e.g., 1D.1+ may add new tenant-scoped tables).
+# drifts (e.g., future work may add new tenant-scoped tables).
 _TENANT_SCOPED_TABLES: tuple[str, ...] = (
     "feedback",
     "decisions",
     "customer_baselines",
     "shipments",
-    # Phase 6A.6 — RLS-enabled, no FKs back to other tenant-scoped
+    # RLS-enabled, no FKs back to other tenant-scoped
     # tables, so position is arbitrary among the leaves; placed before
     # users/customers for explicit ordering.
     "tenant_route_baselines",
@@ -181,7 +181,7 @@ def _reset_structlog() -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_tenant_config_cache() -> None:
-    """5B introduces an in-process 60s TTL cache fronting load_tenant_config.
+    """An in-process 60s TTL cache fronts load_tenant_config.
     Many integration tests mutate `tenants.config` mid-test and expect the
     next endpoint call to observe the new value. In production the
     staleness window is operator-acceptable; in tests it would surface
@@ -270,8 +270,8 @@ async def _isolate_enrichment_state(_app_state: None) -> AsyncIterator[None]:
 async def set_test_tenant_id(conn: asyncpg.Connection, tenant_id: int) -> None:
     """Test helper: set `app.tenant_id` session-scoped on this connection.
 
-    Phase 5D.2: with the runtime role switched to `riskd_app_login`,
-    every INSERT into a tenant-scoped table is subject to RLS WITH CHECK
+    With the runtime role `riskd_app_login`, every INSERT into a
+    tenant-scoped table is subject to RLS WITH CHECK
     (the policy USING clause acts as WITH CHECK by default in Postgres).
     Test fixtures that issue raw `INSERT INTO customers/users/...` must
     set `app.tenant_id` BEFORE the INSERT or the policy rejects.
@@ -289,7 +289,7 @@ async def set_test_tenant_id(conn: asyncpg.Connection, tenant_id: int) -> None:
 
 @asynccontextmanager
 async def with_test_tenant_context(conn: asyncpg.Connection, tenant_id: int) -> AsyncIterator[None]:
-    """Phase 5D.2 helper: temporarily switch `app.tenant_id` on the
+    """Helper: temporarily switch `app.tenant_id` on the
     given connection, then restore the prior context on exit. Use for
     cross-tenant verification reads in tests that need to count or
     inspect rows belonging to a different tenant than the one the
@@ -319,7 +319,7 @@ async def db_conn(_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
     """Single connection from the shared pool. NOT auto-transactional —
     callers manage their own transactions for seed/cleanup.
 
-    Phase 5D.2: `app.tenant_id` is reset to '0' on acquire so a
+    `app.tenant_id` is reset to '0' on acquire so a
     stale value from a prior pool tenant doesn't leak in. Tests that
     insert into tenant-scoped tables must call `set_test_tenant_id`
     before INSERT (or wrap in `async with conn.transaction(): set_tenant_id`)."""
@@ -335,12 +335,12 @@ async def db_conn(_pool: asyncpg.Pool) -> AsyncIterator[asyncpg.Connection]:
 async def seeded_tenant(db_conn: asyncpg.Connection) -> AsyncIterator[int]:
     """Insert a tenant; cleanup all dependent rows on teardown.
 
-    Phase 5D.2: after inserting `tenants` (which is NOT RLS-enabled),
+    After inserting `tenants` (which is NOT RLS-enabled),
     set `app.tenant_id` session-scoped to the new id so subsequent
     INSERTs on tenant-scoped tables succeed under RLS WITH CHECK.
 
-    Phase 6B: seeds `allowed_currencies = ["USD", "CAD"]` so the
-    project-default-CAD switch (6B.1) does NOT break the ~20 test
+    Seeds `allowed_currencies = ["USD", "CAD"]` so the
+    project-default-CAD switch does NOT break the ~20 test
     files that POST USD payloads against a default-configured
     tenant. Tests that explicitly want a single-currency tenant
     override via `_set_allowed_currencies` (test_currency_validation
@@ -527,7 +527,7 @@ async def seed_customer_with_baseline(
     as a Python value; JSONB columns accept dict; date/timestamp accept
     None and default to today / NULL. `decay_anchor_date` defaults to
     Python's `date.today()` so it matches `build_context`'s default
-    `as_of` (avoids the cross-TZ decay drift surfaced in 2C.3).
+    `as_of` (avoids cross-TZ decay drift).
     """
     from datetime import date
 
@@ -613,14 +613,14 @@ async def create_tenant_with_token(
     cascade-cleans on exit. Use inside tests that need >1 tenant (e.g.
     cross-tenant isolation checks).
 
-    Phase 5D.2: sets `app.tenant_id` to the new tenant's id while the
+    Sets `app.tenant_id` to the new tenant's id while the
     block is open (so dependent inserts succeed under RLS WITH CHECK);
     on exit, restores the prior `app.tenant_id` after cleanup so the
     outer fixture's teardown sees its own tenant's rows.
     """
     prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
     prev_int = int(prev_raw) if prev_raw else 0
-    # Phase 6B: seed allowed_currencies = ["USD", "CAD"] to match the
+    # Seed allowed_currencies = ["USD", "CAD"] to match the
     # seeded_tenant fixture default; cross-tenant tests don't care
     # about currency, just isolation.
     tenant_id: int = await db_conn.fetchval(
@@ -656,7 +656,7 @@ async def create_tenant_with_token(
 async def create_extra_tenant(
     db_conn: asyncpg.Connection, name_prefix: str = "extra"
 ) -> AsyncIterator[int]:
-    """Phase 5D.2 helper: create an extra tenant + set `app.tenant_id`
+    """Helper: create an extra tenant + set `app.tenant_id`
     session-scoped to it. Use inside tests that need to seed dependent
     rows under a second tenant alongside `seeded_tenant`. On exit
     cascades all tenant-scoped rows AND restores the prior tenant
@@ -664,7 +664,7 @@ async def create_extra_tenant(
     """
     prev_raw = await db_conn.fetchval("SELECT current_setting('app.tenant_id', true)")
     prev_int = int(prev_raw) if prev_raw else 0
-    # Phase 6B: seed allowed_currencies = ["USD", "CAD"] to match the
+    # Seed allowed_currencies = ["USD", "CAD"] to match the
     # seeded_tenant fixture default; multi-tenant tests don't care
     # about currency.
     tenant_id: int = await db_conn.fetchval(

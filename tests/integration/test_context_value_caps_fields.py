@@ -1,9 +1,9 @@
 """Integration tests for the 5 currency-derived Context fields populated by
-build_context (4B.4).
+build_context.
 
 DB-backed because build_context loads the baseline + enricher inside an
-asyncpg transaction. Plan section 4B.4 originally suggested tests/unit/,
-but per .ai/conventions.md:207-208, DB-touching tests live under
+asyncpg transaction. Although these could read as unit tests,
+per .ai/conventions.md:207-208, DB-touching tests live under
 tests/integration/ (pre-commit pytest hook runs unit only — DB-backed
 tests under unit/ would break the fast-commit contract).
 """
@@ -173,9 +173,8 @@ async def test_currency_with_no_caps_falls_back_to_cad_default_with_warning(
     resolve_value_caps falls back to DEFAULT_VALUE_CAPS["CAD"] AND emits a
     `tenant_config.value_caps.fallback` warning with metric=True.
 
-    Phase 6B: the fallback target was DEFAULT_VALUE_CAPS["USD"] before
-    the CAD-default switch; this test now exercises the symmetric
-    CAD-fallback path."""
+    The fallback target is DEFAULT_VALUE_CAPS["CAD"]; this test
+    exercises the CAD-fallback path."""
     cust_id, row = await _seed_minimal_customer_and_baseline(db_conn, seeded_tenant, "vc-4")
     only_cad = {"CAD": {"high": 1.0, "new_user": 2.0, "medium": 3.0, "low": 4.0}}
     payload = _make_payload(currency="USD")
@@ -211,9 +210,8 @@ async def test_currency_round_trip_with_fallback_thresholds(
     for ANY currency. Assert both the currency round-trip AND the resolved
     threshold values to make the test meaningful.
 
-    Phase 6B: parametrize was ["USD", "EUR"] → ["CAD", "EUR"] because
-    the fallback target is now CAD-default (was USD); the USD-keyed
-    fallback would be self-referential under the old USD-only setup.
+    Parametrize is ["CAD", "EUR"] because the fallback target is
+    CAD-default; a USD-keyed fallback would be self-referential.
     """
     cust_id, row = await _seed_minimal_customer_and_baseline(
         db_conn, seeded_tenant, f"vc-rt-{currency}"

@@ -1,7 +1,7 @@
 """Integration test for the Pattern B-lite refresh task wired into the
-FastAPI lifespan (PBL C2).
+FastAPI lifespan.
 
-Per Amendment 1 F5: the lifespan-aware test pattern is direct invocation
+The lifespan-aware test pattern is direct invocation
 of the `lifespan` async context manager — no `TestClient`, no
 `LifespanManager`, no new dev dependency. This matches the project's
 existing ASGI-transport convention while exercising lifespan code paths
@@ -125,7 +125,7 @@ async def test_lifespan_swap_replaces_app_state_enricher(
     _bypass_pool_in_lifespan: None,
 ) -> None:
     """When refresh succeeds inside the lifespan, `app.state.enricher`
-    is atomically swapped (Amendment 1 F2 CoW). The pre-swap Enricher
+    is atomically swapped (CoW). The pre-swap Enricher
     instance the test captures before entering the lifespan should NOT
     be the same object as `app.state.enricher` after one successful
     refresh tick."""

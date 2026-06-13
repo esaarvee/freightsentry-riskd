@@ -1,4 +1,4 @@
-"""End-to-end integration tests for per-tenant maturity overrides (4C.4).
+"""End-to-end integration tests for per-tenant maturity overrides.
 
 Drives the booking endpoint with tenants whose `config` JSONB overrides
 the maturity formula constants. Asserts that ScoringResult.maturity
@@ -306,6 +306,6 @@ async def test_empty_config_tenant_uses_defaults(
     resp = await _post_booking(
         unauth_client, seeded_tenant, _booking(request_id="REQ-mat-inv", customer="cust-inv")
     )
-    # Pre-4C: mature customer, no flags, no rules fire → score near 0.
+    # Mature customer, no flags, no rules fire → score near 0.
     assert resp["score"] < 0.05
     assert resp["decision"] == "ALLOW"

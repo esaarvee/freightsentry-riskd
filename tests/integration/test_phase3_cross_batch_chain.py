@@ -1,16 +1,17 @@
-"""Cross-batch chain integration test (3D.2) — Phase 3 value demo.
+"""Cross-batch chain integration test — value demo.
 
-The canonical end-to-end chain that demonstrates 3A + 3B + Phase 2
-scoring all compose correctly across the three new endpoints:
+The canonical end-to-end chain that demonstrates modification,
+feedback, and scoring all compose correctly across the three new
+endpoints:
 
   booking → modification → feedback → next booking (triggers rule)
 
-3A.8, 3B.6, and 3C.2 each cover their batch's surfaces in isolation.
+The per-batch tests each cover their batch's surfaces in isolation.
 This file integrates them: the modification triggers a high-velocity
 rule on the path, the feedback rejection feeds the baseline, and the
 next booking by the same customer triggers the corresponding
-previously-rejected rule. Per-batch tests cannot demonstrate this
-shape because the chain crosses 3A + 3B endpoints.
+previously-rejected rule. Per-surface tests cannot demonstrate this
+shape because the chain crosses the modification and feedback endpoints.
 """
 
 from __future__ import annotations
@@ -78,7 +79,7 @@ async def test_full_chain_booking_modification_feedback_next_booking_triggers_ru
        ip_stats.r_n += 1, customer flagged_count += 1
     4. Next booking from same customer + same IP + same email triggers
        email_previously_rejected_for_customer AND
-       ip_previously_rejected_for_customer rules (3B.5).
+       ip_previously_rejected_for_customer rules.
     """
     token, tenant_id = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.90", asn_org="Comcast"):
@@ -221,7 +222,7 @@ async def test_modification_on_rejected_baseline_inherits_signal(
 ) -> None:
     """After a rejection, a subsequent modification's Context inherits
     the *_previously_rejected fields via the shared build_context path.
-    Verifies that 3B.4 derivations flow through build_modification_context
+    Verifies that previously-rejected derivations flow through build_modification_context
     when the modification reuses the same source IP."""
     token, _tenant_id = seeded_api_token
     async with seeded_ip_enrichment(db_conn, "203.0.113.92", asn_org="Comcast"):

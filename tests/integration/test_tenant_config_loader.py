@@ -1,4 +1,4 @@
-"""Unit tests for load_tenant_config (4A.2).
+"""Unit tests for load_tenant_config.
 
 8 tests covering:
 - Empty config tenant (default JSONB '{}') → overrides None, defaults applied
@@ -33,7 +33,7 @@ async def _seed_config(conn: asyncpg.Connection, tenant_id: int, config: dict[st
 
 
 async def test_empty_config_returns_defaults(db_conn: asyncpg.Connection) -> None:
-    # Phase 6B: seeded_tenant fixture now seeds a non-empty config
+    # The seeded_tenant fixture seeds a non-empty config
     # (allowed_currencies = ["USD", "CAD"]) to support the broader
     # test suite. To exercise the empty-config-returns-defaults loader
     # path, insert a fresh tenant directly with no config override.
@@ -49,7 +49,7 @@ async def test_empty_config_returns_defaults(db_conn: asyncpg.Connection) -> Non
         assert tc.maturity_shipments is None
         assert tc.maturity_k is None
         assert tc.value_caps is None
-        # Phase 6B switched the default from ["USD"] to ["CAD"].
+        # The project default is ["CAD"].
         assert tc.allowed_currencies == ["CAD"]
         assert tc.cold_start_grace_days == 0
         # Timestamps are timezone-aware so downstream scoring can subtract

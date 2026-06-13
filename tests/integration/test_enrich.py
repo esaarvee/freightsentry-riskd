@@ -1,6 +1,6 @@
 """Integration tests for app/enrich.py — covers cache hit/miss/stale + the
 ip_enrichment table round-trip. Source-file lookups (MaxMind, FireHOL,
-IP2Proxy, cloud CIDRs) are exercised by 1D.8 case-2 fixture replay; the
+IP2Proxy, cloud CIDRs) are exercised by case-2 fixture replay; the
 unit cost of mocking each binary format here would dwarf the value.
 """
 

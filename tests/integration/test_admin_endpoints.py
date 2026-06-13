@@ -1,4 +1,4 @@
-"""End-to-end integration tests for both admin endpoints (4D.2 + 4D.3).
+"""End-to-end integration tests for both admin endpoints.
 
 Combined coverage:
 - GET /api/v1/admin/decisions/{request_id} — happy paths + 401/403/404
