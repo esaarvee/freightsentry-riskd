@@ -1,4 +1,4 @@
-"""POST /api/v1/shipments/modification/evaluate — Phase 3A endpoint.
+"""POST /api/v1/shipments/modification/evaluate endpoint.
 
 Mirrors the booking endpoint's single-transaction discipline (txn opens
 before set_tenant_id, idempotency check on (tenant_id, request_id),
@@ -56,10 +56,10 @@ async def evaluate_modification(
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
 
-        # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
+        # Loaded via the TTL cache (load_tenant_config_cached).
         tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
-        # 4B.3 request-time currency check. Modification carries its own
+        # Request-time currency check. Modification carries its own
         # `currency` (defaults to USD); the modification's currency may differ
         # from the prior shipment's, which is fine — value-tier rules at the
         # modification evaluation use the modification's currency.
@@ -142,8 +142,8 @@ async def evaluate_modification(
                 detail="Original booking not found for the given original_request_id",
             )
         if prior["prior_request_type"] != "booking":
-            # Modification of a non-booking decision is out-of-scope per
-            # Phase 3 (today only "modification" can land here, but the
+            # Modification of a non-booking decision is out-of-scope
+            # (today only "modification" can land here, but the
             # message includes the actual value to remain accurate if
             # future request_types are added).
             raise HTTPException(
@@ -200,9 +200,9 @@ async def evaluate_modification(
         # Persist decision with request_type='modification' against the
         # prior shipment_id (no new shipments row created).
         #
-        # UNIQUE is `(tenant_id, request_type, request_id)` per 0007 —
-        # RESOLVED in 5A.7 — so booking and modification with the same
-        # request_id legitimately coexist at the DB layer. The try/except
+        # UNIQUE is `(tenant_id, request_type, request_id)` — so booking
+        # and modification with the same request_id legitimately coexist
+        # at the DB layer. The try/except
         # below stays as defense-in-depth for the same-type duplicate
         # case (two POSTs of the same modification request_id).
         risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])

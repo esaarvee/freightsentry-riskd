@@ -1,4 +1,4 @@
-"""POST /api/v1/shipments/feedback — Phase 3B endpoint.
+"""POST /api/v1/shipments/feedback endpoint.
 
 Two-tier idempotency:
 
@@ -16,11 +16,11 @@ transition matrix is exhaustively testable. The endpoint persists in
 a single transaction: feedback INSERT + baseline UPDATE (FOR UPDATE
 lock) + customer counter UPDATE. Mirrors booking discipline.
 
-Phase 7C.11 — deferred-observation fold on `approved` feedback. When
-the booking endpoint declines to fold a REVIEW/BLOCK booking into the
-customer baseline (baseline gated on ALLOW per the case-2 baseline-
-pollution finding), a later `approved` feedback against that booking
-triggers the fold here. The fold uses enrichment data FRESH at
+Deferred-observation fold on `approved` feedback. When the booking
+endpoint declines to fold a REVIEW/BLOCK booking into the customer
+baseline (baseline gated on ALLOW to avoid case-2 baseline pollution),
+a later `approved` feedback against that booking triggers the fold
+here. The fold uses enrichment data FRESH at
 feedback time — not booking time — because the booking-time snapshot
 is not persisted. For stable IP→ASN/country attribution, this is
 acceptable on the operator-feedback timescale (30-180 day typical
@@ -166,9 +166,8 @@ async def submit_feedback(
         # Resolve target_request_id -> prior decision + shipment + customer.
         # Dual tenant_id filters on every JOIN leg per .ai/conventions.md.
         #
-        # Phase 7C.11 — additional columns (`d.decision`, `s.value`,
-        # `s.channel`, `s.booking_ts`) needed by the fold-on-approved
-        # path. Cheap column-level additions; no schema change.
+        # Columns `d.decision`, `s.value`, `s.channel`, `s.booking_ts`
+        # feed the fold-on-approved path.
         prior = await conn.fetchrow(
             """
             SELECT
@@ -318,7 +317,7 @@ async def submit_feedback(
             )
             await baseline.save(conn)
         elif payload.label == "approved" and prior["decision_band"] != "ALLOW":
-            # Phase 7C.11 — fold-deferred-observation on positive
+            # Fold-deferred-observation on positive
             # feedback. The booking endpoint deferred this observation
             # (decision was REVIEW or BLOCK; baseline gated on ALLOW).
             # Operator has now confirmed the booking as legitimate;
@@ -527,9 +526,9 @@ def _apply_baseline_writes(
     ts: datetime,
 ) -> list[str]:
     """Apply per-dimension r_n increments for the rejection. Returns the
-    list of dimensions actually written (NULL HMACs are skipped — pre-3B.3
-    shipments rows lack email_hmac/phone_hmac, so the email/phone
-    dimensions don't contribute for those targets).
+    list of dimensions actually written (NULL HMACs are skipped —
+    shipments rows that lack email_hmac/phone_hmac don't contribute the
+    email/phone dimensions for those targets).
     """
     written: list[str] = []
 
@@ -547,7 +546,7 @@ def _apply_baseline_writes(
     baseline.add_rejected_observation(key_in=dest_addr, stat="dest_stats", ts=ts)
     written.append("dest_stats")
 
-    # Email/phone HMAC — pre-3B.3 shipments rows have NULL; skip if so.
+    # Email/phone HMAC — may be NULL; skip if so.
     # The structured-log dimensions_written reports the actual list.
     if prior["email_hmac"] is not None:
         baseline.add_rejected_observation(
@@ -568,10 +567,9 @@ async def _insert_feedback_row(
     tenant_id: int,
     payload: FeedbackRequest,
 ) -> None:
-    """INSERT the feedback audit row. The pure-bootstrap feedback schema
-    (per 3B.1 drop-and-recreate) has no decision_id column; the prior
-    decision is re-resolvable via the decisions.request_id lookup at
-    read time if needed.
+    """INSERT the feedback audit row. The feedback schema has no
+    decision_id column; the prior decision is re-resolvable via the
+    decisions.request_id lookup at read time if needed.
     """
     await conn.execute(
         """

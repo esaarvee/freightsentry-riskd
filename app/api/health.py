@@ -31,12 +31,10 @@ async def health(enricher: Annotated[Enricher, Depends(get_enricher)]) -> JSONRe
         (hybrid Pattern A defense) AND that no loaded source failed to
         parse. A source that was downloaded but is corrupt /
         version-incompatible (the enricher dropped its reader and
-        recorded it in `degraded_sources()`) now flips this field to
-        `"degraded"` — previously it stayed `"ok"` because the signal
-        keyed off download success, not parse success, silently failing
-        open. `"degraded"` does NOT change the HTTP status code per
-        Amendment 1 F2 / operator decision: the ALB target + ECS task
-        health probe key off the status code, so degraded enrichment
+        recorded it in `degraded_sources()`) flips this field to
+        `"degraded"`. `"degraded"` does NOT change the HTTP status code
+        per operator decision: the ALB target + ECS task health probe
+        key off the status code, so degraded enrichment
         stays IN ROTATION (a corrupt dataset must not drop every task);
         operators alarm on the `enrich.source_load_failed` EMF metric and
         this field, not on task death.

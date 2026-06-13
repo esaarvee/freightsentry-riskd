@@ -1,9 +1,9 @@
-"""POST /api/v1/shipments/booking/evaluate — Phase 1 full pipeline.
+"""POST /api/v1/shipments/booking/evaluate — full pipeline.
 
 Wires build_context → score → single-transaction persist. Real scoring
-via Layer 1 + Layer 3 (Layer 2 lands Phase 2). Booking ts drives the
-baseline observation timestamp; HMAC at ingress lands here for contact
-PII via signal_helpers.hmac_hex.
+via Layer 1 + Layer 2 + Layer 3. Booking ts drives the baseline
+observation timestamp; HMAC at ingress lands here for contact PII via
+signal_helpers.hmac_hex.
 """
 
 from __future__ import annotations
@@ -49,13 +49,13 @@ async def evaluate_booking(
     async with get_conn() as conn, conn.transaction():
         await set_tenant_id(conn, auth.tenant_id)
 
-        # Per-request fresh load — no caching in Phase 4 (Phase 5 wraps).
-        # Sub-millisecond indexed PK lookup; consumers (4B currency
-        # validation, 4C cold-start) are downstream.
+        # Loaded via the TTL cache (load_tenant_config_cached).
+        # Sub-millisecond indexed PK lookup; the currency-validation and
+        # cold-start consumers are downstream.
         tenant_config = await load_tenant_config_cached(conn, auth.tenant_id)
 
-        # 4B.3 request-time currency check. ISO 4217 shape is enforced at the
-        # Pydantic layer (4B.1); this is the allowed-list enforcement. 400 is
+        # Request-time currency check. ISO 4217 shape is enforced at the
+        # Pydantic layer; this is the allowed-list enforcement. 400 is
         # the right code — the request is well-formed but the chosen currency
         # is not in this tenant's allowed list.
         if payload.shipment.currency not in tenant_config.allowed_currencies:
@@ -117,8 +117,8 @@ async def evaluate_booking(
 
         # Reload customer row post-upsert so build_context sees current
         # first_seen / total_shipments / flag counts. Explicit
-        # `tenant_id = $1` is defense-in-depth above RLS (which is
-        # dormant under the Phase 1 superuser per .claude/STATUS.md).
+        # `tenant_id = $1` is defense-in-depth above RLS (currently
+        # dormant under the bootstrap superuser — see .claude/STATUS.md).
         customer_row = await conn.fetchrow(
             "SELECT * FROM customers WHERE id = $1 AND tenant_id = $2",
             customer_id,
@@ -177,7 +177,7 @@ async def evaluate_booking(
             ruleset, context_env, customer_state=customer_state, tenant_config=tenant_config
         )
 
-        # Phase 7C.11 — fold THIS booking into the customer baseline
+        # Fold THIS booking into the customer baseline
         # ONLY when the decision lands in ALLOW band. REVIEW/BLOCK
         # bookings are HELD in pending state: no baseline mutation
         # (ip/netblock/asn stats, value/cadence Welford accumulators,
@@ -200,7 +200,7 @@ async def evaluate_booking(
         # table) are UNAFFECTED — those still count REVIEW/BLOCK
         # bookings. Only per-customer baseline state is gated.
         #
-        # Phase 6A.2 — shipment country pair is passed through from
+        # Shipment country pair is passed through from
         # the structured Address.country field (NOT the IP country)
         # so the case-3a route-baseline histogram tracks customer-
         # shipment routes, not IP geolocation.
@@ -226,9 +226,9 @@ async def evaluate_booking(
             )
             await baseline.save(conn)
 
-        # Persist shipment. email_hmac and phone_hmac (added in 3B.1)
-        # land on the shipments row so the 3B.3 feedback endpoint can
-        # populate baseline.rejected_email_hmacs / rejected_phone_hmacs
+        # Persist shipment. email_hmac and phone_hmac land on the
+        # shipments row so the feedback endpoint can populate
+        # baseline.rejected_email_hmacs / rejected_phone_hmacs
         # per-shipment. NULL when the booking payload supplies no
         # contact email/phone.
         shipment_id = await conn.fetchval(
@@ -260,18 +260,18 @@ async def evaluate_booking(
             phone_hmac,
         )
 
-        # Persist decision with explicit request_type='booking' (3A.6
-        # makes the discriminator visible at the call site; the 0003
-        # migration's DEFAULT 'booking' would cover us if omitted, but
-        # explicit literal mirrors the modification endpoint's
-        # 'modification' literal and makes intent unambiguous).
+        # Persist decision with explicit request_type='booking'. The
+        # discriminator is visible at the call site; the migration's
+        # DEFAULT 'booking' would cover us if omitted, but the explicit
+        # literal mirrors the modification endpoint's 'modification'
+        # literal and makes intent unambiguous.
         #
         # UniqueViolation handling: catches duplicate POSTs of the same
-        # booking request_id (intra-type collision). The UNIQUE is now
-        # `(tenant_id, request_type, request_id)` per 0007 — RESOLVED in
-        # 5A.7 — so booking and modification with the same request_id
-        # legitimately coexist. This try/except stays as defense-in-depth
-        # for the same-type duplicate case.
+        # booking request_id (intra-type collision). The UNIQUE is
+        # `(tenant_id, request_type, request_id)`, so booking and
+        # modification with the same request_id legitimately coexist.
+        # This try/except stays as defense-in-depth for the same-type
+        # duplicate case.
         risk_factor_json = json.dumps([asdict(rf) for rf in result.risk_factors])
         try:
             await conn.execute(
@@ -314,7 +314,7 @@ async def evaluate_booking(
             auth.tenant_id,
         )
 
-        # Phase 6A.7 — case-3b population baseline UPSERT. Same
+        # Case-3b population baseline UPSERT. Same
         # transaction as the booking commit; failure rolls the booking
         # back. No-op when any country is None (corpora without
         # ground-truth structured data don't pollute the baseline).

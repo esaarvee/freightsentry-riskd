@@ -1,4 +1,4 @@
-"""Phase 4D admin endpoints — read-only.
+"""Admin endpoints — read-only.
 
 Both endpoints require admin role (api_tokens.role == 'admin' via
 require_admin_role) and are tenant-bounded: an admin sees only their
@@ -30,8 +30,8 @@ _STAT_DICT_TRUNCATION_LIMIT = 10
 
 def _decode_jsonb(value: Any) -> Any:
     """Defensive JSONB decode — asyncpg returns JSONB as `str` by default in
-    this project (no codec registered). The cast-at-boundary pattern from
-    Phase 3B handles both str and pre-decoded forms."""
+    this project (no codec registered). The cast-at-boundary pattern
+    handles both str and pre-decoded forms."""
     if isinstance(value, str):
         return json.loads(value)
     return value
@@ -172,8 +172,8 @@ async def get_admin_customer_baseline(
     Tenant-bounded. Cross-tenant lookups return 404.
 
     Stat-dicts truncated to top-10 by `n` desc. Total count + truncated
-    flag included per dict. Full dicts available via Phase 5+ separate
-    endpoint if needed.
+    flag included per dict. A separate endpoint can expose full dicts
+    if needed.
 
     PII surfaced:
       - business_name, registered_address (admin authorized for their
