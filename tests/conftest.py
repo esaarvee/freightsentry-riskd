@@ -28,9 +28,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app import db as app_db
 from app.auth import AuthContext, _hash_token, require_api_token
 from app.config import get_settings
 from app.db import close_pool, init_pool
+from app.enrich import Enricher
 from app.main import app
 from app.runtime import init_runtime
 from app.tenant_config import TenantConfig
@@ -178,8 +180,48 @@ async def _pool() -> AsyncIterator[asyncpg.Pool]:
     """
     settings = get_settings()
     pool = await init_pool(settings)
+    # Clean session start: `ip_enrichment` is global / no-RLS and is NOT
+    # covered by `_cleanup_tenant`, so any residue from a prior session
+    # (or the triage's injected rows) would confound the first test.
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM ip_enrichment")
     yield pool
     await close_pool()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_enrichment_state(_app_state: None) -> AsyncIterator[None]:
+    """Per-test isolation of the GLOBAL enrichment state (T2 — determinism
+    keystone). Two leak vectors, cleared BEFORE each test so every test
+    starts from a known-clean state regardless of run order:
+
+    1. **Shared `app.state.enricher`.** `test_enrichment_refresh_lifespan`
+       swaps `app.state.enricher` for one whose in-process FireHOL tries
+       are loaded from refresh fixtures covering the RFC-5737 doc ranges
+       (`192.0.2.0/24`, `203.0.113.0/24`, …). The swapped enricher then
+       serves every later booking → `fh_level1=True` → `blacklisted_ip`
+       Layer-1 BLOCK on any doc IP. We RECONSTRUCT a fresh Enricher from
+       canonical settings (default empty data_dir) so the swap never
+       leaks. Reconstructing (not just resetting `_loaded`) is required:
+       pytest retains `tmp_path` for several runs, so a `_loaded=False`
+       reset would reload the polluted fixtures from disk. This half is
+       ungated (no DB) so unit tests stay DB-free (T4).
+
+    2. **Global `ip_enrichment` table.** Global / no-RLS, never truncated
+       by tenant-scoped `_cleanup_tenant`; a directly-INSERTed malicious
+       `/32` or an enrich-on-miss persist leaks into later tests. We
+       DELETE all rows — DB-GATED (AM1): keyed off `app.db._pool` (NOT by
+       requesting the `_pool` fixture, which would force pool init on
+       every test and defeat T4). When the pool was never initialised — a
+       DB-free unit run — this half no-ops and never connects.
+    """
+    # Vector 1 — fresh enricher (ungated; no DB).
+    app.state.enricher = Enricher(data_dir=get_settings().enrichment_data_dir)
+    # Vector 2 — clean global enrichment table (DB-gated).
+    if app_db._pool is not None:
+        async with app_db._pool.acquire() as conn:
+            await conn.execute("DELETE FROM ip_enrichment")
+    yield
 
 
 async def set_test_tenant_id(conn: asyncpg.Connection, tenant_id: int) -> None:
