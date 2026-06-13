@@ -1,17 +1,9 @@
-# Phase 1 rule catalogue — 14 rules.
+# Rule catalogue.
 #
 # Source-of-truth thresholds (allow_max / block_min) live here; .env /
 # pyproject must NOT shadow them. Every Name token in a `condition` MUST
 # appear in app.rules.ALLOWED_CONTEXT_FIELDS — the loader fails fast at
 # app lifespan startup if any field is unknown.
-#
-# Phase 1 does not implement Layer 2 (account-prior) per
-# .ai/decisions.md § Scoring architecture — `maturity_sensitive` is
-# preserved as a YAML field for forward compatibility but does NOT
-# downweight rule contributions yet. Phase 2 wires the downweight.
-#
-# Phase 2+ expansion: ~80 additional rules per
-# .ai/decisions.md § Rule catalogue target.
 
 thresholds:
   allow_max: 0.60
@@ -89,12 +81,9 @@ rules:
 
   - name: unknown_destination_address
     description: "Destination address not seen before for this established customer"
-    # Phase 7C.8: weight 0.20 -> 0.10. Case-2 detection moved to
-    # api_booking_from_unfamiliar_asn (7C.7); this rule's role
-    # shifts from primary FPR contributor to secondary corroborating
-    # signal. Condition unchanged; rule continues firing on novel
-    # destination addresses for established customers but no longer
-    # pushes records to REVIEW band standalone.
+    # Secondary corroborating signal: fires on novel destination addresses
+    # for established customers; weighted below standalone REVIEW-band
+    # contribution (primary case-2 detection is api_booking_from_unfamiliar_asn).
     condition: "NOT destination_address_familiar AND customer_observations >= 10"
     weight: 0.1
     maturity_sensitive: true
@@ -107,22 +96,17 @@ rules:
 
   - name: unfamiliar_ip_country_for_origin
     description: "Origin paired with an unseen IP country for this established customer"
-    # Phase 7C.8: weight 0.30 -> 0.15. Same rationale as
-    # unknown_destination_address: case-2 detection moved to
-    # api_booking_from_unfamiliar_asn (7C.7); this rule's role
-    # shifts from primary FPR contributor to secondary corroborating
-    # signal. Condition unchanged; the 72% baseline fire rate on
-    # approved corpus is intentionally preserved (legitimate
-    # freight customers' origin expansion is the dominant pattern)
-    # but contribution to scoring drops below REVIEW-pushing.
+    # Secondary corroborating signal: the high baseline fire rate on
+    # legitimate origin expansion is intentional, so the weight stays
+    # below standalone REVIEW-pushing (primary case-2 detection is
+    # api_booking_from_unfamiliar_asn).
     condition: "NOT origin_ip_country_familiar AND customer_observations >= 10"
     weight: 0.15
     maturity_sensitive: true
 
   # =====================================================================
-  # Phase 2C.1 — Trust-conditioned rules
-  # Layer 2 in 2A.3 made trust_score meaningful at scoring time; these
-  # rules fire when low trust + corroborating evidence compound.
+  # Trust-conditioned rules — fire when low trust_score + corroborating
+  # evidence compound.
   # =====================================================================
 
   - name: very_low_trust
@@ -165,8 +149,8 @@ rules:
     weight: 0.25
 
   # =====================================================================
-  # Phase 2C.2 — Dormancy + customer lock-in (case-1 / case-2 ATO
-  # primary detectors). Dormancy = silent customer suddenly active;
+  # Dormancy + customer lock-in (case-1 / case-2 ATO primary
+  # detectors). Dormancy = silent customer suddenly active;
   # lock-in = customer's strong baseline (cloud+api or web-only)
   # being violated by the current booking's infrastructure shape.
   # =====================================================================
@@ -199,7 +183,7 @@ rules:
     weight: 0.45
 
   # =====================================================================
-  # Phase 2C.3 — Residential ASN + IP-class diversity rules
+  # Residential ASN + IP-class diversity rules
   # Rules around residential-ASN abuse (proxy farms, distributed
   # bookings) and IP-class mismatches between the customer's typical
   # infrastructure and the current booking.
@@ -212,23 +196,16 @@ rules:
     maturity_sensitive: true
 
   # =====================================================================
-  # Phase 7C.7 — case-2 learning-based detection. Replaces the deleted
-  # api_non_cloud_ip (tenant-agnostic novelty heuristic, 41% fire rate on
-  # approved corpus) and non_cloud_established_account (same signal at
-  # lower weight, 40% fire). Those rules' is_cloud_ip / is_datacenter_ip
-  # conditions captured gobolt-tenant-specific infrastructure (their
-  # legit API booked from Google Cloud) but fired universally on any
-  # tenant's API-from-non-cloud traffic. The replacement uses
-  # per-customer learned ASN deviation (unfamiliar_asn_for_customer
-  # derivation from 7C.6): each customer's accumulated ip_asn_stats
-  # baseline is their reference; deviation is the signal. Sharp on
-  # case-2 (gobolt customers shifting off Google Cloud); silent on
-  # non-gobolt tenants whose customers have non-cloud ASN baselines.
+  # Case-2 learning-based detection. Uses per-customer learned ASN
+  # deviation (unfamiliar_asn_for_customer derivation): each customer's
+  # accumulated ip_asn_stats baseline is their reference; deviation is
+  # the signal. Sharp on case-2 (customers shifting off their established
+  # source, e.g. Google Cloud); silent on tenants whose customers have
+  # non-cloud ASN baselines.
   #
-  # Cold-start gate (customer_observations >= 10) is INSIDE the
-  # _asn_unfamiliar_for_customer derivation, matching the 7C.2
-  # _outbound_destination_mismatch pattern. The YAML condition is just
-  # the two-conjunct compose: is_api_booking AND
+  # The cold-start gate (customer_observations >= 10) lives INSIDE the
+  # _asn_unfamiliar_for_customer derivation, so the YAML condition is
+  # just the two-conjunct compose: is_api_booking AND
   # unfamiliar_asn_for_customer.
   # =====================================================================
   - name: api_booking_from_unfamiliar_asn
@@ -253,13 +230,12 @@ rules:
     weight: 0.50
 
   # =====================================================================
-  # Phase 2C.4 — Recipient overlap rules
+  # Recipient overlap rules
   # Cross-customer destination-hmac overlap detection. Tier-disjoint:
   # the lower-weight `_many_customers` rule fires in the 4-10 range,
   # the higher-weight `_very_many_customers` rule fires for >10. The
   # upper bound on the lower rule prevents both firing simultaneously
-  # (avoiding noisy-OR compounding that the freight_risk catalogue
-  # source did not intend).
+  # (avoiding unintended noisy-OR compounding).
   # =====================================================================
 
   - name: recipient_used_by_many_customers
@@ -274,8 +250,8 @@ rules:
     weight: 0.60
 
   # =====================================================================
-  # Phase 2C.5 — Velocity (additional) + identity-novelty rules
-  # Velocity-spike rules complementing Phase 1's basic customer_daily_
+  # Velocity (additional) + identity-novelty rules
+  # Velocity-spike rules complementing the basic customer_daily_
   # volume_spike, plus simple identity-novelty rules.
   # =====================================================================
 
@@ -337,16 +313,7 @@ rules:
     weight: 0.35
 
   # =====================================================================
-  # Phase 2C.6 — Value-anomaly + geographic + threat-intel composites
-  #
-  # Triage notes (Phase 2C — see docs/history.md):
-  # - threat_intel_level1 (freight_risk 29) NOT ported — Phase 1's
-  #   blacklisted_ip BLOCK rule already covers ip_in_level1 at Layer 1.
-  #   Adding it as a Layer 3 contribution would be redundant (Layer 1
-  #   short-circuit means Layer 3 never runs when BLOCK fires).
-  # - outside_allowed_country (freight_risk 181) DEFERRED to Phase 4 —
-  #   the condition references ip_outside_allowed_country which depends
-  #   on tenant-level country_allowlist config (Phase 4 scope).
+  # Value-anomaly + geographic + threat-intel composites
   # =====================================================================
 
   # Value-anomaly (6 rules)
@@ -385,38 +352,9 @@ rules:
 
   # Geographic (5 rules)
 
-  # =====================================================================
-  # Phase 7C.12 — calibrate MaxMind-enabled geo rules against measured FPR.
-  # Original weights (0.65 / 0.35 / 0.25 / 0.25) were intuition-based in
-  # Phase 1-2 BEFORE the test/dev stack had MaxMind ASN+City data
-  # provisioned. Phase 7D measurement (with MaxMind active for the first
-  # time, against the Jan-Mar 2026 operator-approved corpus) found these
-  # rules drive the bulk of approved-corpus BLOCK band — they fire on
-  # legitimate multi-region customer behavior that MaxMind now correctly
-  # exposes as geographic novelty.
-  #
-  # Per-rule fire share on the 346 approved BLOCKs (7D post-7C.11 run):
-  #   impossible_travel_geo:    248 (71.7%)  — biggest lever
-  #   ip_country_change:        202 (58.4%)
-  #   ip_long_distance_new_ip:  197 (57.0%)
-  #   ip_intercontinental_jump: 159 (46.0%)
-  #
-  # The geographic signals these rules detect are REAL — operator-
-  # approved long-distance bookings DO involve large IP-distance jumps.
-  # The signals belong on the noisy-OR ladder but at lower weights so
-  # they nudge records toward REVIEW (operator queue) rather than
-  # auto-BLOCK. Calibration backlog items 12-13 ("deferred to real-data
-  # observation") apply directly — the Jan-Mar 2026 historical traffic
-  # IS real data; the "wait for production traffic" framing assumed
-  # MaxMind would only be active in production, but 7D-prep mounted the
-  # data locally and measurement is now possible.
-  #
-  # Predicted composition on the top BLOCK pattern (n=50):
-  #   pre-calibration: 0.10 + 0.45 + 0.65 + 0.30 -> noisy-OR 0.879 (BLOCK)
-  #   post-calibration: 0.10 + 0.45 + 0.30 + 0.30 -> noisy-OR 0.76 (REVIEW)
-  # The signal is preserved; the auto-BLOCK is removed. Records move
-  # to operator review where they can be confirmed/rejected.
-  # =====================================================================
+  # The geographic signals these rules detect are real, so they sit on
+  # the noisy-OR ladder at lower weights — they nudge records toward
+  # REVIEW (operator queue) rather than auto-BLOCK.
 
   - name: ip_intercontinental_jump
     description: "IP distance >5000km from customer's last booking — implausible same-day travel"
@@ -440,10 +378,9 @@ rules:
 
   - name: impossible_travel_geo
     description: "Same-day booking from >500km away from last known location"
-    # Phase 7C.12 calibration: 0.65 -> 0.30 (see 7C.12 comment block
-    # above for rationale). Biggest single-rule contributor to
-    # approved-corpus BLOCK; the signal is preserved but the standalone
-    # auto-BLOCK contribution drops below the band threshold.
+    # Weighted below standalone auto-BLOCK: a strong single-rule
+    # contributor, so the weight keeps the preserved signal below the
+    # band threshold (nudges toward REVIEW rather than auto-BLOCK).
     condition: "impossible_travel"
     weight: 0.30
 
@@ -483,18 +420,9 @@ rules:
     weight: 0.30
 
   # =====================================================================
-  # Phase 2C.7 — IP-familiarity tier + closing pieces
+  # IP-familiarity tier + closing pieces
   # The 3 IP-familiarity-tier rules from freight_risk plus 2 compound
   # rules whose conditions re-use existing fields without adaptation.
-  #
-  # Triaged from this commit per Phase 2C plan (see docs/history.md):
-  # - unknown_email_for_customer, unknown_phone_for_customer: would
-  #   require adapted condition (proxy fields). Defer to Phase 3+
-  #   when is_new_email / is_new_phone fields land.
-  # - user_ip_rotation_elevated, user_ip_rotation_high: would require
-  #   semantic mismatch (customer_distinct_ips_30d vs
-  #   user_unique_non_cloud_ips_daily — different metrics). Defer
-  #   until a proper distinct-non-cloud-IP counter lands.
   # =====================================================================
 
   - name: ip_family_familiar_cloud
@@ -527,11 +455,9 @@ rules:
     weight: 0.30
 
   # =====================================================================
-  # Modification rules (Phase 3A.7) — 8 rules for the
-  # POST /api/v1/shipments/modification/evaluate endpoint. Weights chosen
-  # by operator judgment per .ai/decisions.md "Modification rule weight
-  # rationale (Phase 3A)" subsection — calibration deferred to Phase 6
-  # staging replay.
+  # Modification rules for the modification/evaluate endpoint. Weights
+  # chosen by operator judgment per .ai/decisions.md "Modification rule
+  # weight rationale".
   #
   # Booking-path dormancy: build_context populates modification_type as
   # the "none" sentinel (see app/context.py BOOKING_PATH_MODIFICATION_
@@ -590,12 +516,11 @@ rules:
     maturity_sensitive: true
 
   # =====================================================================
-  # Previously-rejected rules (Phase 3B.5) — 4 rules consuming the
-  # email/phone/origin/ip_previously_rejected Context fields populated
-  # in 3B.4. Weights ported from freight_risk's catalogue (verified
-  # during 3B planning, §6 of verification). All maturity-sensitive:
-  # a young / thin-baseline customer with one prior rejection still
-  # contributes to score under Layer 2 with appropriate downweighting.
+  # Previously-rejected rules — consume the
+  # email/phone/origin/ip_previously_rejected Context fields. All
+  # maturity-sensitive: a young / thin-baseline customer with one prior
+  # rejection still contributes to score under Layer 2 with appropriate
+  # downweighting.
   # =====================================================================
 
   - name: email_previously_rejected_for_customer
@@ -623,7 +548,7 @@ rules:
     maturity_sensitive: true
 
   # =====================================================================
-  # Phase 6A.3 — case-3a compound rule (established-customer compromise).
+  # Case-3a compound rule (established-customer compromise).
   # Fires when an established customer (>= 10 obs) ships from a
   # carrier-dropoff origin AND the country pair is outside the top-N
   # covering >= 80% of their historical routes AND the source IP is
@@ -637,7 +562,7 @@ rules:
   # legitimate baseline; attacker uses stolen credentials to ship under
   # the customer's identity to a fraud destination). NOT the brand-new-
   # customer fraud case (case-3b) — that threat is covered by separate
-  # cold_start_* rules introduced in 6A.5 + 6A.9.
+  # cold_start_* rules.
   # =====================================================================
 
   - name: case_3_compound
@@ -647,14 +572,10 @@ rules:
     maturity_sensitive: true
 
   # =====================================================================
-  # Phase 7C.2 — case-3b asymmetric compound (Roulottes Lupien attack
-  # shape). Replaces the symmetric triangle compound above. The
-  # triangle compound assumed customer ships outside their declared
-  # country in BOTH origin and destination; the empirical Phase 6C
-  # measurement (0/95 detection on the Roulottes Lupien census)
-  # showed the attack shape is asymmetric: customer ships FROM their
-  # declared country (origin matches) TO outside-country with
-  # carrier-facility drop-off.
+  # Case-3b asymmetric compound (Roulottes Lupien attack shape). The
+  # attack shape is asymmetric: customer ships FROM their declared
+  # country (origin matches) TO outside-country with carrier-facility
+  # drop-off.
   #
   # Predicates:
   # - customer_destination_country_mismatch_outbound: derived in
@@ -669,10 +590,6 @@ rules:
   # REVIEW by itself. Composes with IP-quality / value-tier
   # cold-start rules to reach BLOCK when multiple signals fire.
   # maturity_sensitive false (gate inside the condition).
-  #
-  # The symmetric `cold_start_country_triangle_with_carrier_dropoff`
-  # rule above is DELETED in 7C.3. Both compounds co-existed only
-  # transiently between 7C.2 and 7C.3 (declared break).
   # =====================================================================
 
   - name: cold_start_outbound_carrier_dropoff
@@ -682,8 +599,8 @@ rules:
     maturity_sensitive: false
 
   # =====================================================================
-  # Phase 6A.9 — case-3b sophisticated compound. The companion to the
-  # 6A.5 simple country-triangle compound. Same threat shape (brand-new-
+  # Case-3b sophisticated compound. The companion to the simple
+  # country-triangle compound. Same threat shape (brand-new-
   # customer fraud) but uses the TENANT'S population baseline rather
   # than a fixed country-equality heuristic to decide whether the
   # current route is anomalous. More accurate against tenants whose
@@ -695,7 +612,7 @@ rules:
   #   destination_country) triple is <2% of the tenant's historical
   #   population AND the tenant has accumulated >=100 observations.
   #   Derived in app/context.py via app/tenant_route_baselines.py
-  #   derive_route_rarity (6A.8). Cold-start tenants whose baseline
+  #   derive_route_rarity. Cold-start tenants whose baseline
   #   is too sparse to be statistically meaningful return False here,
   #   so this rule does not fire on freshly-onboarded production
   #   tenants — operationally graceful.
@@ -705,7 +622,7 @@ rules:
   #   compound covers the same gate; both rules co-fire on case-3b
   #   transactions where they apply).
   #
-  # Weight 0.70 is slightly higher than the simple compound's 0.65
+  # Weighted slightly higher than the simple country-triangle compound
   # because the tenant-population-derived signal is more specific
   # (anchored in the tenant's actual customer behavior rather than
   # a fixed country-equality heuristic). Both compounds compose via
