@@ -549,3 +549,18 @@ comment pass left the code value untouched (comment-only scope) and only strippe
 wire-model default and the operational default currency.
 Suggested action: investigation needed — confirm whether the USD wire-default is intentional
 (backward-compat) or should be CAD.
+
+## 2026-06-13 — test_schema_golden fails on host pg_dump 18 (golden generated with pg16)
+
+Discovered by: comment-cleanliness pass (Commit 6 validation)
+Location: tests/integration/test_schema_golden.py
+Severity: low
+Observation: The golden test prefers a host pg_dump when present. Host pg_dump is 18.3
+while tests/golden/schema.sql was generated with the container's pg16; pg18 emits
+slightly different DDL formatting, so the test fails on the host path. Confirmed the live
+schema MATCHES golden when dumped via the container pg16 (docker compose exec postgres
+pg_dump), so the schema is correct — this is purely a pg_dump-version skew in the host
+test path, not a schema defect. Independent of the comment-cleanliness edits (the test
+dumps the live DB, which the edits do not touch).
+Suggested action: pin the test to the container pg_dump (or a pinned client version), or
+regenerate the golden with the supported client version, so the host path is deterministic.

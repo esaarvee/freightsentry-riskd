@@ -4,36 +4,10 @@ Revision ID: 0002
 Revises: 0001
 Create Date: 2026-06-05
 
-Phase 8A squash. Consolidates the booking-flow tables. Folds in:
-
-  - 0001_initial.py — shipments, decisions table-creates (Phase 1 column set)
-    and the Phase 1 feedback shape (which 0004 later DROP+RECREATEd).
-  - 0002_shipments_destination_hmac.py — adds the ``destination_hmac``
-    column and the ``ix_shipments_tenant_dest_hmac_booking_ts`` composite
-    index (Phase 2B.6).
-  - 0003_decisions_request_type.py — adds the ``request_type`` discriminator
-    column with CHECK constraint, the
-    ``ix_decisions_tenant_request_type_created`` supporting index, and the
-    backfill-to-'booking' (Phase 3A).
-  - 0004_feedback_phase3_shape.py — the Phase 3B feedback shape (no
-    decision_id FK; pure bootstrap columns; operator_id text from the
-    start) and the ``shipments.email_hmac`` + ``shipments.phone_hmac``
-    additions for feedback-driven baseline updates (Phase 3B.1).
-  - 0007_decisions_unique_widen.py — the widened UNIQUE on
-    ``(tenant_id, request_type, request_id)`` (Phase 5A.7). Original chain
-    created the flat ``(tenant_id, request_id)`` constraint in 0001 then
-    DROPped and replaced it in 0007; the squash creates the wider index
-    directly at table-create time.
-
-Column ordering — to keep the post-squash schema dump byte-equivalent to
-the pre-squash dump under the canonical normalizer, each CREATE TABLE
-preserves the original attribute order: Phase 1 columns first, columns
-added by ALTER TABLE ADD COLUMN appended at the end in the order their
-original migration ran. ``shipments`` ends with ``destination_hmac``
-(from old 0002), then ``email_hmac`` and ``phone_hmac`` (from old 0004).
-``decisions`` ends with ``request_type`` (from old 0003). ``feedback``
-is created in its Phase 3B shape directly (Phase 1 shape is not
-materialised in the squashed chain).
+Column ordering — each CREATE TABLE orders ALTER-appended columns last so
+the dump is byte-equivalent under the canonical normalizer: ``shipments``
+ends with ``destination_hmac``, ``email_hmac``, ``phone_hmac``;
+``decisions`` ends with ``request_type``.
 """
 
 from __future__ import annotations
@@ -80,15 +54,15 @@ CREATE INDEX ix_shipments_tenant_ip_booking_ts
 CREATE INDEX ix_shipments_tenant_dest_hmac_booking_ts
     ON shipments (tenant_id, destination_hmac, booking_ts);
 COMMENT ON COLUMN shipments.email_hmac IS
-    'HMAC of the email present on this shipment, computed via signal_helpers.hmac_hex at booking-write time. NULL on rows written before Phase 3B or when no email was supplied in the request.';
+    'HMAC of the email present on this shipment, computed via signal_helpers.hmac_hex at booking-write time. NULL when no email was supplied in the request.';
 COMMENT ON COLUMN shipments.phone_hmac IS
-    'HMAC of the phone present on this shipment, computed via signal_helpers.hmac_hex at booking-write time. NULL on rows written before Phase 3B or when no phone was supplied in the request.';
+    'HMAC of the phone present on this shipment, computed via signal_helpers.hmac_hex at booking-write time. NULL when no phone was supplied in the request.';
 
 -- ===========================================================================
 -- Decisions — persisted evaluation output. UNIQUE idempotency is the
--- widened (tenant_id, request_type, request_id) index from Phase 5A.7 so
--- a booking and a modification can legitimately share a ``request_id``
--- per the public idempotency contract.
+-- (tenant_id, request_type, request_id) index so a booking and a
+-- modification can legitimately share a ``request_id`` per the public
+-- idempotency contract.
 -- ===========================================================================
 CREATE TABLE decisions (
     id              serial PRIMARY KEY,
@@ -113,18 +87,18 @@ COMMENT ON COLUMN decisions.classification IS
 COMMENT ON COLUMN decisions.risk_level IS
     'One of LOW | MEDIUM | HIGH | CRITICAL; score-band classification independent of decision';
 COMMENT ON COLUMN decisions.request_type IS
-    'One of booking | modification; discriminates which evaluate endpoint produced this decision. DEFAULT booking preserved as safety net — endpoints supply request_type explicitly in 3A.6.';
+    'One of booking | modification; discriminates which evaluate endpoint produced this decision. DEFAULT booking preserved as safety net — endpoints supply request_type explicitly.';
 CREATE INDEX ix_decisions_tenant_shipment ON decisions (tenant_id, shipment_id);
 CREATE INDEX ix_decisions_tenant_request_type_created
     ON decisions (tenant_id, request_type, created_at);
 CREATE UNIQUE INDEX ux_decisions_tenant_request_type
     ON decisions (tenant_id, request_type, request_id);
 COMMENT ON INDEX ux_decisions_tenant_request_type IS
-    'UNIQUE idempotency key. Replaces 0001 flat (tenant_id, request_id) constraint so booking and modification with the same request_id are valid (Phase 5A.7).';
+    'UNIQUE idempotency key over (tenant_id, request_type, request_id) so a booking and a modification with the same request_id are both valid.';
 
 -- ===========================================================================
--- Feedback — operator-supplied outcomes for prior decisions. Phase 3B
--- bootstrap shape: no decision_id FK (target resolution goes through
+-- Feedback — operator-supplied outcomes for prior decisions. Bootstrap
+-- shape: no decision_id FK (target resolution goes through
 -- decisions.request_id lookup at the endpoint layer); no FK to app_users
 -- (operator_id is opaque tenant-supplied text from the start).
 -- ===========================================================================
@@ -150,7 +124,7 @@ COMMENT ON COLUMN feedback.target_request_id IS
 COMMENT ON COLUMN feedback.feedback_ts IS
     'Event time (operator-supplied). server-side created_at is the persistence timestamp.';
 COMMENT ON COLUMN feedback.operator_id IS
-    'Opaque tenant-supplied operator identifier (text). Not an FK; Phase 4 may layer validation via TenantConfig.';
+    'Opaque tenant-supplied operator identifier (text). Not an FK; validation may later be layered via TenantConfig.';
 
 -- ===========================================================================
 -- Row-Level Security policies.

@@ -4,44 +4,24 @@ Revision ID: 0001
 Revises:
 Create Date: 2026-06-05
 
-Phase 8A squash. Consolidates the auth- and customer-facing foundation
-tables from the original migration chain. Folds in:
+The ``customers.registered_country`` column lives here as part of the
+foundation grouping; the ``tenant_route_baselines`` table belongs to the
+baselines grouping and lives in ``0003_baselines.py`` instead.
 
-  - 0001_initial.py — tenants, enterprises, customers, users, app_users,
-    api_tokens table-creates + the original ``riskd_app`` NOLOGIN role +
-    the original ``GRANT ON ALL TABLES IN SCHEMA public TO riskd_app``
-    pattern.
-  - 0005_tenants_updated_at.py — adds ``tenants.updated_at`` (Phase 4A).
-  - 0006_api_tokens_last_used_index.py — adds the
-    ``ix_api_tokens_tenant_last_used`` supporting index (Phase 5A.6).
-  - 0011_case_3b_schema.py — the ``customers.registered_country`` column
-    only (Phase 6A.6). The ``tenant_route_baselines`` table from the
-    same original migration belongs to the baselines grouping and folds
-    into ``0003_baselines.py`` instead.
-
-Historical context — auth-table RLS. In the original chain,
-``0001_initial.py`` created RLS policies on ``api_tokens`` and
-``app_users``, and the runtime app connected as the postgres superuser
-(which bypasses RLS by definition). Phase 5D introduced
-``riskd_app_login`` as a non-superuser runtime role; that exposed the
-chicken-and-egg in ``app/auth.py``: the auth dependency runs
+Auth-table RLS. ``api_tokens`` and ``app_users`` intentionally have no
+RLS. The auth dependency in ``app/auth.py`` runs
 ``SELECT FROM api_tokens WHERE token_hash = $1`` BEFORE the endpoint
 handler issues ``set_tenant_id`` — there is no tenant to set yet
-because the tenant_id IS the result of the auth lookup. With the
-default sentinel ``app.tenant_id = '0'`` the RLS policy on
-``api_tokens`` filtered all rows out and auth failed. ``0009_drop_rls_on_auth_tables.py``
-resolved this by DROPping RLS on ``api_tokens`` and ``app_users``;
-each token's secret is itself the credential (UNIQUE
-``token_hash``), so the table-level RLS was vestigial under the
-post-5D runtime model.
+because the tenant_id IS the result of the auth lookup. An RLS policy
+keyed on ``app.tenant_id`` (default sentinel ``'0'``) would filter all
+rows out and break auth. Each token's secret is itself the credential
+(UNIQUE ``token_hash``), so table-level RLS would be vestigial anyway.
 
-The squash skips the RLS creation entirely — neither this migration
-nor ``0005_runtime_roles.py`` issues RLS DDL against ``api_tokens`` or
-``app_users``. Final-state schema is byte-equivalent to the
-pre-squash chain (verified via ``tests/integration/test_schema_golden.py``).
+No migration in this chain issues RLS DDL against ``api_tokens`` or
+``app_users``. Final-state schema is byte-equivalent under the canonical
+normalizer (verified via ``tests/integration/test_schema_golden.py``).
 Cross-reference ``docs/security-audit-rls-phase-5.md`` for the full
-architectural reasoning. A future reader tracing the absence of a
-"DROP RLS on auth tables" step in the squashed chain should land here.
+architectural reasoning.
 
 Idempotent guards on role creation: a ``DO $$ ... duplicate_object``
 block lets re-runs against an already-populated cluster succeed. This
@@ -64,8 +44,8 @@ depends_on: str | Sequence[str] | None = None
 
 UPGRADE_SQL = """
 -- ===========================================================================
--- App role. NOLOGIN — permissions container. Phase 5D adds the LOGIN
--- companion ``riskd_app_login`` in migration 0005 (this chain). Idempotent
+-- App role. NOLOGIN — permissions container. The LOGIN companion
+-- ``riskd_app_login`` is created in migration 0005. Idempotent
 -- guard for local-dev re-runs against existing volumes.
 -- ===========================================================================
 DO $$ BEGIN
@@ -75,8 +55,7 @@ END $$;
 
 -- ===========================================================================
 -- Tenants — the partitioning dimension. No RLS (tenants are not scoped to
--- themselves). ``updated_at`` lands at table-create time in the squash
--- (Phase 4A originally added it via ALTER in old 0005).
+-- themselves).
 -- ===========================================================================
 CREATE TABLE tenants (
     id         serial PRIMARY KEY,
@@ -87,7 +66,7 @@ CREATE TABLE tenants (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON COLUMN tenants.updated_at IS
-    'Last time the tenant row (including config JSONB) was modified. Populated by load_tenant_config (Phase 4A) and updated by scripts/tenant_onboard.py.';
+    'Last time the tenant row (including config JSONB) was modified. Populated by load_tenant_config and updated by scripts/tenant_onboard.py.';
 
 -- ===========================================================================
 -- Enterprises — optional corporate-account grouping within a tenant.
@@ -103,11 +82,8 @@ CREATE TABLE enterprises (
 CREATE INDEX ix_enterprises_tenant_id ON enterprises (tenant_id);
 
 -- ===========================================================================
--- Customers — primary fraud-evaluation entity. ``registered_country`` lands
--- at table-create time in the squash (Phase 6A.6 originally added it via
--- ALTER in old 0011). Column order matches the post-0011 attribute order
--- (Phase 1 columns first; ``registered_country`` last) so pg_dump output is
--- byte-equivalent under the canonical normalizer.
+-- Customers — primary fraud-evaluation entity. ``registered_country`` is
+-- ordered last so the dump is byte-equivalent under the canonical normalizer.
 -- ===========================================================================
 CREATE TABLE customers (
     id                    serial PRIMARY KEY,
@@ -131,7 +107,7 @@ COMMENT ON COLUMN customers.registered_country IS
     'ISO 3166-1 alpha-2 country code supplied by platform integration on '
     'booking commits. Drives case-3b detection via the '
     'customer_destination_country_mismatch_outbound derivation (build_context) and the '
-    'tenant_route_baselines population (6A.7 upsert). Pydantic enforces shape '
+    'tenant_route_baselines population (upsert). Pydantic enforces shape '
     'at ingress (CustomerData.registered_country, ^[A-Z]{2}$).';
 
 -- ===========================================================================
@@ -150,9 +126,8 @@ CREATE TABLE users (
 
 -- ===========================================================================
 -- API tokens — bearer-token lookup. NO RLS — see module docstring for the
--- Phase 5D auth chicken-and-egg rationale. ``ix_api_tokens_tenant_last_used``
--- lands at table-create time (Phase 5A.6 originally added it via separate
--- migration).
+-- auth chicken-and-egg rationale. ``ix_api_tokens_tenant_last_used`` is
+-- created here at table-create time.
 -- ===========================================================================
 CREATE TABLE api_tokens (
     id           serial PRIMARY KEY,
@@ -170,7 +145,7 @@ COMMENT ON INDEX ix_api_tokens_tenant_last_used IS
     'Supports stale-token queries (least-recently-used / unused tokens per tenant). NULLS LAST so never-used tokens sort at the tail of DESC scans.';
 
 -- ===========================================================================
--- App users — Phase 4 admin principals. NO RLS — same auth-lookup
+-- App users — admin principals. NO RLS — same auth-lookup
 -- rationale as api_tokens (see module docstring).
 -- ===========================================================================
 CREATE TABLE app_users (

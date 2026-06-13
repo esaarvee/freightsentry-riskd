@@ -4,20 +4,12 @@ Revision ID: 0005
 Revises: 0004
 Create Date: 2026-06-05
 
-Phase 8A squash. Final migration in the squashed chain. Folds in:
+No RLS DDL is issued on auth tables anywhere in this chain — see
+``0001_foundation.py`` module docstring for the auth-table RLS
+chicken-and-egg rationale.
 
-  - 0008_riskd_app_login.py — CREATE ROLE riskd_app_login WITH LOGIN
-    INHERIT + GRANT riskd_app TO riskd_app_login (Phase 5D.1).
-
-The original ``0009_drop_rls_on_auth_tables.py`` is NOT folded in here
-because new ``0001_foundation.py`` never creates RLS on
-``api_tokens`` or ``app_users`` in the first place. Final-state
-schema is byte-equivalent to the pre-squash chain (see new
-``0001_foundation.py`` module docstring for the full historical
-context on the auth-table RLS chicken-and-egg).
-
-Password sourcing (PBL D2)
---------------------------
+Password sourcing
+-----------------
 The ``riskd_app_login`` password is read at migration time from the
 ``DATABASE_URL`` env var the deploy migrate task already mounts (the
 runtime app's connection DSN, secret-managed). Single source of truth:
@@ -60,7 +52,7 @@ def _app_login_password() -> str:
     # unchanged. NOTE: this fallback is a foot-gun if an operator runs
     # `alembic upgrade head` against a production cluster without
     # DATABASE_URL set — the prod role would be rotated to the dev
-    # literal. The gated deploy path (PBL D5) injects DATABASE_URL via
+    # literal. The gated deploy path injects DATABASE_URL via
     # the migrate task definition's secrets block, so the production
     # pipeline cannot hit this branch. Operators running migrations
     # manually outside that pipeline must set DATABASE_URL explicitly.
@@ -103,7 +95,7 @@ $mig$;
 GRANT riskd_app TO riskd_app_login;
 
 COMMENT ON ROLE riskd_app_login IS
-    'Runtime DB connection role (Phase 5D). LOGIN INHERIT; receives all grants of riskd_app via the GRANT below. Password sourced from DATABASE_URL at migration time (PBL D2).';
+    'Runtime DB connection role. LOGIN INHERIT; receives all grants of riskd_app via the GRANT below. Password sourced from DATABASE_URL at migration time.';
 """
     try:
         op.execute(sql)

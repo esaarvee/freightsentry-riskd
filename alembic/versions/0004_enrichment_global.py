@@ -4,12 +4,6 @@ Revision ID: 0004
 Revises: 0003
 Create Date: 2026-06-05
 
-Phase 8A squash. Consolidates the intentionally-global (no-RLS) tables.
-Folds in:
-
-  - 0001_initial.py — ``ip_enrichment`` and ``global_blocked_vectors``
-    table-creates with their Phase 1 column sets.
-
 Both tables intentionally skip RLS: ``ip_enrichment`` is a lazy-cached
 IP-fact store shared across tenants (no tenant_id column); ``global_blocked_vectors``
 is a capability stub for cross-tenant vector sharing (``share_enabled =

@@ -4,32 +4,19 @@ Revision ID: 0003
 Revises: 0002
 Create Date: 2026-06-05
 
-Phase 8A squash. Consolidates the customer- and tenant-baseline tables.
-Folds in:
+The ``tenant_route_baselines`` table lives here as part of the baselines
+grouping; the ``customers.registered_country`` column belongs to the
+foundation grouping and lives in ``0001_foundation.py`` instead.
 
-  - 0001_initial.py — customer_baselines table-create with Phase 1 column
-    set (origin/dest/lane/ip/country stat-dicts; Welford triples;
-    last-booking pointers; decay anchor).
-  - 0010_country_route_stats.py — adds ``customer_baselines.country_route_stats``
-    JSONB column (Phase 6A.1, case-3a route-baseline derivation).
-  - 0011_case_3b_schema.py — ``tenant_route_baselines`` table + its RLS
-    policy and explicit GRANT (Phase 6A.6, case-3b detection). The
-    ``customers.registered_country`` column from the same original
-    migration is folded into ``0001_foundation.py`` instead, since it
-    belongs to the foundation grouping.
-
-Column ordering: ``country_route_stats`` lands at the end of the
-``customer_baselines`` CREATE TABLE so the post-squash attribute order
-matches the post-0010 pre-squash order (where the column was appended
-via ALTER TABLE).
+Column ordering: ``country_route_stats`` is ordered last in the
+``customer_baselines`` CREATE TABLE so the dump is byte-equivalent under
+the canonical normalizer.
 
 Seed migration. The ``INSERT INTO tenant_route_baselines ... SELECT``
-from old 0011 is preserved verbatim. Pre-launch it yields 0 rows
-(no customers with ``registered_country`` set yet; no shipments).
-For dev databases populated mid-Phase-6, the seed correctly populates
-the table from the existing join. The seed runs as a separate
-``op.execute`` call after the schema additions so any error fails the
-migration loudly rather than producing partial state.
+back-fills the histogram from existing shipments/customers; it yields 0
+rows on an empty DB. The seed runs as a separate ``op.execute`` call
+after the schema additions so any error fails the migration loudly
+rather than producing partial state.
 """
 
 from __future__ import annotations
@@ -113,7 +100,7 @@ CREATE POLICY tenant_isolation ON customer_baselines
 -- (customer_country, origin_country, destination_country) triples.
 -- Composite PK doubles as the natural row-lookup index; the PK's
 -- leading-column (tenant_id) BTREE serves the tenant-wide
--- total-observations sum the rarity derivation needs (Phase 6A.8) —
+-- total-observations sum the rarity derivation needs —
 -- no separate single-column index needed.
 -- ===========================================================================
 CREATE TABLE tenant_route_baselines (
@@ -128,9 +115,9 @@ CREATE TABLE tenant_route_baselines (
 COMMENT ON TABLE tenant_route_baselines IS
     'Per-tenant population frequency of (customer_country, origin_country, '
     'destination_country) triples. Populated synchronously on each booking '
-    'commit (6A.7 UPSERT) and consumed by Phase 6A.8 derive_route_rarity '
+    'commit (UPSERT) and consumed by derive_route_rarity '
     'to produce the shipment_route_rare_for_tenant signal used by the '
-    'cold_start_population_baseline_rare_with_carrier_dropoff rule (6A.9).';
+    'cold_start_population_baseline_rare_with_carrier_dropoff rule.';
 
 ALTER TABLE tenant_route_baselines ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON tenant_route_baselines
@@ -146,9 +133,8 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO riskd_app;
 
 
 SEED_SQL = """
--- Pre-launch this yields 0 rows; for dev DBs populated mid-Phase-6
--- the seed correctly back-fills the histogram from the existing
--- shipments/customers join. Reads structured columns + JSONB path
+-- This back-fills the histogram from the existing shipments/customers
+-- join; it yields 0 rows on an empty DB. Reads structured columns + JSONB path
 -- expressions on shipments.origin / shipments.destination. GROUP BY
 -- ensures one row per distinct triple.
 INSERT INTO tenant_route_baselines (
