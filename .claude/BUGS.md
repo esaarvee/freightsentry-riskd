@@ -506,3 +506,16 @@ match uv.lock — the same class of risk .ai/conventions.md calls out for
 the ruff pre-commit rev. Likely affects more than structlog.
 Suggested action: Phase 9 — adopt uv.lock-based install in CI/Dockerfile
 (or re-resolve uv.lock to current and pin the pre-commit/test envs to it).
+
+## 2026-06-13 — CI: snyk action pinned to floating @master ref
+
+Discovered by: test-soundness pass (CI security review) during REFACTOR_PLAN_test-soundness.md CI commit
+Location: .github/workflows/test.yml (snyk job, `uses: snyk/actions/python@master`)
+Severity: low
+Observation: The Snyk job pins a third-party action to a moving `@master`
+ref, which runs in CI with access to SNYK_TOKEN — a compromised upstream
+master would execute with that secret. Pre-existing (not introduced by
+the two-job CI split; that diff only removed a comment from the job).
+First-party actions (checkout@v4, setup-python@v5) are pinned to major
+tags. Suggested action: pin snyk/actions/python to a release tag or
+commit SHA. Out of scope for the test-soundness pass.
