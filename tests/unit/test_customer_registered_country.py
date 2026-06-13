@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.5 CustomerData.registered_country Pydantic field
+"""Unit tests for the CustomerData.registered_country Pydantic field
 + Address.country ISO 3166-1 alpha-2 validation extension.
 
 Both fields validate as ISO 3166-1 alpha-2 uppercase two-letter codes when
@@ -6,7 +6,7 @@ not None. None remains the safe default — corpora without ground-truth
 country data submit None and the downstream triangle-mismatch derivation
 correctly returns False.
 
-Address.country validation extension (per 6A.2 security-auditor
+Address.country validation extension (per a security-auditor
 informational note) eliminates the "||" composite-key collision risk
 on country_route_stats / lane_stats.
 """
@@ -81,7 +81,7 @@ def test_registered_country_round_trip_via_model_dump() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Address.country (validation extension per 6A.2 security-auditor note)
+# Address.country (validation extension per security-auditor note)
 # ---------------------------------------------------------------------------
 
 

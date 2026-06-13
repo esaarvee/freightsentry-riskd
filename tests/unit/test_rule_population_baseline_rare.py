@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.9 cold_start_population_baseline_rare_with_carrier_dropoff rule.
+"""Unit tests for cold_start_population_baseline_rare_with_carrier_dropoff rule.
 
 Truth-table coverage for the case-3b sophisticated compound:
     shipment_route_rare_for_tenant
@@ -70,7 +70,7 @@ def test_cold_start_boundary_at_ten_does_not_fire(rule) -> None:
 
 
 def test_all_signals_false_does_not_fire(rule) -> None:
-    """base_ctx defaults preserve pre-Phase-6A behavior (no fire).
+    """base_ctx defaults preserve baseline behavior (no fire).
     The case-3b signals (rare + dropoff) default False; the AND
     short-circuits regardless of the customer_observations default."""
     assert rule.evaluate(base_ctx()) is False

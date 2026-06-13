@@ -1,7 +1,7 @@
-"""Unit tests for per-tenant maturity overrides in score() (4C.1).
+"""Unit tests for per-tenant maturity overrides in score().
 
 Covers:
-- Empty tenant_config produces identical output to pre-4C scoring
+- Empty tenant_config produces identical output to baseline scoring
 - maturity_age_days override changes maturity computation
 - maturity_shipments override changes maturity computation
 - maturity_k override changes the Layer 3 downweight magnitude

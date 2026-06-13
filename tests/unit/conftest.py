@@ -1,7 +1,7 @@
 """Shared fixtures for unit tests that exercise app/rules.yaml end-to-end.
 
-Phase 2C adds 6 new rule-test modules (2C.1 trust-conditioned through
-2C.7 IP-familiarity). Each needs to load the production rules.yaml,
+Several rule-test modules (trust-conditioned through IP-familiarity)
+each need to load the production rules.yaml,
 find a rule by name, and exercise it with a controlled neutral ctx
 dict. These helpers live here so the same pattern doesn't get
 duplicated across six files.
@@ -101,47 +101,47 @@ def base_ctx() -> dict[str, Any]:
         "is_email_blocklisted": False,
         "is_email_suspicious_pattern": False,
         "is_phone_dummy_pattern": False,
-        # Previously-rejected (3B) — neutral defaults; tests targeting
-        # the 3B.5 previously-rejected rules override explicitly.
+        # Previously-rejected — neutral defaults; tests targeting
+        # the previously-rejected rules override explicitly.
         "email_previously_rejected": False,
         "phone_previously_rejected": False,
         "origin_previously_rejected": False,
         "ip_previously_rejected": False,
-        # Currency-normalized thresholds (4B.4) — USD-default values matching
-        # DEFAULT_VALUE_CAPS. Tests for the 4B.5 rewritten rules override
+        # Currency-normalized thresholds — USD-default values matching
+        # DEFAULT_VALUE_CAPS. Tests for the rewritten rules override
         # these to exercise per-currency behavior.
         "shipment_currency": "USD",
         "shipment_value_threshold_high": 10000.0,
         "shipment_value_threshold_new_user": 5000.0,
         "shipment_value_threshold_medium": 2000.0,
         "shipment_value_threshold_low": 1000.0,
-        # Phase 6A.2 — case-3a signals. Defaults are neutral (False) so
-        # rules predating Phase 6A behave identically. case-3a rule
+        # case-3a signals. Defaults are neutral (False) so
+        # rules predating these signals behave identically. case-3a rule
         # tests override origin_via_carrier_dropoff +
         # shipment_route_unfamiliar_for_customer explicitly.
         "origin_via_carrier_dropoff": False,
         "shipment_route_unfamiliar_for_customer": False,
-        # Phase 6A.5 — case-3b signals. Defaults are None / False;
+        # case-3b signals. Defaults are None / False;
         # case-3b rule tests override explicitly. The default
         # registered_country=None + mismatch=False neutralizes the
         # case-3b compound shape in tests that aren't targeting it.
         "customer_registered_country": None,
-        # Phase 7C.2 — case-3b asymmetric signal (replaces the deleted
+        # case-3b asymmetric signal (replaces the deleted
         # symmetric triangle-mismatch). Default False; the
         # cold_start_outbound_carrier_dropoff rule tests override.
         "customer_destination_country_mismatch_outbound": False,
-        # Phase 7C.6 — case-2 learning-based ASN deviation. Default
+        # case-2 learning-based ASN deviation. Default
         # False; the api_booking_from_unfamiliar_asn rule tests
         # override explicitly.
         "unfamiliar_asn_for_customer": False,
-        # Phase 6A.8 — case-3b sophisticated signal. Default False so
-        # rules predating Phase 6A behave identically; case-3b
-        # sophisticated rule tests (6A.9) override explicitly.
+        # case-3b sophisticated signal. Default False so
+        # rules predating this signal behave identically; case-3b
+        # sophisticated rule tests override explicitly.
         "shipment_route_rare_for_tenant": False,
-        # Modification (3A) — neutral defaults imported from
+        # Modification — neutral defaults imported from
         # app.context.BOOKING_PATH_MODIFICATION_DEFAULTS so production and
         # tests cannot drift. modification_type "none" matches no enum
-        # value, so the 3A.7 modification rules don't trip in
+        # value, so the modification rules don't trip in
         # non-modification tests. Tests targeting modification rules
         # override these explicitly.
         **BOOKING_PATH_MODIFICATION_DEFAULTS,

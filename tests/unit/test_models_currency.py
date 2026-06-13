@@ -1,9 +1,9 @@
-"""Unit tests for the Phase 4B currency field on BookingRequest.shipment and
+"""Unit tests for the currency field on BookingRequest.shipment and
 ModificationRequest. 11 tests (10 from plan + 1 backward-compat).
 
 ISO 4217 shape validation (3 uppercase letters) is enforced at the Pydantic
 layer; the allowed-list check against tenant_config.allowed_currencies runs
-at request time in app/api/booking.py and app/api/modification.py (4B.3).
+at request time in app/api/booking.py and app/api/modification.py.
 """
 
 from __future__ import annotations

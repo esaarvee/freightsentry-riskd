@@ -1,4 +1,4 @@
-"""Unit tests for the 4 Phase 3B previously-rejected Context fields.
+"""Unit tests for the 4 previously-rejected Context fields.
 
 build_context populates email_previously_rejected, phone_previously_rejected,
 origin_previously_rejected, ip_previously_rejected from the loaded
@@ -44,7 +44,7 @@ def _baseline_with_rejections(
 # These tests directly exercise the dict-lookup shape used by
 # build_context — copied here as the canonical derivation. If
 # build_context's derivation drifts from this shape, the integration
-# tests in 3B.6 catch it; these unit tests pin the semantics.
+# tests catch it; these unit tests pin the semantics.
 
 
 def _email_previously_rejected(baseline: CustomerBaseline, email_hmac: str | None) -> bool:

@@ -1,4 +1,4 @@
-"""Unit tests for Phase 7C.2 cold_start_outbound_carrier_dropoff rule.
+"""Unit tests for the cold_start_outbound_carrier_dropoff rule.
 
 Truth-table coverage for the case-3b asymmetric compound (Roulottes
 Lupien attack shape):
@@ -75,7 +75,7 @@ def test_cold_start_boundary_at_ten_does_not_fire(rule) -> None:
 
 
 def test_all_signals_false_does_not_fire(rule) -> None:
-    """base_ctx defaults preserve pre-Phase-7C behavior (no fire)."""
+    """base_ctx defaults preserve prior behavior (no fire)."""
     assert rule.evaluate(base_ctx()) is False
 
 

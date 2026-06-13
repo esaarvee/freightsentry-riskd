@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 2C.5 velocity + identity-novelty rules.
+"""Unit tests for the velocity + identity-novelty rules.
 
 Eleven rules grouped into:
 - Velocity spikes (5 rules) — hourly + daily spikes per channel + IP-velocity
@@ -217,8 +217,8 @@ def test_high_value_new_user_strict_5000(ruleset: RuleSet) -> None:
 
 
 def test_velocity_novelty_rules_load(ruleset: RuleSet) -> None:
-    """All 11 rules added in 2C.5 must be present after the rule-loader
-    runs. Canonical total-count audit lives in 2C.7."""
+    """All 11 velocity + identity-novelty rules must be present after the
+    rule-loader runs. Canonical total-count audit lives in the rule-count test."""
     expected = {
         "velocity_spike_hourly_ui",
         "velocity_spike_hourly_api",

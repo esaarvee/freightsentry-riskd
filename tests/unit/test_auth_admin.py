@@ -1,4 +1,4 @@
-"""Unit tests for require_admin_role (4D.1).
+"""Unit tests for require_admin_role.
 
 5 tests covering:
 - admin role passes through

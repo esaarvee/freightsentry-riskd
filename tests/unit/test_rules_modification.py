@@ -1,10 +1,10 @@
-"""Unit tests for the 8 Phase 3A.7 modification rules.
+"""Unit tests for the 8 modification rules.
 
 Per-rule: one fire case plus 1-2 negative cases (below-threshold and/or
 wrong-discriminator). Tests load the production app/rules.yaml via the
 shared `ruleset` fixture and exercise each rule via `rule.evaluate(ctx)`
 — production code path, no inline re-implementation of rule conditions
-(Phase 2 false-pass lesson).
+(false-pass lesson).
 
 Plus two cross-cutting tests:
 - test_modification_rules_dormant_under_booking_path_defaults — pins

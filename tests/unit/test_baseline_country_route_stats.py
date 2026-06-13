@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.2 country_route_stats histogram population.
+"""Unit tests for country_route_stats histogram population.
 
 Pure in-memory exercises of CustomerBaseline.add_observation against the
 new shipment_origin_country / shipment_destination_country parameters.

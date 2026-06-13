@@ -564,3 +564,17 @@ test path, not a schema defect. Independent of the comment-cleanliness edits (th
 dumps the live DB, which the edits do not touch).
 Suggested action: pin the test to the container pg_dump (or a pinned client version), or
 regenerate the golden with the supported client version, so the host path is deterministic.
+
+## 2026-06-13 — stale test identifier: test_allowed_context_fields_count_is_76_after_6a8 asserts ==77
+
+Discovered by: test-reviewer + code-flow during comment-cleanliness pass (Commit 7)
+Location: tests/unit/test_context_tenant_config_passthrough.py (function name) and the
+similarly-named test_rule_count_after_6a9
+Severity: low
+Observation: The test function name embeds a stale count ("_is_76_") and a phase token
+("_after_6a8") while the assertion checks == 77. Pre-existing (confirmed identical at HEAD);
+the comment-cleanliness pass intentionally did NOT rename it (renaming an identifier is a
+code change, out of scope for a comment/docstring-text pass). The _PHASE_2B_ADDITIONS
+constant name is a related out-of-scope phase-token-in-identifier case.
+Suggested action: rename to a count-agnostic, phase-agnostic identifier (e.g.
+test_allowed_context_fields_present / _expected_count) in a separate code commit.

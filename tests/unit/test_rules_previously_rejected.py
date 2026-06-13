@@ -1,4 +1,4 @@
-"""Unit tests for the 4 Phase 3B.5 previously-rejected rules.
+"""Unit tests for the 4 previously-rejected rules.
 
 Per rule: one fire case (the corresponding *_previously_rejected
 context field set to True) and one no-fire case (False). All 4 rules
@@ -7,7 +7,7 @@ YAML config drift fails per-rule rather than only surfacing in scoring
 integration tests.
 
 Tests call rule.evaluate(ctx) directly — production code path; no
-inline re-implementation of rule conditions (Phase 2 false-pass
+inline re-implementation of rule conditions (false-pass
 lesson).
 """
 

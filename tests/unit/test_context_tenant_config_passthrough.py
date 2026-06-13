@@ -1,14 +1,13 @@
-"""Unit tests for 4A.3 — `tenant_config` parameter on build_context.
+"""Unit tests for the `tenant_config` parameter on build_context.
 
-The 4A.3 commit extends build_context and build_modification_context to
-accept `tenant_config: TenantConfig` as a required keyword arg. 4A.4
-wires it in at the endpoint call sites. In 4A no rule consumes the
-config — 4B/4C are the consumers.
+build_context and build_modification_context accept
+`tenant_config: TenantConfig` as a required keyword arg, wired in at the
+endpoint call sites. The currency-derived fields are the consumers.
 
 3 tests:
 1. build_context REQUIRES tenant_config (TypeError if omitted)
 2. build_modification_context REQUIRES tenant_config
-3. ctx shape is unchanged from Phase 3 — no new keys yet (4B adds 5)
+3. ctx shape carries no new keys from the bare-context baseline
 """
 
 from __future__ import annotations
@@ -37,29 +36,29 @@ def test_build_modification_context_signature_requires_tenant_config() -> None:
 
 
 def test_allowed_context_fields_count_is_76_after_6a8() -> None:
-    """4A starts at 66; 4B.4 adds 5 currency-derived fields → 71;
-    6A.2 adds 2 case-3a signals → 73; 6A.5 adds 2 case-3b signals → 75;
-    6A.8 adds 1 case-3b sophisticated signal → 76. Phase 7C.2 swaps
-    the symmetric triangle-mismatch field for the asymmetric
+    """Base whitelist starts at 66; 5 currency-derived fields → 71;
+    2 case-3a signals → 73; 2 case-3b signals → 75;
+    1 case-3b sophisticated signal → 76. The symmetric
+    triangle-mismatch field is swapped for the asymmetric
     outbound-destination-mismatch field — net unchanged at 76.
-    Phase 7C.6 adds unfamiliar_asn_for_customer → 77."""
+    unfamiliar_asn_for_customer → 77."""
     from app.rules import ALLOWED_CONTEXT_FIELDS
 
     assert len(ALLOWED_CONTEXT_FIELDS) == 77
-    # The 5 Phase 4B fields must remain present in the whitelist.
+    # The 5 currency-derived fields must remain present in the whitelist.
     assert "shipment_currency" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_high" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_new_user" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_medium" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_value_threshold_low" in ALLOWED_CONTEXT_FIELDS
-    # The 2 Phase 6A.2 fields must be present.
+    # The 2 case-3a fields must be present.
     assert "origin_via_carrier_dropoff" in ALLOWED_CONTEXT_FIELDS
     assert "shipment_route_unfamiliar_for_customer" in ALLOWED_CONTEXT_FIELDS
-    # Phase 6A.5 customer_registered_country is retained; Phase 7C.2
-    # replaced the symmetric triangle-mismatch with the asymmetric
+    # customer_registered_country is retained; the symmetric
+    # triangle-mismatch is replaced with the asymmetric
     # outbound mismatch.
     assert "customer_registered_country" in ALLOWED_CONTEXT_FIELDS
     assert "customer_destination_country_mismatch_outbound" in ALLOWED_CONTEXT_FIELDS
     assert "customer_country_triangle_mismatch" not in ALLOWED_CONTEXT_FIELDS
-    # The Phase 6A.8 sophisticated signal must be present.
+    # The sophisticated signal must be present.
     assert "shipment_route_rare_for_tenant" in ALLOWED_CONTEXT_FIELDS

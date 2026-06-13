@@ -1,6 +1,6 @@
-"""Unit tests for DEFAULT_VALUE_CAPS + resolve_value_caps (4B.2 / 6B.1).
+"""Unit tests for DEFAULT_VALUE_CAPS + resolve_value_caps.
 
-Phase 6B re-keyed DEFAULT_VALUE_CAPS from "USD" to "CAD" with same
+DEFAULT_VALUE_CAPS was re-keyed from "USD" to "CAD" with same
 numeric thresholds. The fallback path now returns
 DEFAULT_VALUE_CAPS["CAD"]. USD-explicit value_caps overrides still
 work end-to-end; multi-currency tenants are still supported.
@@ -13,7 +13,7 @@ Tests covering:
 - Custom USD-only value_caps + USD → custom values (multi-currency support)
 - Multi-currency value_caps + missing currency → CAD fallback + warning
 - DEFAULT_VALUE_CAPS["CAD"] has all 4 tier keys
-- DEFAULT_VALUE_CAPS["CAD"] values match Phase 2 thresholds
+- DEFAULT_VALUE_CAPS["CAD"] values match the legacy thresholds
 - Returned dict identity (not deep-copied; callers must not mutate)
 """
 
@@ -64,8 +64,8 @@ def test_empty_value_caps_dict_falls_back() -> None:
 def test_none_value_caps_usd_falls_back_to_cad_with_warning() -> None:
     # structlog doesn't route through stdlib by default, so we patch the
     # bound logger directly and assert the warning was emitted with the
-    # tenant_id, currency, and metric=True tag for Phase 5 EMF.
-    # Phase 6B: USD now triggers the fallback (was CAD pre-6B).
+    # tenant_id, currency, and metric=True tag for EMF.
+    # USD now triggers the fallback (re-keyed USD → CAD).
     with patch("app.tenant_config._log") as mock_log:
         result = resolve_value_caps(_tc(value_caps=None, tenant_id=42), "USD")
     assert result == DEFAULT_VALUE_CAPS["CAD"]
@@ -96,7 +96,7 @@ def test_multi_currency_value_caps_missing_currency_falls_back_with_warning() ->
 def test_custom_value_caps_matching_currency_returns_custom_no_warning() -> None:
     # Happy path: value_caps is populated AND currency is in it. The helper
     # must NOT emit a fallback warning. Guards against a regression where the
-    # helper accidentally logs on every call (which would flood Phase 5 EMF).
+    # helper accidentally logs on every call (which would flood EMF).
     custom_cad = {"high": 12500.0, "new_user": 6250.0, "medium": 2500.0, "low": 1250.0}
     with patch("app.tenant_config._log") as mock_log:
         result = resolve_value_caps(_tc(value_caps={"CAD": custom_cad}), "CAD")
@@ -106,7 +106,7 @@ def test_custom_value_caps_matching_currency_returns_custom_no_warning() -> None
 
 def test_custom_usd_value_caps_returns_custom_not_default() -> None:
     """USD-explicit value_caps continues to work end-to-end (multi-currency
-    support preserved after the Phase 6B CAD-default switch)."""
+    support preserved after the CAD-default switch)."""
     custom_usd = {"high": 99999.0, "new_user": 50000.0, "medium": 20000.0, "low": 10000.0}
     result = resolve_value_caps(_tc(value_caps={"USD": custom_usd}), "USD")
     assert result == custom_usd
@@ -118,8 +118,8 @@ def test_default_value_caps_cad_has_all_four_tiers() -> None:
 
 def test_default_value_caps_match_current_thresholds() -> None:
     # These literals must match the 7 currency-implicit rules in app/rules.yaml
-    # (currency thresholds). 4B.5 rewrote those rules to consult these values;
-    # Phase 6B re-keyed USD → CAD; numeric thresholds unchanged.
+    # (currency thresholds). The rewritten rules consult these values;
+    # re-keyed USD → CAD; numeric thresholds unchanged.
     assert DEFAULT_VALUE_CAPS["CAD"]["high"] == 10000.0
     assert DEFAULT_VALUE_CAPS["CAD"]["new_user"] == 5000.0
     assert DEFAULT_VALUE_CAPS["CAD"]["medium"] == 2000.0
@@ -128,7 +128,7 @@ def test_default_value_caps_match_current_thresholds() -> None:
 
 def test_returned_dict_for_default_is_default_reference() -> None:
     # The helper returns DEFAULT_VALUE_CAPS["CAD"] directly on fallback.
-    # Callers MUST NOT mutate. Phase 4B+ consumers (4B.4 context derivations)
+    # Callers MUST NOT mutate. Consumers (context derivations)
     # only read the dict.
     result = resolve_value_caps(_tc(value_caps=None), "CAD")
     assert result is DEFAULT_VALUE_CAPS["CAD"]

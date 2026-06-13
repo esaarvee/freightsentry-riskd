@@ -1,4 +1,4 @@
-"""Unit tests for scripts/tenant_onboard.py helpers (4A.5).
+"""Unit tests for scripts/tenant_onboard.py helpers.
 
 6 tests on the pure helpers:
 - _load_initial_config(None) -> {}
@@ -8,7 +8,7 @@
 - _validate_initial_config({}) -> None
 - _validate_initial_config({"unknown": 1}) -> SystemExit(1)
 
-Full-script E2E tests live in tests/integration/ (4A.6).
+Full-script E2E tests live in tests/integration/.
 """
 
 from __future__ import annotations

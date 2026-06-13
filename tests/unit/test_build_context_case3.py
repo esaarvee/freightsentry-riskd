@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.2 case-3a Context derivations.
+"""Unit tests for case-3a Context derivations.
 
 Two new Context fields:
 - origin_via_carrier_dropoff (passthrough from payload.shipment)

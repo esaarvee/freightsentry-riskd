@@ -1,4 +1,4 @@
-"""Unit tests for _truncate_stat_dict and _truncate_hmac_set (4D.3 helpers).
+"""Unit tests for _truncate_stat_dict and _truncate_hmac_set helpers.
 
 6 tests covering:
 - Empty stat-dict

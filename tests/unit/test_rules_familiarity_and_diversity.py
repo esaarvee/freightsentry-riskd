@@ -1,12 +1,12 @@
-"""Unit tests for the Phase 2C.7 closing-batch rule additions.
+"""Unit tests for the closing-batch rule additions.
 
 Five rules: 3 IP-familiarity-tier-conditioned, value_novelty_compound,
-and a narrower locked-customer compound. The canonical Phase-2-end
+and a narrower locked-customer compound. The canonical end-of-phase
 total-rule-count audit also lives here (test_phase2_end_total_rule_count).
 
 Triaged from this commit (per plan, with reason in YAML comment):
 - unknown_email_for_customer / unknown_phone_for_customer: require
-  proxy-field adaptation; defer to Phase 3+
+  proxy-field adaptation; defer to a later phase
 - user_ip_rotation_elevated / user_ip_rotation_high: semantic mismatch
   between customer_distinct_ips_30d (all IPs, 30d) and freight_risk's
   user_unique_non_cloud_ips_daily; defer
@@ -133,12 +133,12 @@ def test_locked_customer_new_ip_family_compound(ruleset: RuleSet) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Set-level audit + canonical Phase 2 end total-count
+# Set-level audit + canonical end-of-phase total-count
 # ---------------------------------------------------------------------------
 
 
 def test_familiarity_diversity_rules_load(ruleset: RuleSet) -> None:
-    """All 5 rules added in 2C.7 must be present after rule-loader runs."""
+    """All 5 closing-batch rules must be present after rule-loader runs."""
     expected = {
         "ip_family_familiar_cloud",
         "ip_family_familiar_residential",
@@ -157,22 +157,22 @@ def test_total_rule_count(ruleset: RuleSet) -> None:
     set-membership tests match the production catalogue. See
     docs/history.md for the full per-phase additions.
 
-    Phase 1 baseline:  14 rules
-    2C.1 trust-conditioned:                       +7 =  21
-    2C.2 dormancy + customer lock-in:             +5 =  26
-    2C.3 residential ASN + IP-class diversity:    +6 =  32
-    2C.4 recipient overlap:                       +2 =  34
-    2C.5 velocity + identity-novelty:            +11 =  45
-    2C.6 value-anomaly + geographic + threat:    +17 =  62
-    2C.7 familiarity-tier + closing pieces:       +5 =  67
-    3A.7 modification rules:                      +8 =  75
-    3B.5 previously-rejected rules:               +4 =  79
-    6A.3 case_3_compound:                         +1 =  80
-    6A.5 cold_start_country_triangle:             +1 =  81
-    6A.9 cold_start_population_baseline_rare:     +1 =  82
-    7C.2 swap cold_start_country_triangle for
+    baseline:                                     14 rules
+    trust-conditioned:                            +7 =  21
+    dormancy + customer lock-in:                  +5 =  26
+    residential ASN + IP-class diversity:         +6 =  32
+    recipient overlap:                            +2 =  34
+    velocity + identity-novelty:                 +11 =  45
+    value-anomaly + geographic + threat:         +17 =  62
+    familiarity-tier + closing pieces:            +5 =  67
+    modification rules:                           +8 =  75
+    previously-rejected rules:                    +4 =  79
+    case_3_compound:                              +1 =  80
+    cold_start_country_triangle:                  +1 =  81
+    cold_start_population_baseline_rare:          +1 =  82
+    swap cold_start_country_triangle for
          cold_start_outbound_carrier_dropoff:     net 0 = 82
-    7C.7 delete api_non_cloud_ip +
+    delete api_non_cloud_ip +
          non_cloud_established_account, add
          api_booking_from_unfamiliar_asn:         net -1 = 81
     """

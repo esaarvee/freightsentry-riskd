@@ -3,7 +3,7 @@
 Covers field-level constraints (length bounds, enum membership, datetime
 coercion, extra="forbid") that the endpoint relies on at the validation
 boundary. Two-tier idempotency + label-monotonicity semantics belong on
-the endpoint (3B.3), not the model.
+the endpoint, not the model.
 """
 
 from __future__ import annotations

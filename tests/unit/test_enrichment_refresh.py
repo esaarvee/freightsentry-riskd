@@ -186,7 +186,7 @@ class TestAtomicReplaceStream:
         assert list(tmp_path.glob(f"{target.name}.tmp.*")) == []
 
     async def test_streams_in_chunks_not_full_buffer(self, tmp_path: Path) -> None:
-        """Pin the streaming invariant per Amendment 2 F3: the IP2Proxy
+        """Pin the streaming invariant: the IP2Proxy
         path is 1.6 GB extracted; a regression that buffered the full
         source into a Python bytes object would defeat the entire reason
         `atomic_replace_stream` exists. This test asserts the source is
@@ -553,7 +553,7 @@ class TestIp2Proxy:
         synthetic_settings: Settings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Cycle-2 regression-pin per Amendment 2 F3: the ZIP-extract
+        """Cycle-2 regression-pin: the ZIP-extract
         path must call `atomic_replace_stream` (streaming) not
         `atomic_replace` (bytes-form). A regression that buffered the
         1.6 GB BIN into Python `bytes` would OOM on small Fargate
@@ -897,7 +897,7 @@ class TestLoadedSources:
 
 
 # ---------------------------------------------------------------------------
-# refresh_all_once + refresh_loop (PBL C2)
+# refresh_all_once + refresh_loop
 # ---------------------------------------------------------------------------
 
 
@@ -1136,7 +1136,7 @@ class TestRefreshLoop:
 
 
 class TestCowConcurrencyInvariant:
-    """Pin the Amendment 1 F2 CoW concurrency invariant: a reference to
+    """Pin the CoW concurrency invariant: a reference to
     the OLD Enricher remains FUNCTIONAL (loaded pytricia tries still
     respond to membership checks; internal handles not closed) AFTER
     `app.state.enricher` is swapped, so concurrent in-flight `enrich()`

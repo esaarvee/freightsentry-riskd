@@ -1,9 +1,9 @@
-"""Unit tests for CustomerBaseline derivations (Phase 2B.3).
+"""Unit tests for CustomerBaseline derivations.
 
 Pure-derivation properties + one date-arithmetic helper. No DB.
 
-The derivations feed Phase 2C lock-in + dormancy rules via build_context
-(wired in 2B.4). Each is a property/method on an in-memory CustomerBaseline
+The derivations feed the lock-in + dormancy rules via build_context.
+Each is a property/method on an in-memory CustomerBaseline
 constructed with hand-set histogram fields.
 """
 

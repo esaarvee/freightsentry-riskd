@@ -1,8 +1,8 @@
-"""Unit tests for the Phase 2C.3 residential-ASN + IP-class diversity rules.
+"""Unit tests for the residential-ASN + IP-class diversity rules.
 
 Specifically tests the `(is_cloud_ip OR is_datacenter_ip)` parenthesized
-sub-expression in web_booking_from_cloud_ip — Phase 1's DSL evaluator
-supports arbitrary boolean trees; this is the first 2C rule to exercise
+sub-expression in web_booking_from_cloud_ip — the DSL evaluator
+supports arbitrary boolean trees; this is the first rule to exercise
 OR-precedence within parens.
 """
 
@@ -31,7 +31,7 @@ def test_residential_asn_high_velocity_threshold_15(ruleset: RuleSet) -> None:
 
 
 # ---------------------------------------------------------------------------
-# api_booking_from_unfamiliar_asn (Phase 7C.7 replacement for the deleted
+# api_booking_from_unfamiliar_asn (replacement for the deleted
 # api_non_cloud_ip + non_cloud_established_account pair) —
 # is_api_booking AND unfamiliar_asn_for_customer
 # ---------------------------------------------------------------------------
@@ -152,12 +152,12 @@ def test_web_only_customer_using_api_compound(ruleset: RuleSet) -> None:
 
 
 def test_ip_class_rules_load(ruleset: RuleSet) -> None:
-    """All 6 rules added in 2C.3 must be present after the rule-loader runs.
-    Canonical total-count audit lives in 2C.7."""
+    """All 6 IP-class rules must be present after the rule-loader runs.
+    Canonical total-count audit lives in the rule-count test."""
     expected = {
         "residential_asn_high_velocity",
         # api_non_cloud_ip + non_cloud_established_account replaced by
-        # api_booking_from_unfamiliar_asn in Phase 7C.7.
+        # api_booking_from_unfamiliar_asn.
         "api_booking_from_unfamiliar_asn",
         "new_user_api_non_cloud",
         "web_booking_from_cloud_ip",

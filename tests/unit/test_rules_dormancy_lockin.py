@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 2C.2 dormancy + customer-lock-in rule additions.
+"""Unit tests for the dormancy + customer-lock-in rule additions.
 
 These are the case-1 (dashboard ATO) + case-2 (API ATO) primary detectors.
 Per CLAUDE.md these are HIGH-risk rules — boolean composition typos
@@ -138,13 +138,13 @@ def test_locked_customer_unfamiliar_ip_compound(ruleset: RuleSet) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2C.2 set-level integration
+# Set-level integration
 # ---------------------------------------------------------------------------
 
 
 def test_dormancy_lockin_rules_load(ruleset: RuleSet) -> None:
-    """All 5 rules added in 2C.2 must be present after the rule-loader
-    runs. Canonical total-count audit lives in 2C.7."""
+    """All 5 dormancy + customer-lock-in rules must be present after the
+    rule-loader runs. Canonical total-count audit lives in the rule-count test."""
     expected = {
         "dormant_vpn",
         "dormant_new_ip",

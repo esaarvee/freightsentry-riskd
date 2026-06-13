@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 2C.1 trust-conditioned rule additions.
+"""Unit tests for the trust-conditioned rule additions.
 
 Each test loads the production `app/rules.yaml` via `app.rules.load_rules`,
 finds the rule by name, and exercises its evaluator with a controlled
@@ -6,7 +6,7 @@ ctx dict. This proves the rule lives in YAML, parses through the DSL,
 and fires exactly at the documented threshold (boundary-side wins).
 
 Shared helpers (`ruleset` fixture, `base_ctx`, `find_rule`) live in
-tests/unit/conftest.py — they're consumed by every Phase 2C rule-test
+tests/unit/conftest.py — they're consumed by every trust-conditioned rule-test
 module.
 """
 
@@ -144,9 +144,9 @@ def test_vpn_known_user_excludes_new(ruleset: RuleSet) -> None:
 
 
 def test_all_trust_conditioned_rules_load(ruleset: RuleSet) -> None:
-    """All 7 rules added in 2C.1 must be present after rule-loader runs.
-    Set-membership only — the canonical total-count audit lives in 2C.7,
-    so per-commit count assertions don't churn as later commits land."""
+    """All 7 trust-conditioned rules must be present after rule-loader runs.
+    Set-membership only — the canonical total-count audit lives in the
+    rule-count test, so per-commit count assertions don't churn as later commits land."""
     expected = {
         "very_low_trust",
         "low_trust_high_value",

@@ -67,8 +67,8 @@ def test_variant_a_tightens_gate_to_30_keeps_weights() -> None:
     assert "customer_observations >= 30" in dest_rule["condition"]
     assert "customer_observations >= 10" not in ip_rule["condition"]
     assert "customer_observations >= 10" not in dest_rule["condition"]
-    assert ip_rule["weight"] == 0.15  # Phase 7C.8 baseline reduction
-    assert dest_rule["weight"] == 0.10  # Phase 7C.8 baseline reduction
+    assert ip_rule["weight"] == 0.15  # baseline reduction
+    assert dest_rule["weight"] == 0.10  # baseline reduction
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +118,8 @@ def test_variant_d_appends_secondary_signal_keeps_gate_at_10_and_weights() -> No
     assert "customer_observations >= 10" in ip_rule["condition"]
     assert "shipment_value > shipment_value_threshold_medium" in dest_rule["condition"]
     assert "customer_observations >= 10" in dest_rule["condition"]
-    assert ip_rule["weight"] == 0.15  # Phase 7C.8 baseline reduction
-    assert dest_rule["weight"] == 0.10  # Phase 7C.8 baseline reduction
+    assert ip_rule["weight"] == 0.15  # baseline reduction
+    assert dest_rule["weight"] == 0.10  # baseline reduction
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +145,8 @@ def test_variant_e_asymmetric_split() -> None:
     assert "customer_observations >= 10" not in dest_rule["condition"]
     assert "is_vpn" not in dest_rule["condition"]  # not a D-style compound
     # Weights unchanged
-    assert ip_rule["weight"] == 0.15  # Phase 7C.8 baseline reduction
-    assert dest_rule["weight"] == 0.10  # Phase 7C.8 baseline reduction
+    assert ip_rule["weight"] == 0.15  # baseline reduction
+    assert dest_rule["weight"] == 0.10  # baseline reduction
 
 
 # ---------------------------------------------------------------------------

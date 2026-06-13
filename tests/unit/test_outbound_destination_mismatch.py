@@ -1,4 +1,4 @@
-"""Phase 7C.2 — unit tests for the _outbound_destination_mismatch
+"""Unit tests for the _outbound_destination_mismatch
 helper in app/context.py. The helper backs the
 customer_destination_country_mismatch_outbound ctx field consumed by
 the cold_start_outbound_carrier_dropoff rule.

@@ -1,7 +1,7 @@
 """Unit tests for Layer 2 scoring constants + maturity helper.
 
 Boundary cases against the formula recorded in `.ai/decisions.md` §
-Scoring architecture (Phase 2A amendment). The maturity formula is
+Scoring architecture. The maturity formula is
 intentionally multiplicative (Design Context) rather than min-of-fractions
 (FreightSentry scorer.go) — the test_maturity_multiplicative_form case
 documents the divergence.

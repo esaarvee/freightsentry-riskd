@@ -1,4 +1,4 @@
-"""Phase 7C.6 — unit tests for the _asn_unfamiliar_for_customer
+"""Unit tests for the _asn_unfamiliar_for_customer
 helper in app/context.py. The helper backs the
 unfamiliar_asn_for_customer ctx field consumed by the
 api_booking_from_unfamiliar_asn rule (case-2 detection).

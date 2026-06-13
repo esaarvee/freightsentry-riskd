@@ -1,19 +1,19 @@
-"""Phase 2D.1 — pin the tuned thresholds from verification §2.2.
+"""Pin the tuned thresholds from verification §2.2.
 
-The Phase 1 and Phase 2C rule additions applied the tuned values
-in-place. This module pins them so a future refactor that changes
-a literal threshold value (or copy-pastes a rule between Phase 1
-and Phase 2C) will fail loudly here.
+The rule additions applied the tuned values in-place. This module
+pins them so a future refactor that changes a literal threshold
+value (or copy-pastes a rule from a different rule set) will fail
+loudly here.
 
 Audited thresholds:
 1. cadence_anomaly: is_abnormally_dormant = cadence_zscore > 6.0
-   (Phase 1 derivation in app/context.py)
+   (derivation in app/context.py)
 2. velocity_spike_daily_api: velocity_user_daily > 50
-   (Phase 2C.5; freight_risk's source was 5000)
+   (freight_risk's source was 5000)
 3. residential_asn_high_velocity: velocity_ip_hourly > 15
-   (Phase 2C.3; freight_risk's source was 5)
+   (freight_risk's source was 5)
 4. ip_familiarity_tier "family_familiar": /24 match only, no
-   cloud+ASN shortcut (Phase 1 app/baseline.py)
+   cloud+ASN shortcut (app/baseline.py)
 """
 
 from __future__ import annotations

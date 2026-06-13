@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 7A.1-rewritten replay orchestrator
+"""Unit tests for the replay orchestrator
 (scripts/replay_validation.py).
 
 Pure-Python exercises of the deterministic surfaces:
@@ -16,7 +16,7 @@ Pure-Python exercises of the deterministic surfaces:
 - rules_file_recorded round-trip
 
 Does NOT exercise the network POST loop — integration-only
-(implicit coverage during Phase 7B/7D replay execution).
+(implicit coverage during replay execution).
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from scripts.replay_validation import (
 
 # ---------------------------------------------------------------------------
 # Synthetic fixtures (the production NDJSON corpora are not committed; the
-# operator runs the Phase 7 export script to /tmp/riskd-replay/ before any
+# operator runs the export script to /tmp/riskd-replay/ before any
 # real run. Unit tests use minimal synthetic fixtures.)
 # ---------------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 2C.6 value-anomaly + geographic + threat-
+"""Unit tests for the value-anomaly + geographic + threat-
 intel composite rules.
 
 Seventeen rules grouped into:
@@ -9,9 +9,9 @@ Seventeen rules grouped into:
 - Threat-intel composites (6): Level-2-with-VPN, IP2P signal/scanner/
   new-user/api, open-proxy (NOT VPN AND NOT Tor)
 
-Note: Phase 2C triaged 2 rules out of the original 19-rule list
-(threat_intel_level1 — Phase 1 BLOCK already covers; outside_allowed_country
-— defers to Phase 4 tenant-config landing). After triage, 17 rules
+Note: 2 rules were triaged out of the original 19-rule list
+(threat_intel_level1 — the BLOCK path already covers it; outside_allowed_country
+— defers to tenant-config). After triage, 17 rules
 land here.
 """
 
@@ -266,14 +266,14 @@ def test_open_proxy_excludes_vpn_and_tor(ruleset: RuleSet) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Set-level audit (canonical total-count check lives in 2C.7)
+# Set-level audit (canonical total-count check lives in the rule-count test)
 # ---------------------------------------------------------------------------
 
 
 def test_value_geo_threat_rules_load(ruleset: RuleSet) -> None:
-    """All 17 rules added in 2C.6 must be present after the rule-loader
-    runs. (Plan summary line lists "13" — arithmetic error in the plan;
-    the section table lists 19, triaged 2, lands at 17.)"""
+    """All 17 value-anomaly + geographic + threat-intel rules must be
+    present after the rule-loader runs. (The original list had 19; 2 were
+    triaged out, landing at 17.)"""
     expected = {
         # Value-anomaly
         "extreme_value",

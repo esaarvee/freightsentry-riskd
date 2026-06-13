@@ -1,4 +1,4 @@
-"""Unit tests for Phase 6A.3 case_3_compound rule.
+"""Unit tests for case_3_compound rule.
 
 Truth-table coverage for the case-3a compound:
     origin_via_carrier_dropoff

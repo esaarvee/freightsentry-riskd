@@ -1,15 +1,15 @@
 """Per-rule + USD-default invariance tests for the 7 currency-implicit rules
-rewritten in 4B.5.
+that were rewritten to use tenant-configurable thresholds.
 
 For each rule:
-1. Fires when the threshold field equals the pre-4B literal AND
+1. Fires when the threshold field equals the pre-rewrite literal AND
    shipment_value is just above.
 2. Does NOT fire when tenant_config elevates the threshold above the
    shipment_value (custom-elevated thresholds).
 
 Plus a parametrized USD-default invariance test pinning that across a
 matrix of shipment_value values, every rewritten rule fires identically
-to its pre-Phase-4B condition under USD-default thresholds.
+to its pre-rewrite condition under USD-default thresholds.
 """
 
 from __future__ import annotations
@@ -165,13 +165,13 @@ def test_ip2p_threat_high_value_does_not_fire_when_custom_medium_elevated(rulese
 
 # ---------------------------------------------------------------------------
 # USD-default invariance: with the default thresholds, the rewritten rules
-# fire identically to their pre-Phase-4B (literal-threshold) conditions.
+# fire identically to their pre-rewrite (literal-threshold) conditions.
 # Parametrized across a value matrix that brackets every tier boundary.
 # ---------------------------------------------------------------------------
 
 
 _RULE_USD_DEFAULTS = [
-    # (rule_name, pre-Phase-4B literal threshold, tier-field name, extra-conds)
+    # (rule_name, pre-rewrite literal threshold, tier-field name, extra-conds)
     ("vpn_high_value", 1000.0, "shipment_value_threshold_low", {"is_vpn": True}),
     (
         "low_trust_high_value",
@@ -210,21 +210,21 @@ _RULE_USD_DEFAULTS = [
 @pytest.mark.parametrize("shipment_value", [500.0, 1500.0, 2500.0, 4000.0, 5500.0, 9500.0, 10500.0])
 def test_usd_default_invariance_matrix(ruleset: Any, shipment_value: float) -> None:
     """For each rewritten rule + each shipment_value, the rule's evaluation
-    under USD-default thresholds must match the pre-Phase-4B literal
+    under USD-default thresholds must match the pre-rewrite literal
     threshold semantics (rule fires iff shipment_value > literal AND other
     conditions met).
 
-    This is the surgical invariance check for the 4B.5 rewrite. If any rule
-    flips outcome relative to its Phase 2 literal, the rewrite has a bug.
+    This is the surgical invariance check for the rewrite. If any rule
+    flips outcome relative to its original literal, the rewrite has a bug.
     """
     base = base_ctx()
     base["shipment_value"] = shipment_value
     for rule_name, literal, _tier_field, extra_conds in _RULE_USD_DEFAULTS:
-        # USD-default thresholds are already populated in base_ctx by 4B.4's
-        # conftest update.
+        # USD-default thresholds are already populated in base_ctx by the
+        # conftest.
         ctx = {**base, **extra_conds}
         rule = find_rule(ruleset, rule_name)
-        # Pre-Phase-4B condition: shipment_value > literal AND extra_conds met
+        # Pre-rewrite condition: shipment_value > literal AND extra_conds met
         # All extra_conds are truthy by construction (we set them); the
         # invariant is rule.evaluate(ctx) == (shipment_value > literal).
         expected = shipment_value > literal
@@ -236,14 +236,14 @@ def test_usd_default_invariance_matrix(ruleset: Any, shipment_value: float) -> N
 
 
 def test_rule_count_after_6a9(ruleset: Any) -> None:
-    """4B.5 rewrites 7 rules but adds/removes none → 79; Phase 6A.3 adds
-    case_3_compound → 80; Phase 6A.5 adds
-    cold_start_country_triangle_with_carrier_dropoff → 81; Phase 6A.9
-    adds cold_start_population_baseline_rare_with_carrier_dropoff → 82.
-    Phase 7C.2 swaps cold_start_country_triangle_with_carrier_dropoff
+    """The currency rewrite touches 7 rules but adds/removes none → 79;
+    case_3_compound adds 1 → 80;
+    cold_start_country_triangle_with_carrier_dropoff adds 1 → 81;
+    cold_start_population_baseline_rare_with_carrier_dropoff adds 1 → 82.
+    cold_start_country_triangle_with_carrier_dropoff is then swapped
     for cold_start_outbound_carrier_dropoff (1-for-1) → unchanged at 82.
-    Phase 7C.7 deletes api_non_cloud_ip + non_cloud_established_account
-    and adds api_booking_from_unfamiliar_asn (net -1) → 81.
+    api_non_cloud_ip + non_cloud_established_account are deleted
+    and api_booking_from_unfamiliar_asn is added (net -1) → 81.
 
     Uses the conftest `ruleset` fixture (cwd-independent) rather than
     opening rules.yaml by relative path.

@@ -1,4 +1,4 @@
-"""Whitelist + DSL parse tests for the 6 modification-Context fields (3A.3).
+"""Whitelist + DSL parse tests for the 6 modification-Context fields.
 
 Mirrors `test_rules_whitelist.py` shape — additive size pin + per-field
 membership. Also confirms the rule loader still loads the production
@@ -7,7 +7,7 @@ whitelist filter (`app/rules.py::load_rules`) rejects rules that reference
 fields outside the whitelist.
 
 Field-semantics testing (what value each field takes given a Context
-state) lands in tests/unit/test_context_modification.py at 3A.4.
+state) lands in tests/unit/test_context_modification.py.
 """
 
 from __future__ import annotations

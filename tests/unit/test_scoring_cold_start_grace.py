@@ -1,4 +1,4 @@
-"""Unit tests for the cold-start grace mechanism in scoring (4C.2).
+"""Unit tests for the cold-start grace mechanism in scoring.
 
 8 tests covering:
 - grace=0 returns maturity unchanged

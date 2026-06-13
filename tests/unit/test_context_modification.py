@@ -1,10 +1,10 @@
-"""Unit tests for the pure helpers in build_modification_context (3A.4).
+"""Unit tests for the pure helpers in build_modification_context.
 
 The async build_modification_context itself is exercised by integration
-tests in 3A.6 (endpoint flow); these tests pin the three pure helpers
+tests (endpoint flow); these tests pin the three pure helpers
 that compute the modification-specific signals against a Context.
 
-Cross-TZ discipline (per Phase 2 lesson): production code uses Python
+Cross-TZ discipline: production code uses Python
 datetime.now(UTC) consistently. These tests use tz-aware datetimes
 throughout — no date.today() / current_date mixing.
 """

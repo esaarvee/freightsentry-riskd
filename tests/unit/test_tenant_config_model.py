@@ -1,4 +1,4 @@
-"""Unit tests for TenantConfig (4A.1).
+"""Unit tests for TenantConfig.
 
 25 tests covering:
 - Empty config + required metadata happy path

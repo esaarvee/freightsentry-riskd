@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 2C.4 recipient-overlap rules.
+"""Unit tests for the recipient-overlap rules.
 
 Two rules that detect destination addresses receiving shipments from
 many customers within the same tenant — a fraud-ring drop-point pattern.

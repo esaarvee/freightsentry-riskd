@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 6D.5 smoke-test script (scripts/smoke_test.py).
+"""Unit tests for the smoke-test script (scripts/smoke_test.py).
 
 Pure-Python exercises of the `assert_response` validation logic. The
 network POST loop in `_post_booking` is integration-only (implicit
@@ -198,7 +198,7 @@ def test_assert_response_rejects_non_dict_body() -> None:
 
 
 def test_smoke_payload_currency_is_cad() -> None:
-    """Phase 6B project default. Smoke tenant in the runbook is
+    """Project default. Smoke tenant in the runbook is
     configured with allowed_currencies including CAD."""
     assert _SMOKE_PAYLOAD["shipment"]["currency"] == "CAD"
 

@@ -323,7 +323,7 @@ def test_export_produces_three_ndjson_files(tmp_path: Path) -> None:
     assert (out_dir / "approved_jan_mar.ndjson").exists()
     assert (out_dir / "case2_sample.ndjson").exists()
     assert (out_dir / "case3_census.ndjson").exists()
-    # Phase 7C.9 split: counts now per-corpus dict {warmup, measurement}.
+    # counts are per-corpus dict {warmup, measurement}.
     assert counts["approved"]["measurement"] == 12
     assert counts["case2"]["measurement"] == 8
     assert counts["case3"]["measurement"] == 95
@@ -345,7 +345,7 @@ def test_export_case3_records_have_hardcoded_overrides(tmp_path: Path) -> None:
     """case-3 records must carry customer_registered_country='CA' and
     shipment.origin_via_carrier_dropoff=True regardless of the row's
     actual customer_registered_address. case-3 has warmup_enabled=
-    False (Phase 7C.9) — every record in the case3 file is a
+    False — every record in the case3 file is a
     measurement record."""
     db_path = tmp_path / "fr.db"
     out_dir = tmp_path / "out"
@@ -393,7 +393,7 @@ def test_export_currency_is_cad_on_every_record(tmp_path: Path) -> None:
 
 
 def test_export_request_id_pattern_includes_replay_role(tmp_path: Path) -> None:
-    """Phase 7C.9 update: request_id format is
+    """request_id format is
     `replay-{slug}-{role}-{idx}` where role is 'warmup' or
     'measurement'. The role token preserves the
     role-distinguishing semantics in the deterministic id."""
@@ -412,7 +412,7 @@ def test_export_request_id_pattern_includes_replay_role(tmp_path: Path) -> None:
 
 
 def test_export_warmup_emitted_before_measurement_per_customer(tmp_path: Path) -> None:
-    """Phase 7C.9 warmup ordering contract: per-customer warmup records
+    """warmup ordering contract: per-customer warmup records
     appear BEFORE that customer's measurement record in the output
     NDJSON. The orchestrator processes records in file order, so
     warmups populate the customer baseline before measurement

@@ -333,7 +333,7 @@ def test_every_metric_spec_produces_emf_block(event_name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# PBL C4 — enrich.refresh.{success,failure,skipped_sanity_floor}
+# enrich.refresh.{success,failure,skipped_sanity_floor}
 # ---------------------------------------------------------------------------
 
 
