@@ -87,6 +87,12 @@ class Enricher:
         self._firehol_l1: Any = None  # pytricia.PyTricia or None
         self._firehol_l2: Any = None
         self._cloud_tries: dict[str, Any] = {}
+        # Sources present on disk but that FAILED TO PARSE (corrupt /
+        # version-incompatible). Distinct from "missing". Drives the
+        # /health degraded reflection and the enrich.source_load_failed
+        # metric so a downloaded-but-corrupt dataset alarms instead of
+        # silently failing open. Populated by the guard except-blocks.
+        self._load_failures: set[str] = set()
 
     # -----------------------------------------------------------------------
     # Source loading — lazy, single-shot. Missing files are skipped silently
@@ -120,10 +126,13 @@ class Enricher:
                 # load (and, via lazy load, a booking request) or blocking
                 # the refresh swap. Observable via this WARNING.
                 self._mm_city = None
+                self._load_failures.add("maxmind_city")
                 _log.warning(
-                    "enrich.maxmind_city_load_failed",
+                    "enrich.source_load_failed",
+                    source="maxmind_city",
                     path=str(city_path),
                     error=type(exc).__name__,
+                    metric=True,
                 )
         else:
             _log.warning("enrich.maxmind_city_missing", path=str(city_path))
@@ -132,10 +141,13 @@ class Enricher:
                 self._mm_asn = maxminddb.open_database(str(asn_path))
             except Exception as exc:
                 self._mm_asn = None
+                self._load_failures.add("maxmind_asn")
                 _log.warning(
-                    "enrich.maxmind_asn_load_failed",
+                    "enrich.source_load_failed",
+                    source="maxmind_asn",
                     path=str(asn_path),
                     error=type(exc).__name__,
+                    metric=True,
                 )
         else:
             _log.warning("enrich.maxmind_asn_missing", path=str(asn_path))
@@ -158,10 +170,13 @@ class Enricher:
             # one: drop the handle so proxy/threat signals return False
             # rather than crashing the load/lookup. Observable via WARNING.
             self._ip2p = None
+            self._load_failures.add("ip2proxy")
             _log.warning(
-                "enrich.ip2proxy_load_failed",
+                "enrich.source_load_failed",
+                source="ip2proxy",
                 path=str(bin_path),
                 error=type(exc).__name__,
+                metric=True,
             )
         else:
             self._ip2p = ip2p
@@ -238,6 +253,15 @@ class Enricher:
         row = self._lookup(ip_str)
         await self._persist(conn, row)
         return row
+
+    def degraded_sources(self) -> frozenset[str]:
+        """Sources present on disk but which failed to parse/open (corrupt
+        or version-incompatible). Empty until `_load_sources` has run.
+        Distinct from a *missing* source (that degrades like a clean miss
+        and is expected pre-download). `/health` reflects this so a
+        downloaded-but-corrupt dataset reports `degraded` rather than `ok`.
+        """
+        return frozenset(self._load_failures)
 
     def _lookup(self, ip: str) -> EnrichmentRow:
         """Run every loaded source. Missing source → fields stay default."""

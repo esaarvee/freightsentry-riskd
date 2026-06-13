@@ -65,6 +65,30 @@ async def test_health_enrichment_degraded_on_partial_load(
     assert response.json()["enrichment"] == "degraded"
 
 
+async def test_health_degraded_on_corrupt_but_downloaded_source(
+    unauth_client: AsyncClient,
+) -> None:
+    """A source downloaded successfully (marked loaded) but FAILED TO PARSE
+    (corrupt / version-incompatible) → enrichment="degraded", still HTTP
+    200. Previously /health stayed "ok" because it keyed off download
+    success, not parse success — silently failing open. Critically the
+    status stays 200: the ALB/ECS rotation probe keys off the status code,
+    so a corrupt dataset must NOT drop every task (it must alarm via the
+    field + the enrich.source_load_failed metric instead)."""
+    from app.main import app
+
+    # All sources downloaded OK — the download tracker alone would say "ok".
+    for name in er._ALL_SOURCE_NAMES:
+        er.mark_source_loaded(name)
+    # ...but one loaded source failed to parse (the enricher dropped its
+    # reader and recorded the failure).
+    app.state.enricher._load_failures.add("maxmind_city")
+
+    response = await unauth_client.get("/health/")
+    assert response.status_code == 200  # MUST stay in rotation
+    assert response.json()["enrichment"] == "degraded"
+
+
 async def test_health_returns_503_on_db_failure(
     unauth_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

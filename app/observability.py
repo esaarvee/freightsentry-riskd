@@ -151,6 +151,15 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     ),
     "enrich.cache_hit": MetricSpec(synthetic_count=True),
     "enrich.cache_miss": MetricSpec(synthetic_count=True),
+    # A loaded source's binary DB was present but failed to parse/open
+    # (corrupt / version-incompatible). `source` dimension breaks the
+    # count out per source (maxmind_city / maxmind_asn / ip2proxy). This
+    # is the alarm around the 25f9932 fail-open guard — it closes the
+    # silent-suppression class the dead-capability audit flagged.
+    "enrich.source_load_failed": MetricSpec(
+        dimensions=("source",),
+        synthetic_count=True,
+    ),
     "enrich.refresh.success": MetricSpec(
         dimensions=("source_name",),
         metrics=(

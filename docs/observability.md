@@ -49,6 +49,7 @@ event flows through without an EMF block (forward-compat behavior).
 | `modification.idempotent_replay` | tenant_id | count (Count) |
 | `enrich.cache_hit` | — | count (Count) |
 | `enrich.cache_miss` | — | count (Count) |
+| `enrich.source_load_failed` | source | count (Count) |
 | `admin.decision_lookup` | tenant_id, request_type | count (Count) |
 | `admin.customer_baseline_lookup` | tenant_id | count (Count) |
 

@@ -1317,13 +1317,15 @@ class TestLoadSourcesResilience:
     blocking the refresh swap. Mirrors the already-guarded lookup path."""
 
     def test_load_sources_tolerates_corrupt_maxmind_and_ip2proxy(self, tmp_path: Path) -> None:
-        # The asserted *_load_failed WARNINGs only fire when the readers are
-        # importable; otherwise _load_{maxmind,ip2proxy} returns at the
-        # ImportError branch before the guarded open. Both are hard deps, so
-        # skip cleanly rather than fail in a degenerate env that lacks them.
+        # The asserted enrich.source_load_failed metrics only fire when the
+        # readers are importable; otherwise _load_{maxmind,ip2proxy} returns
+        # at the ImportError branch before the guarded open. Both are hard
+        # deps, so skip cleanly rather than fail in a degenerate env that
+        # lacks them.
         pytest.importorskip("maxminddb")
         pytest.importorskip("IP2Proxy")
         from app.enrich import Enricher
+        from app.observability import METRIC_SPECS
 
         # Structurally-invalid binaries at the exact paths _load_sources reads.
         # (Short/garbage content: maxminddb and IP2Proxy both reject these on
@@ -1343,12 +1345,26 @@ class TestLoadSourcesResilience:
         assert enricher._mm_asn is None
         assert enricher._ip2p is None
 
-        # Each failure is observable (WARNING per source), error type only —
-        # no exception message that could leak a path/secret.
-        events = {r.get("event") for r in captured}
-        assert "enrich.maxmind_city_load_failed" in events
-        assert "enrich.maxmind_asn_load_failed" in events
-        assert "enrich.ip2proxy_load_failed" in events
+        # Each failure is observable as one alarmable metric family
+        # (enrich.source_load_failed) with a `source` dimension — the alarm
+        # around the fail-open guard.
+        failures = [r for r in captured if r.get("event") == "enrich.source_load_failed"]
+        assert {r["source"] for r in failures} == {"maxmind_city", "maxmind_asn", "ip2proxy"}
+        for r in failures:
+            # metric=True so the EMF processor emits a CloudWatch point.
+            assert r.get("metric") is True
+            # Leak-safe: `error` is the exception TYPE name only (a bare
+            # identifier), never a message that could carry a path/secret.
+            assert r["error"].isidentifier()
+
+        # The metric family is registered so the EMF processor emits it
+        # (rather than the one-shot stderr pass-through) with source as the
+        # CloudWatch dimension.
+        assert "enrich.source_load_failed" in METRIC_SPECS
+        assert METRIC_SPECS["enrich.source_load_failed"].dimensions == ("source",)
+
+        # The corrupt-but-present sources are reflected for /health.
+        assert enricher.degraded_sources() == frozenset({"maxmind_city", "maxmind_asn", "ip2proxy"})
 
         # Lookup degrades gracefully: no geo/proxy signals, no raise.
         row = enricher._lookup("192.0.2.1")
