@@ -1,6 +1,6 @@
 """CloudWatch Embedded Metric Format (EMF) processor for structlog.
 
-Phase 5C. Detects `metric=True` events and reshapes the event dict to
+Detects `metric=True` events and reshapes the event dict to
 carry a CloudWatch EMF block (`_aws.CloudWatchMetrics`) alongside the
 existing fields. Non-metric events flow through unchanged.
 
@@ -154,8 +154,9 @@ METRIC_SPECS: dict[str, MetricSpec] = {
     # A loaded source's binary DB was present but failed to parse/open
     # (corrupt / version-incompatible). `source` dimension breaks the
     # count out per source (maxmind_city / maxmind_asn / ip2proxy). This
-    # is the alarm around the 25f9932 fail-open guard — it closes the
-    # silent-suppression class the dead-capability audit flagged.
+    # alarm guards the fail-open source-load path: it surfaces a loaded
+    # source whose binary DB was present but failed to parse/open,
+    # closing an otherwise-silent suppression of that failure.
     "enrich.source_load_failed": MetricSpec(
         dimensions=("source",),
         synthetic_count=True,

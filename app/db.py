@@ -21,7 +21,7 @@ _pool: asyncpg.Pool | None = None
 
 async def _pool_setup(conn: asyncpg.Connection) -> None:
     """Pool setup callback: runs once when each new pooled connection is
-    created. Phase 5D.2: sets `app.tenant_id` to a sentinel '0' so the
+    created. Sets `app.tenant_id` to a sentinel '0' so the
     custom parameter is known to the session. Without this, any query
     that hits an RLS policy (which references `current_setting('app.tenant_id')`)
     before the request's `set_tenant_id` call raises

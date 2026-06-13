@@ -63,11 +63,11 @@ async def upsert_customer(
         enterprise_id = await upsert_enterprise(conn, tenant_id, payload.enterprise.external_id)
 
     c = payload.customer
-    # Phase 6A.7: registered_country joins the COALESCE-on-update set so
-    # that a payload supplying None does NOT overwrite an existing
+    # registered_country joins the COALESCE-on-update set so that a
+    # payload supplying None does NOT overwrite an existing
     # operator-supplied (or earlier-payload-supplied) value. ISO 3166-1
     # alpha-2 validation is enforced at the Pydantic layer by
-    # CustomerData.registered_country (Phase 6A.5).
+    # CustomerData.registered_country.
     row = await conn.fetchrow(
         """
         INSERT INTO customers (

@@ -6,13 +6,12 @@ in `[0, 1]` derived from:
   - `effective_observations` from baseline.value_n (post-decay)
   - `flagged_count` + `fraud_confirmed_count` from customers
 
-`build_context` (1D.5) attaches the computed value to Context as
-`trust_score`. Phase 1 rule conditions don't read it; Phase 2 Layer 2
-+ the 11 trust-conditioned FreightSentry-port rules do.
+`build_context` attaches the computed value to Context as
+`trust_score`. Layer 2 and the trust-conditioned rules read it.
 
 Sub-millisecond (pure arithmetic, no I/O). Deliberately not cached —
 inputs change every booking, so caching gives nothing and complicates
-secret rotation / per-tenant config-override (Phase 4).
+secret rotation / per-tenant config-override.
 """
 
 import math

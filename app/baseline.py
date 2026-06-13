@@ -47,7 +47,7 @@ IP_TYPE_CLOUD = "cloud"
 IP_TYPE_DC = "dc"
 IP_TYPE_RESIDENTIAL = "residential"
 
-# Phase 6A.2 — cap on country_route_stats distinct (origin, destination)
+# Cap on country_route_stats distinct (origin, destination)
 # country pairs per customer baseline. Real customers ship across <50
 # country combinations; the cap is a defense-in-depth bound against
 # adversarial flooding (carrier API ATO pattern with rapidly varying
@@ -122,7 +122,7 @@ class CustomerBaseline:
     ip_asn_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     country_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     origin_ip_country_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # Phase 6A.2 — case-3a route-baseline histogram. Key:
+    # case-3a route-baseline histogram. Key:
     # f"{origin_country}||{destination_country}". Populated by
     # add_observation when both shipment countries are non-null.
     country_route_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -393,8 +393,7 @@ class CustomerBaseline:
         Pydantic Address.country structured-field passthroughs (NOT the IP
         country). When both are non-null, the (origin, destination)
         country pair is bumped in country_route_stats — bounded at
-        COUNTRY_ROUTE_STATS_CAP keys to prevent adversarial jsonb bloat
-        (Phase 6A.2).
+        COUNTRY_ROUTE_STATS_CAP keys to prevent adversarial jsonb bloat.
         """
         today_iso = ts.date().isoformat()
 
@@ -410,7 +409,7 @@ class CustomerBaseline:
         self._bump(self.dest_stats, destination, today_iso)
         self._bump(self.lane_stats, f"{origin}||{destination}", today_iso)
 
-        # Phase 6A.2 — shipment country-pair histogram (case-3a route
+        # shipment country-pair histogram (case-3a route
         # baseline). Bump only when BOTH countries non-null. Cap at
         # COUNTRY_ROUTE_STATS_CAP distinct pairs: existing keys always
         # bump; new keys are added only while under cap. Beyond cap,
@@ -454,7 +453,7 @@ class CustomerBaseline:
     def add_rejected_observation(self, *, key_in: str, stat: str, ts: datetime) -> None:
         """Feedback path — increment `r_n` on a specific stat-dict entry.
         `stat` selects which dict to touch (e.g. 'email_hmacs', 'ip_stats').
-        Used by 1D-Phase-3 feedback handler."""
+        Used by the feedback handler."""
         target = getattr(self, stat)
         entry = target.get(key_in, _empty_entry())
         entry["r_n"] = float(entry.get("r_n", 0.0)) + 1.0

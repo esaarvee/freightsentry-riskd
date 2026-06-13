@@ -519,3 +519,33 @@ the two-job CI split; that diff only removed a comment from the job).
 First-party actions (checkout@v4, setup-python@v5) are pinned to major
 tags. Suggested action: pin snyk/actions/python to a release tag or
 commit SHA. Out of scope for the test-soundness pass.
+
+## 2026-06-13 — auth.py docstring asserts superuser connecting-role; runtime is riskd_app_login
+
+Discovered by: security-auditor during comment-cleanliness pass (Commit 4)
+Location: app/auth.py:15-18
+Severity: low
+Observation: The module docstring (de-phased this pass, claim preserved from the
+pre-existing "Phase 1 superuser" text) states the connecting role is the postgres
+bootstrap superuser that bypasses RLS, so the api_tokens lookup needs no RLS-exempt
+path. But docker-compose.yml, .env.example, and .ai/decisions.md document the runtime
+role as `riskd_app_login` (LOGIN, no BYPASSRLS). The docstring is stale relative to the
+now-documented runtime role; the comment-cleanliness pass only removed the phase IDs and
+did not change the (pre-existing) claim, since correcting it requires confirming the
+actual auth-path RLS behavior under the non-superuser role.
+Suggested action: confirm api_tokens read behavior under riskd_app_login (api_tokens has
+no RLS per the 0001 squash, so the lookup likely works without an exempt path) and rewrite
+the docstring to the verified current state.
+
+## 2026-06-13 — models.py shipment currency default is USD while project default is CAD
+
+Discovered by: comment-cleanliness pass (Commit 2)
+Location: app/models.py (ShipmentData.currency default) + app/tenant_config.py DEFAULT_VALUE_CAPS
+Severity: low
+Observation: ShipmentData.currency Pydantic default is "USD", but the project operates
+CAD-default (DEFAULT_VALUE_CAPS keyed "CAD"; allowed_currencies defaults ["CAD"]). The
+comment pass left the code value untouched (comment-only scope) and only stripped the
+"defaults to USD so Phase 1-3 payloads…" history. Possible latent inconsistency between the
+wire-model default and the operational default currency.
+Suggested action: investigation needed — confirm whether the USD wire-default is intentional
+(backward-compat) or should be CAD.

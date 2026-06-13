@@ -1,16 +1,16 @@
-"""Phase 6A.7 / 6A.8 — tenant route population baseline writer + reader.
+"""Tenant route population baseline writer + reader.
 
-Per-booking writer for `tenant_route_baselines` (6A.7):
+Per-booking writer for `tenant_route_baselines`:
 - update_tenant_route_baseline UPSERTs the
   (customer_country, origin_country, destination_country) triple
   count for the booking's tenant.
 
-Per-evaluation reader (6A.8):
+Per-evaluation reader:
 - derive_route_rarity returns True iff the current triple is rare
   (<2%) in the tenant's population AND the tenant has accumulated
   >=100 observations. Drives the shipment_route_rare_for_tenant
   Context field used by the case-3b cold_start_population_baseline_
-  rare_with_carrier_dropoff rule (6A.9).
+  rare_with_carrier_dropoff rule.
 
 Both functions:
 - No-op / False on any None country (no signal without ground truth).
@@ -18,7 +18,7 @@ Both functions:
 - Bound by the composite PK (writer) or PK leading-column prefix scan
   (reader); both O(1) at the database planner level.
 
-GRANTs on the table to `riskd_app` are in migration 0011.
+GRANTs on the table to `riskd_app` live in the table's migration.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from typing import Final
 
 import asyncpg
 
-# Phase 6A.8 — population baseline rarity thresholds. Initial values
+# Population baseline rarity thresholds. Initial values
 # documented in .ai/decisions.md for post-launch tuning (the
 # calibration backlog explicitly carries these).
 #
@@ -59,8 +59,7 @@ async def update_tenant_route_baseline(
     - `app.tenant_id` is set on `conn` (RLS policy will deny otherwise).
     - `customer_country` / `origin_country` / `destination_country` are
       either None or already ISO 3166-1 alpha-2 validated upstream
-      (Pydantic — CustomerData.registered_country + Address.country
-      per Phase 6A.5).
+      (Pydantic — CustomerData.registered_country + Address.country).
 
     On conflict (existing triple), bumps `observation_count` by 1 and
     advances `last_updated`.
@@ -107,7 +106,7 @@ async def derive_route_rarity(
     Single round-trip CTE: subquery 1 looks up the triple count via
     composite PK (O(1) index probe); subquery 2 aggregates the tenant-
     wide SUM via the PK's leading-column prefix scan. Both are O(rows
-    for this tenant) — Phase 5 load test confirmed ~1ms p95 budget.
+    for this tenant) — ~1ms p95 budget.
 
     Pre-conditions:
     - `app.tenant_id` is set on `conn` (RLS policy denies otherwise).

@@ -6,15 +6,8 @@ default to None — None means "fall back to the project default in
 app/scoring_constants.py". The constants module remains the source of
 truth for defaults; this model layers overrides on top.
 
-Loaded once per request by `load_tenant_config` (4A.2) and threaded
-through `build_context` (4A.3) into the scorer.
-
-Phase 4 scope: persistence + validation + threading. No rule consumes
-config fields in 4A — 4B (currency normalization) and 4C (cold-start
-overrides) are the consumers. The signature is in place so 4B and 4C
-are pure extensions.
-
-Phase 5 carry-forward: in-process 60s TTL cache wrapping the loader.
+Loaded once per request by `load_tenant_config` and threaded
+through `build_context` into the scorer.
 """
 
 from __future__ import annotations
@@ -32,20 +25,19 @@ _log = structlog.get_logger(__name__)
 DEFAULT_ALLOWED_CURRENCIES: list[str] = ["CAD"]
 DEFAULT_COLD_START_GRACE_DAYS: int = 0
 
-# Project-default per-currency value caps (Phase 4B).
+# Project-default per-currency value caps.
 #
-# Tier values match the absolute literals in the 7 currency-implicit rules
-# pre-Phase-4B (see app/rules.yaml):
+# Tier values match the absolute literals in the currency-implicit rules
+# (see app/rules.yaml):
 #   - high     = 10000   (absolute_high_value)
 #   - new_user = 5000    (high_value_new_user)
 #   - medium   = 2000    (flags_with_value, threat_intel_high_value,
 #                         ip2p_threat_high_value)
 #   - low      = 1000    (low_trust_high_value, vpn_high_value)
 #
-# Phase 6B: CAD-default. The project is a Canadian freight aggregator;
-# CAD is the operational currency. Numeric thresholds UNCHANGED from
-# the prior USD-implicit defaults — interpret as CAD, no exchange-rate
-# conversion. Tenants that need non-CAD pricing populate
+# CAD-default. The project is a Canadian freight aggregator; CAD is the
+# operational currency. Thresholds are interpreted as CAD, no
+# exchange-rate conversion. Tenants that need non-CAD pricing populate
 # tenant_config.value_caps with per-currency overrides. Empty/None
 # value_caps means "use these defaults". If a tenant adds a non-CAD
 # currency to allowed_currencies but doesn't provide a matching
@@ -77,22 +69,20 @@ class TenantConfig(BaseModel):
       value_caps: dict[str, dict[str, float]] | None — per-currency-per-tier
         thresholds; shape {currency: {tier: threshold}} where tier ∈
         {high, new_user, medium, low}. Currency-implicit-CAD default
-        applied at the consumer (4B) when this field is None (Phase 6B
-        switched the default key from USD to CAD).
+        applied at the consumer when this field is None.
 
     Optional fields with non-None defaults (always set on load):
       allowed_currencies: list[str] = ["CAD"] — currencies this tenant
-        accepts. 4B validates BookingRequest.shipment.currency at request
-        time against this list; 400 if not in. Phase 6B switched the
-        default from USD to CAD.
+        accepts. BookingRequest.shipment.currency is validated against
+        this list at request time; 400 if not in.
       cold_start_grace_days: int = 0 — days post-tenant-onboarding during
         which scoring applies a 0.5x multiplier on the maturity formula
         (softer maturity-sensitive rule firing for newly-onboarded
-        tenants). 0 disables. 4C is the consumer.
+        tenants). 0 disables. Consumed by the scorer's cold-start grace.
 
     Metadata:
       created_at, updated_at — both populated from the tenants row at
-        load time (4A.2). Not stored in JSONB; surfaced by the loader.
+        load time. Not stored in JSONB; surfaced by the loader.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -135,8 +125,8 @@ class TenantConfig(BaseModel):
         # coerces (a bool tier value would otherwise become 1.0 silently).
         # Each outer key is a currency (validated like allowed_currencies).
         # Each inner dict must contain the 4 tier keys with positive floats.
-        # Tier keys match the 4 distinct thresholds in the 7 currency-implicit
-        # rules 4B rewrites. Adding a 5th tier is a model change reviewed
+        # Tier keys match the 4 distinct thresholds in the currency-implicit
+        # rules. Adding a 5th tier is a model change reviewed
         # under the standard panel.
         if v is None:
             return None
@@ -191,11 +181,11 @@ def parse_config_jsonb(
     tenant row metadata (created_at, updated_at, tenant_id).
 
     The JSONB blob carries ONLY the override fields + config_version;
-    the loader (4A.2) supplies tenant_id and timestamps. Centralising
-    that here keeps 4A.2's loader concise.
+    the loader supplies tenant_id and timestamps. Centralising that here
+    keeps the loader concise.
 
-    `raw=None` is treated as an empty config (defensive — defaults
-    `tenants.config` to `'{}'::jsonb` per `0001_initial.py:42`, but
+    `raw=None` is treated as an empty config (defensive — `tenants.config`
+    defaults to `'{}'::jsonb`, but
     decoded values flowing through asyncpg could theoretically be None
     in edge cases).
     """
@@ -217,12 +207,10 @@ async def load_tenant_config(
     `{}` (default for newly-created tenants) yields all overrides None;
     consumers fall back to project defaults in app/scoring_constants.py.
 
-    Phase 4A does NOT cache. Phase 5 wraps this in a 60s TTL cache.
-
     Defense-in-depth: explicit `tenant_id` parameter in the WHERE clause
     rather than relying on session-scoped RLS. (The `tenants` table is
-    NOT RLS-enabled per 0001_initial.py:37-38 — tenants are not scoped
-    to themselves; we read by id with a tight WHERE.)
+    NOT RLS-enabled — tenants are not scoped to themselves; we read by id
+    with a tight WHERE.)
 
     Raises:
         LookupError: if tenant_id has no row. The caller decides the
@@ -246,7 +234,7 @@ async def load_tenant_config(
         raise LookupError(msg)
 
     # asyncpg may return JSONB as str OR dict depending on codec config.
-    # Phase 3B cast-at-boundary pattern: handle both, narrow type for mypy.
+    # Cast-at-boundary pattern: handle both, narrow type for mypy.
     raw_config = row["config"]
     decoded: dict[str, Any]
     if isinstance(raw_config, str):
@@ -278,12 +266,12 @@ def resolve_value_caps(
     Resolution priority:
       1. tenant_config.value_caps[currency] if both the dict and the
          currency key are present.
-      2. DEFAULT_VALUE_CAPS["CAD"] as a safety fallback (Phase 6B —
-         was USD prior). Logs a `tenant_config.value_caps.fallback`
+      2. DEFAULT_VALUE_CAPS["CAD"] as a safety fallback. Logs a
+         `tenant_config.value_caps.fallback`
          warning with the tenant_id and currency so operators can
          spot the misconfiguration.
 
-    Currency is validated at request time before this helper runs (4B.3)
+    Currency is validated at request time before this helper runs
     — so a currency reaching this helper is always in
     tenant_config.allowed_currencies. The fallback covers the
     operator-misconfiguration case where a currency is allowed but no

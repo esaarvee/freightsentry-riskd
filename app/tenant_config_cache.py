@@ -14,7 +14,7 @@ serialize against each other.
 Invalidation: TTL-only for v1. A config write via
 `scripts/tenant_onboard.py` (or future admin write endpoints) takes
 up to 60s to propagate to all workers. Documented in
-`.ai/decisions.md` Phase 5B section; surface to operators in the
+`.ai/decisions.md` (cache section); surface to operators in the
 onboarding script output.
 
 LookupError on missing tenant is NOT cached — the caller's next

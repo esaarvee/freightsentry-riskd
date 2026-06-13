@@ -106,15 +106,14 @@ async def count_user_modifications_1h(
 ) -> int:
     """Count of modification decisions for this customer in the last 1h.
 
-    Filters decisions WHERE request_type='modification' (added in 0003)
-    and joins via shipments FK to scope by customer_id. Both legs of
-    the join carry an explicit tenant_id = $1 in WHERE (per
-    .ai/conventions.md tenant-scoping guidance: defense-in-depth +
-    deterministic planner hint under the Phase 5 non-superuser RLS
-    transition; the s.tenant_id = d.tenant_id join predicate is
-    complementary, not redundant).
+    Filters decisions WHERE request_type='modification' and joins via
+    shipments FK to scope by customer_id. Both legs of the join carry an
+    explicit tenant_id = $1 in WHERE (per .ai/conventions.md
+    tenant-scoping guidance: defense-in-depth + deterministic planner
+    hint under non-superuser RLS; the s.tenant_id = d.tenant_id join
+    predicate is complementary, not redundant).
 
-    Uses ix_decisions_tenant_request_type_created (0003) — the planner
+    Uses ix_decisions_tenant_request_type_created — the planner
     seeks into the (tenant, 'modification') slice and range-scans
     created_at at the index leaf. The shipments inner loop probes
     shipments_pkey via decisions.shipment_id (PK lookup; no separate
@@ -172,7 +171,7 @@ async def count_recipient_distinct_customers_30d(
     leaks fraud-pattern information across tenants. See the cross-
     tenant integration test in tests/integration/test_tenant_isolation.py.
 
-    Index `ix_shipments_tenant_dest_hmac_booking_ts` (added in 0002)
+    Index `ix_shipments_tenant_dest_hmac_booking_ts`
     covers the (tenant_id, destination_hmac, booking_ts) filter.
     """
     result: int = await conn.fetchval(

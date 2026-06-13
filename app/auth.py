@@ -12,10 +12,10 @@ The dependency does NOT set the RLS session variable — that happens
 inside each endpoint's transaction (so `SET LOCAL` survives only the
 endpoint's own transactional scope).
 
-In Phase 1, the connecting role is the postgres bootstrap superuser
+The connecting role is currently the postgres bootstrap superuser
 (bypasses RLS), so the api_tokens lookup succeeds without an RLS-exempt
-path. Phase 5 hardening will need either a SECURITY DEFINER function
-for the lookup or an RLS policy exemption. Tracked in .claude/STATUS.md.
+path. Under a non-superuser role the lookup will need either a SECURITY
+DEFINER function or an RLS policy exemption. Tracked in .claude/STATUS.md.
 
 `AUTH_ENABLED=false` is the local-dev carve-out: the dependency returns
 a synthetic AuthContext without touching the DB. Production deploys
@@ -80,7 +80,7 @@ async def require_api_token(
             # Stamp last_used_at on the success path only. asyncpg connections
             # default to autocommit, so the write persists independent of the
             # downstream endpoint handler's transaction outcome (verified by
-            # the 5A.5 integration tests).
+            # the integration tests).
             await conn.execute(
                 "UPDATE api_tokens SET last_used_at = now() WHERE id = $1 AND token_hash = $2",
                 row["id"],
@@ -116,9 +116,8 @@ async def require_admin_role(
     role='tenant', which fails this check — admin endpoints under local
     dev require AUTH_ENABLED=true. Local admin testing pattern: set
     AUTH_ENABLED=true and seed an admin api_token via the onboarding
-    script (4A.5) with --rotate-token, then manually update
-    api_tokens.role to 'admin' (the script does not yet issue admin
-    tokens — out of scope per 4A.5 decisions).
+    script with --rotate-token, then manually update api_tokens.role to
+    'admin' (the script does not issue admin tokens directly).
     """
     if auth.role != "admin":
         _log.info(

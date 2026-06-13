@@ -1,10 +1,10 @@
 """FastAPI app + lifespan.
 
 Lifespan creates the asyncpg pool at startup and drains it on shutdown.
-PBL C2: lifespan also spawns the Pattern B-lite refresh task after
+Lifespan also spawns the Pattern B-lite refresh task after
 `init_runtime` (it needs `app.state.enricher` so it can atomically swap
-the instance on each successful refresh tick per Amendment 1 F2 CoW
-pattern) and cancels-and-awaits it BEFORE closing the pool on shutdown
+the instance on each successful refresh tick via the copy-on-write
+swap) and cancels-and-awaits it BEFORE closing the pool on shutdown
 so the refresh task's structured-log calls still have a working
 context.
 """

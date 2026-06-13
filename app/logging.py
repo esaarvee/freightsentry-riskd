@@ -1,9 +1,9 @@
-"""structlog setup — JSON to stdout, with metric: true tag for Phase 5 sink.
+"""structlog setup — JSON to stdout, with metric: true tag for the metrics sink.
 
 Configured once at app lifespan. Application code obtains a logger via
 `structlog.get_logger(__name__)`; the underlying handler emits JSON lines
 to stdout with ISO-8601 timestamps and a `level` field. Counters and
-histograms are emitted as structured logs with `metric: true` so Phase 5
+histograms are emitted as structured logs with `metric: true` so the
 CloudWatch wiring can route them without re-instrumenting call sites.
 """
 
@@ -23,7 +23,7 @@ def configure_logging(level: str = "INFO") -> None:
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
-            # EMF processor (Phase 5C): events with metric=True gain a
+            # EMF processor: events with metric=True gain a
             # `_aws.CloudWatchMetrics` block before JSONRenderer
             # serializes the line. Non-metric events pass through.
             emf_processor,

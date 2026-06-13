@@ -123,7 +123,7 @@ _TARGET_GCP: Final[str] = "gcp.cidr"
 _TARGET_AZURE: Final[str] = "azure.cidr"
 _TARGET_CLOUDFLARE: Final[str] = "cloudflare.cidr"
 
-# Module-level health-probe state. Per Amendment 1 F1: no lock.
+# Module-level health-probe state; no lock.
 # `_loaded_sources` is single-writer (refresh task's mark_source_loaded)
 # multi-reader (health probe's all_sources_loaded_at_least_once).
 # set.add and set.__contains__ are GIL-atomic on CPython.
@@ -587,14 +587,14 @@ async def refresh_maxmind_asn(
 
 
 # ----------------------------------------------------------------------------
-# IP2Proxy — ZIP per Amendment 2 F3 + defensive magic-byte detection
+# IP2Proxy — ZIP + defensive magic-byte detection
 # ----------------------------------------------------------------------------
 
 
 async def refresh_ip2proxy(
     client: httpx.AsyncClient, target_dir: Path, settings: Settings
 ) -> RefreshResult:
-    """Per Amendment 2 F3:
+    """ZIP-extract refresh path:
     1. Fetch ZIP response (~82 MB).
     2. Raw sanity floor (30 MB) — catches rate-limit / login-page bodies.
     3. Rate-limit prefix detection on `THIS FILE CAN ONLY BE DOWNLOADED`
@@ -948,7 +948,7 @@ async def refresh_cloudflare(client: httpx.AsyncClient, target_dir: Path) -> Ref
 
 
 # ----------------------------------------------------------------------------
-# Refresh loop + per-tick orchestration (PBL C2)
+# Refresh loop + per-tick orchestration
 # ----------------------------------------------------------------------------
 
 
@@ -1027,7 +1027,7 @@ async def refresh_all_once(
     """One refresh tick: seed loaded-sources from disk (hybrid Pattern A
     defense), run all 9 downloaders concurrently, atomically swap
     `app.state.enricher` with a freshly-loaded instance if any source
-    succeeded (CoW per Amendment 1 F2 — concurrent enrich() calls finish
+    succeeded (CoW — concurrent enrich() calls finish
     on the OLD instance; refcount → 0 closes its handles via __del__).
 
     `app` is typed as `object` to avoid a hard dependency on FastAPI in
