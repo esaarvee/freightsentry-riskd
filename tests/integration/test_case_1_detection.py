@@ -116,6 +116,8 @@ def _build_burst_payload(fixture: dict[str, Any], index: int, start_ts: datetime
     value = fixture["burst_values_progression"][index]
     return {
         "request_id": f"case1-burst-{index:03d}",
+        "shipment_id": f"ship-case1-burst-{index:03d}",
+        "transaction_number": f"txn-case1-burst-{index:03d}",
         "customer": {"external_id": fixture["customer"]["external_id"]},
         "user": {"external_id": "case1-user-ato"},
         "source_ip": ip,

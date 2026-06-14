@@ -50,13 +50,13 @@ async def _seed_shipment(
     await conn.execute(
         """
         INSERT INTO shipments (
-            tenant_id, customer_id, user_id, request_id, source_ip,
+            id, tenant_id, customer_id, user_id, request_id, source_ip,
             origin, destination, value, channel, booking_ts,
-            destination_hmac
+            destination_hmac, transaction_number
         )
-        VALUES ($1, $2, $3, $4, $5::inet,
+        VALUES ($4, $1, $2, $3, $4, $5::inet,
                 '{}'::jsonb, '{}'::jsonb, 100, 'web', $6,
-                $7)
+                $7, 'tx-' || $4)
         """,
         tenant_id,
         customer_id,

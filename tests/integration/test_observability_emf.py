@@ -31,6 +31,8 @@ from app.observability import EMF_NAMESPACE, emf_processor
 def _booking_payload(request_id: str = "EMF-001") -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": "emf-cust-1"},
         "user": {"external_id": "emf-user-1"},
         "source_ip": "192.0.2.30",
@@ -52,6 +54,8 @@ def _modification_payload(
     return {
         "request_id": request_id,
         "original_request_id": original_request_id,
+        "shipment_id": f"ship-{original_request_id}",
+        "transaction_number": f"txn-{original_request_id}",
         "modification_ts": "2026-06-02T08:30:00Z",
         "modification_type": "value",
         "new_value": {"value": 1200},

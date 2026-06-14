@@ -43,6 +43,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -67,6 +69,8 @@ def _modification_payload(
     return {
         "request_id": request_id,
         "original_request_id": original_request_id,
+        "shipment_id": f"ship-{original_request_id}",
+        "transaction_number": f"txn-{original_request_id}",
         "modification_ts": modification_ts,
         "modification_type": modification_type,
         "new_value": new_value or {"value": 1050},

@@ -35,6 +35,8 @@ from tests.conftest import _cleanup_tenant, set_test_tenant_id
 async def _make_minimal_booking_payload() -> dict[str, object]:
     return {
         "request_id": "REQ-tc-1",
+        "shipment_id": "ship-REQ-tc-1",
+        "transaction_number": "txn-REQ-tc-1",
         "customer": {"external_id": "cust-tc-1"},
         "user": {"external_id": "user-tc-1"},
         "source_ip": "192.0.2.10",
@@ -55,8 +57,13 @@ async def _post_booking_under_tenant(unauth_client: AsyncClient, tenant_id: int,
     )
     try:
         payload = await _make_minimal_booking_payload()
-        # Make the request_id unique per call so we don't trip idempotency.
-        payload["request_id"] = f"REQ-tc-{tenant_id}-{datetime.now(UTC).timestamp()}"
+        # Make the request_id AND shipment_id unique per call: request_id so we
+        # don't trip idempotency, shipment_id so a second booking under the same
+        # tenant doesn't trip the composite-PK identity 409.
+        unique = f"REQ-tc-{tenant_id}-{datetime.now(UTC).timestamp()}"
+        payload["request_id"] = unique
+        payload["shipment_id"] = f"ship-{unique}"
+        payload["transaction_number"] = f"txn-{unique}"
         r = await unauth_client.post(
             "/api/v1/shipments/booking/evaluate",
             json=payload,
@@ -209,6 +216,8 @@ async def test_modification_endpoint_loads_tenant_config(
                 json={
                     "request_id": "MOD-tc-1",
                     "original_request_id": "REQ-nonexistent",
+                    "shipment_id": "ship-REQ-nonexistent",
+                    "transaction_number": "txn-REQ-nonexistent",
                     "modification_ts": datetime.now(UTC).isoformat(),
                     "modification_type": "value",
                     "new_value": {"value": 500},

@@ -56,8 +56,11 @@ def _payload(
     destination_address: str = "500 5th Avenue",
     booking_ts: datetime | None = None,
 ) -> BookingRequest:
+    request_id = f"ctx-req-{secrets.token_hex(4)}"
     return BookingRequest(
-        request_id=f"ctx-req-{secrets.token_hex(4)}",
+        request_id=request_id,
+        shipment_id=f"ship-{request_id}",
+        transaction_number=f"txn-{request_id}",
         customer=CustomerData(external_id=customer_external_id),
         user=UserData(external_id="ctx-user"),
         source_ip=IPv4Address(source_ip),
@@ -463,9 +466,9 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
         )
         await db_conn.execute(
             """
-            INSERT INTO shipments (tenant_id, customer_id, user_id, request_id, source_ip,
-                origin, destination, value, channel, booking_ts, destination_hmac)
-            VALUES ($1, $2, $3, $4, $5::inet, '{}'::jsonb, '{}'::jsonb, 100, 'web', $6, $7)
+            INSERT INTO shipments (id, tenant_id, customer_id, user_id, request_id, source_ip,
+                origin, destination, value, channel, booking_ts, destination_hmac, transaction_number)
+            VALUES ($4, $1, $2, $3, $4, $5::inet, '{}'::jsonb, '{}'::jsonb, 100, 'web', $6, $7, 'tx-' || $4)
             """,
             seeded_tenant,
             other_cust,
@@ -494,9 +497,9 @@ async def test_recipient_cross_customer_count_isolated_by_tenant(
             )
             await db_conn.execute(
                 """
-                INSERT INTO shipments (tenant_id, customer_id, user_id, request_id, source_ip,
-                    origin, destination, value, channel, booking_ts, destination_hmac)
-                VALUES ($1, $2, $3, $4, $5::inet, '{}'::jsonb, '{}'::jsonb, 100, 'web', $6, $7)
+                INSERT INTO shipments (id, tenant_id, customer_id, user_id, request_id, source_ip,
+                    origin, destination, value, channel, booking_ts, destination_hmac, transaction_number)
+                VALUES ($4, $1, $2, $3, $4, $5::inet, '{}'::jsonb, '{}'::jsonb, 100, 'web', $6, $7, 'tx-' || $4)
                 """,
                 other_tenant,
                 o_cust,

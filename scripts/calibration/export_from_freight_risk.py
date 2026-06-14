@@ -312,6 +312,12 @@ def _row_to_payload(
 
     return {
         "request_id": f"replay-{corpus.slug}-{replay_role}-{idx}",
+        # Platform identity flows straight through from the freight_risk source
+        # (shipments.shipment_id / .transaction_number) — riskd adopts the
+        # upstream identifiers verbatim. request_id stays the synthetic per-POST
+        # replay key; shipment_id is the shipment identity.
+        "shipment_id": row["shipment_id"],
+        "transaction_number": row["transaction_number"],
         "_replay_role": replay_role,
         "customer": {
             "external_id": customer_id,
@@ -363,6 +369,7 @@ def _fetch_warmup_rows(
         WITH ranked AS (
             SELECT
                 s.shipment_id,
+                s.transaction_number,
                 s.target_date,
                 s.source,
                 s.customer_id,
@@ -388,7 +395,7 @@ def _fetch_warmup_rows(
                 AND s.total IS NOT NULL
         )
         SELECT
-            shipment_id, target_date, source, customer_id,
+            shipment_id, transaction_number, target_date, source, customer_id,
             customer_registered_address, origin_address,
             destination_address, total, source_ip, booking_started_at
         FROM ranked
@@ -413,6 +420,7 @@ def _fetch_corpus_rows(
     sql = f"""
         SELECT
             s.shipment_id,
+            s.transaction_number,
             s.target_date,
             s.source,
             s.customer_id,

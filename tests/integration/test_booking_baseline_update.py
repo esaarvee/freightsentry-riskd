@@ -39,6 +39,8 @@ def _payload(
         destination["country"] = destination_country
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": customer,
         "user": {"external_id": user_id},
         "source_ip": "192.0.2.42",

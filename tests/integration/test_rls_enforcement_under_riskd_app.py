@@ -90,16 +90,16 @@ async def two_tenants_with_shipments(
                 await db_conn.execute(
                     """
                     INSERT INTO shipments (
-                        tenant_id, customer_id, user_id, request_id, source_ip,
+                        id, tenant_id, customer_id, user_id, request_id, source_ip,
                         origin, destination, value, channel, booking_ts,
-                        destination_hmac
+                        destination_hmac, transaction_number
                     )
                     VALUES (
-                        $1, $2, $3, $4, $5::inet,
+                        $4, $1, $2, $3, $4, $5::inet,
                         '{"address":"10 Origin"}'::jsonb,
                         '{"address":"20 Destination"}'::jsonb,
                         100, 'web', now(),
-                        'rls-test-hmac'
+                        'rls-test-hmac', 'tx-' || $4
                     )
                     """,
                     tenant_id,
@@ -109,7 +109,7 @@ async def two_tenants_with_shipments(
                     f"203.0.113.{200 + i}",
                 )
             # Also seed a decision per tenant for the decisions check
-            ship_id: int = await db_conn.fetchval(
+            ship_id: str = await db_conn.fetchval(
                 "SELECT id FROM shipments WHERE tenant_id = $1 ORDER BY id LIMIT 1",
                 tenant_id,
             )

@@ -10,11 +10,14 @@ Contracts under test:
   envelope is byte-equal (deterministic for same payload).
 - Same-type duplicate modification: same SELECT-idempotency replay shape.
 
-The 409 try/except → UniqueViolation catch path in booking.py / modification.py
-is the defense-in-depth backstop for the concurrent-race case (two writers
-SELECT-miss in parallel, then race the INSERT). Serial test flow cannot
-exercise that catch — logged as a gap to .claude/BUGS.md for a future
-concurrent-race test follow-up.
+The shipments composite-PK (tenant_id, id) identity 409 — a second booking
+reusing a shipment_id with a different request_id — IS serially exercisable and
+is covered here (test_duplicate_shipment_id_different_request_id_returns_409),
+paired with a replay negative control. The remaining same-request_id
+UniqueViolation backstop (ux_shipments_tenant_request / ux_decisions_tenant_request_type)
+fires only on the concurrent-race case (two writers SELECT-miss in parallel,
+then race the INSERT); serial test flow cannot exercise that branch — logged as
+a gap to .claude/BUGS.md for a future concurrent-race test follow-up.
 """
 
 from __future__ import annotations
@@ -53,6 +56,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": "uniq-user-1"},
         "source_ip": "192.0.2.20",
@@ -74,6 +79,8 @@ def _modification_payload(
     return {
         "request_id": request_id,
         "original_request_id": original_request_id,
+        "shipment_id": f"ship-{original_request_id}",
+        "transaction_number": f"txn-{original_request_id}",
         "modification_ts": "2026-05-28T08:30:00Z",
         "modification_type": "value",
         "new_value": {"value": 1250},
@@ -201,3 +208,51 @@ async def test_duplicate_modification_same_request_id_replays(
         "dup-mod-001",
     )
     assert count == 1, f"expected exactly one persisted modification row; got {count}"
+
+
+async def test_duplicate_shipment_id_different_request_id_returns_409(
+    unauth_client: AsyncClient,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """A second booking POST reusing a shipment_id already booked for this
+    tenant — but with a DIFFERENT request_id — collides on the composite PK
+    (tenant_id, id) and is surfaced as a clear 409 identity message (#8), NOT
+    a raw constraint error. This is the platform-facing contract change: the
+    shipment_id is the shipment identity and is single-use per tenant.
+
+    The discriminated message ("already booked") distinguishes this from the
+    request_id idempotency-race 409 — the two uniqueness surfaces must not be
+    conflated (quality-constraint #1)."""
+    token, _ = seeded_api_token
+    first = await unauth_client.post(
+        _BOOKING_PATH,
+        json=_booking_payload(request_id="id409-book-a"),
+        headers=_headers(token),
+    )
+    assert first.status_code == 200, first.text
+
+    # Different request_id (so the pre-insert request_id replay SELECT misses),
+    # but the SAME shipment_id as the first booking.
+    collide = _booking_payload(request_id="id409-book-b")
+    collide["shipment_id"] = "ship-id409-book-a"
+    second = await unauth_client.post(_BOOKING_PATH, json=collide, headers=_headers(token))
+    assert second.status_code == 409, second.text
+    assert "already booked" in second.json()["detail"]
+
+
+async def test_same_request_id_reuse_is_idempotent_replay_not_identity_409(
+    unauth_client: AsyncClient,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """Negative control for the identity 409: a second booking POST with the
+    SAME request_id (a genuine network-retry replay) returns the prior decision
+    via the request_id idempotency path — 200, NOT a 409. This proves the
+    identity-409 path (shipment_id collision) does not fire on, or short-circuit,
+    the request_id replay path (#10, quality-constraint #1)."""
+    token, _ = seeded_api_token
+    payload = _booking_payload(request_id="id409-replay")
+    first = await unauth_client.post(_BOOKING_PATH, json=payload, headers=_headers(token))
+    assert first.status_code == 200, first.text
+    second = await unauth_client.post(_BOOKING_PATH, json=payload, headers=_headers(token))
+    assert second.status_code == 200, second.text
+    _assert_decisions_equivalent(first.json(), second.json())

@@ -46,6 +46,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -190,6 +192,8 @@ async def test_modification_cross_tenant_original_returns_404(
                 json={
                     "request_id": "ten-b-mod",
                     "original_request_id": "ten-a-orig",  # tenant A's id
+                    "shipment_id": "ship-ten-a-orig",
+                    "transaction_number": "txn-ten-a-orig",
                     "modification_ts": "2026-05-27T08:30:00Z",
                     "modification_type": "value",
                     "new_value": {"value": 1500},
@@ -234,6 +238,8 @@ async def test_modification_velocity_isolated_by_tenant(
                     json={
                         "request_id": f"ten-b-mod-{i}",
                         "original_request_id": "ten-b-mvbook",
+                        "shipment_id": "ship-ten-b-mvbook",
+                        "transaction_number": "txn-ten-b-mvbook",
                         "modification_ts": f"2026-05-27T08:{10 + i}:00Z",
                         "modification_type": "value",
                         "new_value": {"value": 1010 + i},
@@ -247,6 +253,8 @@ async def test_modification_velocity_isolated_by_tenant(
                 json={
                     "request_id": "ten-a-mod-1",
                     "original_request_id": "ten-a-mvbook",
+                    "shipment_id": "ship-ten-a-mvbook",
+                    "transaction_number": "txn-ten-a-mvbook",
                     "modification_ts": "2026-05-27T08:30:00Z",
                     "modification_type": "value",
                     "new_value": {"value": 1020},

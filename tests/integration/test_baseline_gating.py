@@ -50,6 +50,8 @@ def _booking_payload(
     ts = booking_ts or datetime.now(tz=UTC)
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_id},
         "user": {"external_id": "gating-user"},
         "source_ip": source_ip,

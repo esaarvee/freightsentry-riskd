@@ -40,6 +40,8 @@ def _payload(
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": f"{customer_external_id}-user"},
         "source_ip": source_ip,

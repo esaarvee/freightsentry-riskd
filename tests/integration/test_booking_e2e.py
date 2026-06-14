@@ -186,9 +186,15 @@ async def test_repeat_booking_increments_total_shipments(
     token, tenant_id = seeded_api_token
     payload_a = load_payload("booking_minimal")
     payload_a["request_id"] = "repeat-a"
+    payload_a["shipment_id"] = "ship-repeat-a"
+    payload_a["transaction_number"] = "txn-repeat-a"
     payload_b = load_payload("booking_minimal")
     payload_b["request_id"] = "repeat-b"
-    # Both bookings target the SAME customer.external_id.
+    payload_b["shipment_id"] = "ship-repeat-b"
+    payload_b["transaction_number"] = "txn-repeat-b"
+    # Both bookings target the SAME customer.external_id but are distinct
+    # shipments (distinct shipment_id) — a second shipment_id reuse would be a
+    # 409 identity collision, not a repeat booking.
 
     for p in (payload_a, payload_b):
         r = await unauth_client.post(_BOOKING_PATH, json=p, headers=_headers(token))
@@ -215,6 +221,8 @@ async def test_repeat_booking_with_none_metadata_preserves_existing(
 
     p1 = load_payload("booking_minimal")
     p1["request_id"] = "preserve-1"
+    p1["shipment_id"] = "ship-preserve-1"
+    p1["transaction_number"] = "txn-preserve-1"
     p1["customer"]["registered_address"] = "Original Address"
 
     r1 = await unauth_client.post(_BOOKING_PATH, json=p1, headers=_headers(token))
@@ -222,6 +230,8 @@ async def test_repeat_booking_with_none_metadata_preserves_existing(
 
     p2 = load_payload("booking_minimal")
     p2["request_id"] = "preserve-2"
+    p2["shipment_id"] = "ship-preserve-2"
+    p2["transaction_number"] = "txn-preserve-2"
     # Same customer.external_id; explicitly assert + pop registered_address
     # so a future edit to booking_minimal.json that adds the field doesn't
     # silently break this test (the second payload would re-supply the

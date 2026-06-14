@@ -53,6 +53,8 @@ def _headers(token: str) -> dict[str, str]:
 def _booking_payload(request_id: str = "book-mod-001") -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": "mod-cust-1"},
         "user": {"external_id": "mod-user-1"},
         "source_ip": "192.0.2.10",
@@ -77,6 +79,8 @@ def _modification_payload(
     return {
         "request_id": request_id,
         "original_request_id": original_request_id,
+        "shipment_id": f"ship-{original_request_id}",
+        "transaction_number": f"txn-{original_request_id}",
         "modification_ts": modification_ts,
         "modification_type": modification_type,
         "new_value": new_value or {"value": 1050},
@@ -314,3 +318,46 @@ async def test_modification_replay_with_different_payload_still_returns_prior(
     assert first.status_code == 200
     assert second.status_code == 200
     _assert_decisions_equivalent(first.json(), second.json())
+
+
+async def test_modification_mismatched_shipment_id_returns_422(
+    unauth_client: AsyncClient,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """A modification whose shipment_id does NOT equal the shipment resolved
+    via original_request_id is rejected with 422 (#3). The prior booking is
+    resolvable (so this is past the 404 path) and transaction_number is left
+    correct, so the failure is specifically the shipment_id cross-check."""
+    token, _ = seeded_api_token
+    booking_resp = await unauth_client.post(
+        _BOOKING_PATH, json=_booking_payload(), headers=_headers(token)
+    )
+    assert booking_resp.status_code == 200, booking_resp.text
+
+    payload = _modification_payload()
+    payload["shipment_id"] = "ship-WRONG-does-not-match"
+    mod_resp = await unauth_client.post(_MOD_PATH, json=payload, headers=_headers(token))
+    assert mod_resp.status_code == 422, mod_resp.text
+    assert "shipment_id" in mod_resp.json()["detail"]
+
+
+async def test_modification_mismatched_transaction_number_returns_422(
+    unauth_client: AsyncClient,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """A modification whose transaction_number does NOT equal the stored
+    shipment's transaction_number is rejected with 422 (#6, option a).
+    shipment_id is left correct so it passes the first cross-check and the
+    failure is specifically the transaction_number cross-check (which runs
+    second)."""
+    token, _ = seeded_api_token
+    booking_resp = await unauth_client.post(
+        _BOOKING_PATH, json=_booking_payload(), headers=_headers(token)
+    )
+    assert booking_resp.status_code == 200, booking_resp.text
+
+    payload = _modification_payload()
+    payload["transaction_number"] = "txn-WRONG-does-not-match"
+    mod_resp = await unauth_client.post(_MOD_PATH, json=payload, headers=_headers(token))
+    assert mod_resp.status_code == 422, mod_resp.text
+    assert "transaction_number" in mod_resp.json()["detail"]

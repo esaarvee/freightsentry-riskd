@@ -31,6 +31,8 @@ def _payload(request_id: str, customer_id: str, destination_address: str) -> dic
     ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_id},
         "user": {"external_id": f"user-{customer_id}"},
         "source_ip": "192.0.2.42",

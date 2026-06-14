@@ -99,6 +99,12 @@ class BookingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     request_id: str
+    # Platform-supplied shipment identity (system of record) + operator-facing
+    # transaction reference. text, not uuid. Booking consumes shipment_id as the
+    # shipments PK (see app/api/booking.py); transaction_number is stored
+    # unindexed for operator traceability.
+    shipment_id: str = Field(..., min_length=1, max_length=128)
+    transaction_number: str = Field(..., min_length=1, max_length=128)
     customer: CustomerData
     user: UserData
     source_ip: IPv4Address  # v1 is IPv4-only per .ai/decisions.md
@@ -117,6 +123,11 @@ class RiskFactor(BaseModel):
 
 class BookingResponse(BaseModel):
     request_id: str
+    # Echo the platform identity (#9): operator traceability + admin-dashboard
+    # consistency. On an idempotent request_id replay these echo the
+    # request-supplied values, not the stored row (see app/api/booking.py).
+    shipment_id: str
+    transaction_number: str
     decision: Literal["ALLOW", "REVIEW", "BLOCK"]
     score: float = Field(..., ge=0.0, le=1.0)
     classification: Literal["GREEN", "YELLOW", "RED"]
@@ -147,6 +158,12 @@ class ModificationRequest(BaseModel):
 
     request_id: str = Field(..., min_length=1, max_length=128)
     original_request_id: str = Field(..., min_length=1, max_length=128)
+    # Cross-check only (#3, #6): asserted equal to the shipment resolved via
+    # original_request_id and to that shipment's stored transaction_number;
+    # 422 on mismatch. The modification writes no new shipment row and does
+    # not persist transaction_number.
+    shipment_id: str = Field(..., min_length=1, max_length=128)
+    transaction_number: str = Field(..., min_length=1, max_length=128)
     modification_ts: datetime
     modification_type: ModificationType
     # shape varies by modification_type; validated by build_modification_context
@@ -165,6 +182,10 @@ class ModificationResponse(BaseModel):
     """Same shape as BookingResponse — scoring infrastructure shared."""
 
     request_id: str
+    # Echo the cross-checked platform identity (#9). transaction_number is not
+    # echoed: modification does not persist it and the cross-check guarantees it
+    # matches the prior booking's stored value.
+    shipment_id: str
     decision: Literal["ALLOW", "REVIEW", "BLOCK"]
     score: float = Field(..., ge=0.0, le=1.0)
     classification: Literal["GREEN", "YELLOW", "RED"]

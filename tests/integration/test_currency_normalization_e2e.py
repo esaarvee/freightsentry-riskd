@@ -60,6 +60,8 @@ def _booking(
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer},
         "user": {"external_id": user},
         "source_ip": source_ip,
@@ -343,6 +345,8 @@ async def test_modification_rule_1_currency_independent(
                 json={
                     "request_id": f"MOD-cn-{mod_currency}",
                     "original_request_id": "REQ-cn-mod-prior",
+                    "shipment_id": "ship-REQ-cn-mod-prior",
+                    "transaction_number": "txn-REQ-cn-mod-prior",
                     "modification_ts": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
                     "modification_type": "value",
                     "new_value": {"value": 1500},

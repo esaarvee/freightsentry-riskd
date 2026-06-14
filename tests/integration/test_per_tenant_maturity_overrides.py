@@ -31,6 +31,8 @@ def _booking(
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer},
         "user": {"external_id": user},
         "source_ip": source_ip,

@@ -29,6 +29,8 @@ def _booking_payload(
 ) -> dict[str, object]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer},
         "user": {"external_id": f"u-{customer}"},
         "source_ip": source_ip,
@@ -99,6 +101,9 @@ async def test_admin_decision_lookup_returns_full_shape(
     assert "triggered_rules" in body
     assert "risk_factors" in body
     # Shipment block — city + country (not full address).
+    # shipment.id is now the platform-supplied TEXT shipment_id (string),
+    # equal to the booking's shipment_id (f"ship-{request_id}").
+    assert body["shipment"]["id"] == f"ship-{rid}"
     assert body["shipment"]["origin_city"] == "Boston"
     assert body["shipment"]["destination_city"] == "New York"
     assert body["shipment"]["source_ip"] == "192.0.2.99"

@@ -35,6 +35,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -420,6 +422,8 @@ async def test_feedback_for_modification_decision(
             json={
                 "request_id": "mod-fb-001",
                 "original_request_id": "book-fb-001",
+                "shipment_id": "ship-book-fb-001",
+                "transaction_number": "txn-book-fb-001",
                 "modification_ts": "2026-05-27T09:00:00Z",
                 "modification_type": "value",
                 "new_value": {"value": 1100},

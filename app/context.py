@@ -571,6 +571,8 @@ def _address_from_jsonb(value: Any) -> Address:
 def _booking_from_prior_shipment(
     *,
     request_id: str,
+    shipment_id: str,
+    transaction_number: str,
     booking_ts: datetime,
     prior_shipment: asyncpg.Record,
     customer_external_id: str,
@@ -605,6 +607,12 @@ def _booking_from_prior_shipment(
     )
     return BookingRequest(
         request_id=request_id,
+        # Synthetic context only (not persisted, not cross-checked). Carries the
+        # prior booking's identity so the synthesized BookingRequest is a faithful
+        # stand-in; the modification endpoint has already asserted these equal the
+        # stored shipment (#3, #6).
+        shipment_id=shipment_id,
+        transaction_number=transaction_number,
         customer=CustomerData(external_id=customer_external_id),
         user=UserData(external_id=user_external_id),
         source_ip=source_ip,
@@ -645,6 +653,8 @@ async def build_modification_context(
     """
     synthetic_booking = _booking_from_prior_shipment(
         request_id=payload.request_id,
+        shipment_id=payload.shipment_id,
+        transaction_number=payload.transaction_number,
         booking_ts=prior_shipment_row["booking_ts"],
         prior_shipment=prior_shipment_row,
         customer_external_id=customer_external_id,

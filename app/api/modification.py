@@ -97,6 +97,7 @@ async def evaluate_modification(
             )
             return ModificationResponse(
                 request_id=payload.request_id,
+                shipment_id=payload.shipment_id,
                 decision=existing["decision"],
                 score=float(existing["score"]),
                 classification=existing["classification"],
@@ -115,6 +116,7 @@ async def evaluate_modification(
                 d.id            AS decision_id,
                 d.request_type  AS prior_request_type,
                 s.id            AS shipment_id,
+                s.transaction_number AS transaction_number,
                 s.customer_id   AS customer_id,
                 s.user_id       AS user_id,
                 s.source_ip     AS source_ip,
@@ -151,6 +153,26 @@ async def evaluate_modification(
                 detail=(
                     "Cannot modify a non-booking decision; "
                     f"original_request_id resolves to request_type={prior['prior_request_type']!r}"
+                ),
+            )
+
+        # Cross-check the platform identity (#3, #6). The modification asserts
+        # its shipment_id and transaction_number equal the prior booking's
+        # resolved/stored values; 422 on mismatch. Symmetric, read-only checks —
+        # the modification writes no shipment row and persists no
+        # transaction_number. These do NOT alter original_request_id resolution
+        # (the prior row is already resolved above); they validate the payload
+        # against it.
+        if payload.shipment_id != prior["shipment_id"]:
+            raise HTTPException(
+                status_code=422,
+                detail="shipment_id does not match the shipment resolved via original_request_id",
+            )
+        if payload.transaction_number != prior["transaction_number"]:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "transaction_number does not match the stored shipment's transaction_number"
                 ),
             )
 
@@ -253,6 +275,7 @@ async def evaluate_modification(
     )
     return ModificationResponse(
         request_id=payload.request_id,
+        shipment_id=payload.shipment_id,
         decision=result.decision,
         score=result.score,
         classification=result.classification,

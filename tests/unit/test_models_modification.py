@@ -17,6 +17,8 @@ def _base_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "request_id": "mod-001",
         "original_request_id": "book-001",
+        "shipment_id": "ship-001",
+        "transaction_number": "txn-001",
         "modification_ts": datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC),
         "modification_type": "value",
         "new_value": {"value": 1500},
@@ -142,6 +144,7 @@ def test_modification_response_decision_accepts_known_values(decision: str) -> N
     resp = ModificationResponse.model_validate(
         {
             "request_id": "mod-001",
+            "shipment_id": "ship-001",
             "decision": decision,
             "score": 0.5,
             "classification": "YELLOW",
@@ -151,6 +154,7 @@ def test_modification_response_decision_accepts_known_values(decision: str) -> N
         }
     )
     assert resp.decision == decision
+    assert resp.shipment_id == "ship-001"
 
 
 def test_modification_response_decision_rejects_unknown_value() -> None:

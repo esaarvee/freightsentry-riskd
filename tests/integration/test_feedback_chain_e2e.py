@@ -41,6 +41,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -343,6 +345,8 @@ async def test_chain_feedback_on_modification_triggers_rule_on_next_booking(
             json={
                 "request_id": "chain-mod-mod-1",
                 "original_request_id": "chain-mod-book-1",
+                "shipment_id": "ship-chain-mod-book-1",
+                "transaction_number": "txn-chain-mod-book-1",
                 "modification_ts": "2026-05-27T08:30:00Z",
                 "modification_type": "value",
                 "new_value": {"value": 1100},

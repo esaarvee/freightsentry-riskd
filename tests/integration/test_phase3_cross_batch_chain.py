@@ -44,6 +44,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -97,6 +99,8 @@ async def test_full_chain_booking_modification_feedback_next_booking_triggers_ru
             json={
                 "request_id": "chain-mod-1",
                 "original_request_id": "chain-book-1",
+                "shipment_id": "ship-chain-book-1",
+                "transaction_number": "txn-chain-book-1",
                 "modification_ts": "2026-05-27T08:15:00Z",
                 "modification_type": "value",
                 "new_value": {"value": 1100},
@@ -169,6 +173,8 @@ async def test_approved_feedback_on_modification_does_not_flag(
             json={
                 "request_id": "chain-app-mod-1",
                 "original_request_id": "chain-app-book-1",
+                "shipment_id": "ship-chain-app-book-1",
+                "transaction_number": "txn-chain-app-book-1",
                 "modification_ts": "2026-05-27T08:15:00Z",
                 "modification_type": "value",
                 "new_value": {"value": 1050},
@@ -260,6 +266,8 @@ async def test_modification_on_rejected_baseline_inherits_signal(
             json={
                 "request_id": "chain-inh-mod-1",
                 "original_request_id": "chain-inh-book-2",
+                "shipment_id": "ship-chain-inh-book-2",
+                "transaction_number": "txn-chain-inh-book-2",
                 "modification_ts": "2026-05-27T10:30:00Z",
                 "modification_type": "value",
                 "new_value": {"value": 1100},

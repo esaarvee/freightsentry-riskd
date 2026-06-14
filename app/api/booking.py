@@ -95,8 +95,17 @@ async def evaluate_booking(
                 tenant_id=auth.tenant_id,
                 metric=True,
             )
+            # Replay-echo semantics (conscious tradeoff, #9 + #10): the response
+            # echoes the request-supplied shipment_id/transaction_number, NOT the
+            # stored identity of the original booking. A malformed retry that
+            # reuses request_id with different identity fields would echo the new
+            # payload while the decision reflects the original; identity drift on
+            # replay is not validated. This keeps the idempotency replay query
+            # (decisions only) untouched per #10. See .ai/schema.md contract note.
             return BookingResponse(
                 request_id=payload.request_id,
+                shipment_id=payload.shipment_id,
+                transaction_number=payload.transaction_number,
                 decision=existing["decision"],
                 score=float(existing["score"]),
                 classification=existing["classification"],
@@ -226,39 +235,68 @@ async def evaluate_booking(
             )
             await baseline.save(conn)
 
-        # Persist shipment. email_hmac and phone_hmac land on the
-        # shipments row so the feedback endpoint can populate
-        # baseline.rejected_email_hmacs / rejected_phone_hmacs
-        # per-shipment. NULL when the booking payload supplies no
-        # contact email/phone.
-        shipment_id = await conn.fetchval(
-            """
-            INSERT INTO shipments (
-                tenant_id, customer_id, user_id, request_id, source_ip,
-                origin, destination, value, channel, booking_ts,
-                destination_hmac, email_hmac, phone_hmac
+        # Persist shipment. The platform-supplied shipment_id IS the identity
+        # (#2): it lands as shipments.id (composite PK with tenant_id), so the
+        # former RETURNING-id round-trip is gone. transaction_number is stored
+        # for operator traceability (unindexed by design). email_hmac/phone_hmac
+        # land on the row so the feedback endpoint can populate
+        # baseline.rejected_email_hmacs / rejected_phone_hmacs per-shipment;
+        # NULL when the booking payload supplies no contact email/phone.
+        #
+        # shipments has TWO unique surfaces → discriminate the UniqueViolation
+        # on constraint name (#8, quality-constraint #1: never conflate identity
+        # with idempotency):
+        #   - shipments_pkey (tenant_id, id): the platform shipment_id is
+        #     already booked for this tenant → intentional identity 409 (a
+        #     second booking POST, same shipment_id, DIFFERENT request_id).
+        #   - ux_shipments_tenant_request (tenant_id, request_id): a request_id
+        #     the pre-insert replay SELECT missed under a race → request_id
+        #     idempotency 409. NOT an identity collision; a blanket catch would
+        #     mislabel it as one.
+        try:
+            await conn.execute(
+                """
+                INSERT INTO shipments (
+                    id, tenant_id, customer_id, user_id, request_id, source_ip,
+                    origin, destination, value, channel, booking_ts,
+                    destination_hmac, email_hmac, phone_hmac, transaction_number
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    $7::jsonb, $8::jsonb, $9, $10, $11,
+                    $12, $13, $14, $15
+                )
+                """,
+                payload.shipment_id,
+                auth.tenant_id,
+                customer_id,
+                user_id,
+                payload.request_id,
+                str(payload.source_ip),
+                json.dumps(payload.shipment.origin.model_dump()),
+                json.dumps(payload.shipment.destination.model_dump()),
+                payload.shipment.value,
+                payload.shipment.channel,
+                payload.booking_ts,
+                destination_hmac,
+                email_hmac,
+                phone_hmac,
+                payload.transaction_number,
             )
-            VALUES (
-                $1, $2, $3, $4, $5,
-                $6::jsonb, $7::jsonb, $8, $9, $10,
-                $11, $12, $13
-            )
-            RETURNING id
-            """,
-            auth.tenant_id,
-            customer_id,
-            user_id,
-            payload.request_id,
-            str(payload.source_ip),
-            json.dumps(payload.shipment.origin.model_dump()),
-            json.dumps(payload.shipment.destination.model_dump()),
-            payload.shipment.value,
-            payload.shipment.channel,
-            payload.booking_ts,
-            destination_hmac,
-            email_hmac,
-            phone_hmac,
-        )
+        except asyncpg.UniqueViolationError as exc:
+            if exc.constraint_name == "ux_shipments_tenant_request":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "request_id already used by another booking in this tenant "
+                        "(idempotency race past the replay check)"
+                    ),
+                ) from exc
+            # shipments_pkey (tenant_id, id) — the intentional identity 409.
+            raise HTTPException(
+                status_code=409,
+                detail="shipment_id already booked for this tenant",
+            ) from exc
 
         # Persist decision with explicit request_type='booking'. The
         # discriminator is visible at the call site; the migration's
@@ -284,7 +322,7 @@ async def evaluate_booking(
                 VALUES ($1, $2, $3, 'booking', $4, $5, $6, $7, $8, $9::jsonb)
                 """,
                 auth.tenant_id,
-                shipment_id,
+                payload.shipment_id,
                 payload.request_id,
                 result.score,
                 result.decision,
@@ -342,6 +380,8 @@ async def evaluate_booking(
     )
     return BookingResponse(
         request_id=payload.request_id,
+        shipment_id=payload.shipment_id,
+        transaction_number=payload.transaction_number,
         decision=result.decision,
         score=result.score,
         classification=result.classification,

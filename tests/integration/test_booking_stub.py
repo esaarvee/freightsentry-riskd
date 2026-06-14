@@ -19,6 +19,8 @@ def _payload(request_id: str = "test-req-1", customer_id: str = "cust-1") -> dic
     """Minimal valid booking payload."""
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_id},
         "user": {"external_id": "user-1"},
         "source_ip": "192.0.2.42",

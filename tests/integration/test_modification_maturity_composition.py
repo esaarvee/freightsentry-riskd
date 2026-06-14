@@ -43,6 +43,8 @@ def _booking_payload(
 ) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": customer_external_id},
         "user": {"external_id": user_external_id},
         "source_ip": source_ip,
@@ -137,6 +139,8 @@ async def test_high_velocity_24h_score_lower_for_thin_baseline(
                     json={
                         "request_id": f"{ext_id}-mod-{i}",
                         "original_request_id": base_book,
+                        "shipment_id": f"ship-{base_book}",
+                        "transaction_number": f"txn-{base_book}",
                         "modification_ts": f"2026-05-27T0{8 + (i % 2)}:{(i * 5) % 60:02d}:00Z",
                         "modification_type": "value",
                         "new_value": {"value": 1010 + i},
@@ -156,6 +160,8 @@ async def test_high_velocity_24h_score_lower_for_thin_baseline(
                 json={
                     "request_id": f"{ext_id}-final-mod",
                     "original_request_id": base_book,
+                    "shipment_id": f"ship-{base_book}",
+                    "transaction_number": f"txn-{base_book}",
                     "modification_ts": "2026-05-27T20:00:00Z",
                     "modification_type": "value",
                     "new_value": {"value": 1500},
@@ -219,6 +225,8 @@ async def test_high_velocity_1h_fires_for_both_thin_and_mature(
                     json={
                         "request_id": f"{ext_id}-h1-mod-{i}",
                         "original_request_id": base_book,
+                        "shipment_id": f"ship-{base_book}",
+                        "transaction_number": f"txn-{base_book}",
                         "modification_ts": f"2026-05-27T08:{10 + i}:00Z",
                         "modification_type": "value",
                         "new_value": {"value": 1010 + i},
@@ -232,6 +240,8 @@ async def test_high_velocity_1h_fires_for_both_thin_and_mature(
                 json={
                     "request_id": f"{ext_id}-h1-final",
                     "original_request_id": base_book,
+                    "shipment_id": f"ship-{base_book}",
+                    "transaction_number": f"txn-{base_book}",
                     "modification_ts": "2026-05-27T08:30:00Z",
                     "modification_type": "value",
                     "new_value": {"value": 1500},
@@ -288,6 +298,8 @@ async def test_low_trust_customer_rule_fires_with_seeded_low_trust(
             json={
                 "request_id": "lowtrust-mod",
                 "original_request_id": "lowtrust-book",
+                "shipment_id": "ship-lowtrust-book",
+                "transaction_number": "txn-lowtrust-book",
                 "modification_ts": "2026-05-27T08:30:00Z",
                 "modification_type": "destination",
                 "new_value": {"destination": {"address": "999 New Address, Other City"}},
@@ -356,6 +368,8 @@ async def test_destination_change_compound_rules_fire_together(
             json={
                 "request_id": "compound-mod",
                 "original_request_id": "compound-book",
+                "shipment_id": "ship-compound-book",
+                "transaction_number": "txn-compound-book",
                 # 12h after booking — lands in the within_24_hours bucket
                 # (within_30_min covers <= 30min; within_1_hour covers
                 # 30min < t <= 1h; within_24_hours covers 1h < t <= 24h).

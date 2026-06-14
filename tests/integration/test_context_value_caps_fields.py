@@ -62,8 +62,11 @@ async def _seed_minimal_customer_and_baseline(
 
 
 def _make_payload(currency: str = "USD", value: str = "100") -> BookingRequest:
+    request_id = f"REQ-vc-{secrets.token_hex(4)}"
     return BookingRequest(
-        request_id=f"REQ-vc-{secrets.token_hex(4)}",
+        request_id=request_id,
+        shipment_id=f"ship-{request_id}",
+        transaction_number=f"txn-{request_id}",
         customer=CustomerData(external_id="vc"),
         user=UserData(external_id="vc-u"),
         source_ip=IPv4Address("192.0.2.50"),
@@ -251,11 +254,12 @@ async def test_modification_synthetic_booking_uses_modifications_currency(
     shipment_row = await db_conn.fetchrow(
         """
         INSERT INTO shipments (
-            tenant_id, customer_id, user_id, request_id, source_ip,
-            origin, destination, value, channel, booking_ts, destination_hmac
+            id, tenant_id, customer_id, user_id, request_id, source_ip,
+            origin, destination, value, channel, booking_ts, destination_hmac,
+            transaction_number
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11
+            $4, $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, 'tx-' || $4
         )
         RETURNING *
         """,
@@ -278,6 +282,8 @@ async def test_modification_synthetic_booking_uses_modifications_currency(
     mod_payload = ModificationRequest(
         request_id="MOD-cad-1",
         original_request_id="REQ-prior-mod",
+        shipment_id="REQ-prior-mod",
+        transaction_number="tx-REQ-prior-mod",
         modification_ts=datetime.now(UTC),
         modification_type="value",
         new_value={"value": 250},

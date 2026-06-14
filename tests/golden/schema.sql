@@ -10,7 +10,7 @@
     ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
     ADD CONSTRAINT customers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
     ADD CONSTRAINT decisions_pkey PRIMARY KEY (id);
-    ADD CONSTRAINT decisions_shipment_id_fkey FOREIGN KEY (shipment_id) REFERENCES public.shipments(id);
+    ADD CONSTRAINT decisions_shipment_id_fkey FOREIGN KEY (tenant_id, shipment_id) REFERENCES public.shipments(tenant_id, id);
     ADD CONSTRAINT decisions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
     ADD CONSTRAINT enterprises_pkey PRIMARY KEY (id);
     ADD CONSTRAINT enterprises_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
@@ -20,7 +20,7 @@
     ADD CONSTRAINT global_blocked_vectors_pkey PRIMARY KEY (id);
     ADD CONSTRAINT ip_enrichment_pkey PRIMARY KEY (ip);
     ADD CONSTRAINT shipments_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES public.customers(id);
-    ADD CONSTRAINT shipments_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT shipments_pkey PRIMARY KEY (tenant_id, id);
     ADD CONSTRAINT shipments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
     ADD CONSTRAINT shipments_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
     ADD CONSTRAINT tenant_route_baselines_pkey PRIMARY KEY (tenant_id, customer_country, origin_country, destination_country);
@@ -48,8 +48,6 @@
     AS integer
     AS integer
     AS integer
-    AS integer
-    CACHE 1;
     CACHE 1;
     CACHE 1;
     CACHE 1;
@@ -72,8 +70,6 @@
     INCREMENT BY 1
     INCREMENT BY 1
     INCREMENT BY 1
-    INCREMENT BY 1
-    NO MAXVALUE
     NO MAXVALUE
     NO MAXVALUE
     NO MAXVALUE
@@ -94,8 +90,6 @@
     NO MINVALUE
     NO MINVALUE
     NO MINVALUE
-    NO MINVALUE
-    START WITH 1
     START WITH 1
     START WITH 1
     START WITH 1
@@ -172,7 +166,7 @@
     id integer NOT NULL,
     id integer NOT NULL,
     id integer NOT NULL,
-    id integer NOT NULL,
+    id text NOT NULL,
     ip inet NOT NULL,
     ip_asn_stats jsonb DEFAULT '{}'::jsonb NOT NULL,
     ip_netblock_stats jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -205,7 +199,7 @@
     origin_country character varying(2) NOT NULL,
     origin_ip_country_stats jsonb DEFAULT '{}'::jsonb NOT NULL,
     origin_stats jsonb DEFAULT '{}'::jsonb NOT NULL,
-    phone_hmac text
+    phone_hmac text,
     phone_hmacs jsonb DEFAULT '{}'::jsonb NOT NULL,
     phone_prefix_stats jsonb DEFAULT '{}'::jsonb NOT NULL,
     proxy_type text,
@@ -224,7 +218,7 @@
     role text NOT NULL,
     score numeric(5,4) NOT NULL,
     share_enabled boolean DEFAULT false NOT NULL,
-    shipment_id integer NOT NULL,
+    shipment_id text NOT NULL,
     source_ip inet NOT NULL,
     target_request_id text NOT NULL,
     tenant_id integer NOT NULL,
@@ -240,6 +234,7 @@
     threat text,
     token_hash text NOT NULL,
     total_shipments integer DEFAULT 0 NOT NULL,
+    transaction_number text NOT NULL
     triggered_rules text[] DEFAULT '{}'::text[] NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
     updated_at timestamp with time zone DEFAULT now() NOT NULL
@@ -275,7 +270,6 @@ ALTER SEQUENCE public.decisions_id_seq OWNED BY public.decisions.id;
 ALTER SEQUENCE public.enterprises_id_seq OWNED BY public.enterprises.id;
 ALTER SEQUENCE public.feedback_id_seq OWNED BY public.feedback.id;
 ALTER SEQUENCE public.global_blocked_vectors_id_seq OWNED BY public.global_blocked_vectors.id;
-ALTER SEQUENCE public.shipments_id_seq OWNED BY public.shipments.id;
 ALTER SEQUENCE public.tenants_id_seq OWNED BY public.tenants.id;
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 ALTER TABLE ONLY public.alembic_version
@@ -319,7 +313,6 @@ ALTER TABLE ONLY public.shipments
 ALTER TABLE ONLY public.shipments
 ALTER TABLE ONLY public.shipments
 ALTER TABLE ONLY public.shipments
-ALTER TABLE ONLY public.shipments ALTER COLUMN id SET DEFAULT nextval('public.shipments_id_seq'::regclass);
 ALTER TABLE ONLY public.tenant_route_baselines
 ALTER TABLE ONLY public.tenant_route_baselines
 ALTER TABLE ONLY public.tenants
@@ -364,7 +357,6 @@ CREATE SEQUENCE public.decisions_id_seq
 CREATE SEQUENCE public.enterprises_id_seq
 CREATE SEQUENCE public.feedback_id_seq
 CREATE SEQUENCE public.global_blocked_vectors_id_seq
-CREATE SEQUENCE public.shipments_id_seq
 CREATE SEQUENCE public.tenants_id_seq
 CREATE SEQUENCE public.users_id_seq
 CREATE TABLE public.alembic_version (
@@ -404,7 +396,6 @@ GRANT SELECT,USAGE ON SEQUENCE public.decisions_id_seq TO riskd_app;
 GRANT SELECT,USAGE ON SEQUENCE public.enterprises_id_seq TO riskd_app;
 GRANT SELECT,USAGE ON SEQUENCE public.feedback_id_seq TO riskd_app;
 GRANT SELECT,USAGE ON SEQUENCE public.global_blocked_vectors_id_seq TO riskd_app;
-GRANT SELECT,USAGE ON SEQUENCE public.shipments_id_seq TO riskd_app;
 GRANT SELECT,USAGE ON SEQUENCE public.tenants_id_seq TO riskd_app;
 GRANT SELECT,USAGE ON SEQUENCE public.users_id_seq TO riskd_app;
 GRANT USAGE ON SCHEMA public TO riskd_app;

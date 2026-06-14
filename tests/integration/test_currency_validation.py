@@ -18,8 +18,11 @@ from app.main import app
 
 
 def _minimal_booking_payload(currency: str | None = None) -> dict[str, object]:
+    request_id = f"REQ-curr-{datetime.now(UTC).timestamp()}"
     payload: dict[str, object] = {
-        "request_id": f"REQ-curr-{datetime.now(UTC).timestamp()}",
+        "request_id": request_id,
+        "shipment_id": f"ship-{request_id}",
+        "transaction_number": f"txn-{request_id}",
         "customer": {"external_id": "cust-curr"},
         "user": {"external_id": "user-curr"},
         "source_ip": "192.0.2.20",
@@ -42,6 +45,8 @@ def _minimal_modification_payload(currency: str | None = None) -> dict[str, obje
     payload: dict[str, object] = {
         "request_id": f"MOD-curr-{datetime.now(UTC).timestamp()}",
         "original_request_id": "REQ-nonexistent",
+        "shipment_id": "ship-REQ-nonexistent",
+        "transaction_number": "txn-REQ-nonexistent",
         "modification_ts": datetime.now(UTC).isoformat(),
         "modification_type": "value",
         "new_value": {"value": 200},

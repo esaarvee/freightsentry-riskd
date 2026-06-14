@@ -40,6 +40,8 @@ def _minimal_modification(**overrides: object) -> ModificationRequest:
     base: dict[str, object] = {
         "request_id": "MOD-1",
         "original_request_id": "REQ-1",
+        "shipment_id": "ship-1",
+        "transaction_number": "txn-1",
         "modification_ts": datetime.now(UTC),
         "modification_type": "value",
         "new_value": {"value": 200},
@@ -117,6 +119,8 @@ def test_modification_currency_lowercase_rejected() -> None:
 def test_booking_request_without_currency_uses_usd_default() -> None:
     payload = BookingRequest(
         request_id="REQ-x",
+        shipment_id="ship-x",
+        transaction_number="txn-x",
         customer=CustomerData(external_id="c"),
         user=UserData(external_id="u"),
         source_ip=IPv4Address("192.0.2.1"),

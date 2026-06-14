@@ -592,3 +592,41 @@ sides of the diff (pre-existing, not introduced by the comment-cleanliness pass)
 them is a factual-accuracy fix of a different class than ID/history removal — out of scope here.
 Suggested action: update the comments to reference the squashed migration numbers (0001-0005), or
 describe by content, in a follow-up.
+
+## 2026-06-15 — Pre-existing case-2 lock-in rule failure (date-sensitive)
+
+Discovered by: implementer during REFACTOR_PLAN_platform-shipment-id.md Commit 1
+Location: tests/integration/test_case_2.py::test_unfamiliar_ip_against_established_customer_blocks_under_layer2
+Severity: medium
+Observation: This test fails with `missing: {'cloud_api_customer_deviation_iptype',
+'locked_customer_unfamiliar_ip'}` — the two `customer_locked_cloud_api`-gated rules
+do not fire against a directly-seeded locked baseline (cloud_share=1.0, api_share=1.0,
+value_n=20). PROVEN PRE-EXISTING and independent of the platform-shipment-id change:
+reproduced identically on pure HEAD code (commit 04f0c15, no uncommitted changes) +
+HEAD schema (migrations 0001-0005) on a fresh scratch DB. The platform-shipment-id
+diff touches only models/booking-persist/modification-cross-check/_booking_from_prior_shipment;
+`build_context`, `score`, `rules.yaml`, `dsl` are byte-identical to HEAD, so `triggered_rules`
+is computed identically. Almost certainly date-sensitive (surfaced as today rolled to
+2026-06-15; the seed uses hardcoded stat `last="2026-05-20"` + `now() - interval '6 days'`
+and decay against `date.today()`, interacting with the `customer_observations >= 20`
+clause / lock-gate derivation). The test itself documents that failure = operator
+escalation, NOT a weight tune.
+Suggested action: investigation needed — determine whether the lock-gate / customer_observations
+derivation has a date/decay edge at the seed boundary; do NOT tune weights. Out of scope
+for the platform-shipment-id pass (not caused by it).
+
+## 2026-06-15 — Golden-schema test pg_dump version skew (host 18 vs container 16)
+
+Discovered by: implementer during REFACTOR_PLAN_platform-shipment-id.md Commit 1
+Location: tests/integration/test_schema_golden.py (_capture_schema_dump prefers host pg_dump)
+Severity: low
+Observation: The host pg_dump is 18.3; the docker postgres container is 16.13. The committed
+`tests/golden/schema.sql` is generated via the container's pg_dump 16 (the docstring's canonical
+command uses `docker compose exec postgres pg_dump`). pg_dump 18 emits an extra
+`SET transaction_timeout = 0;` line absent in 16, so regenerating/validating the golden via the
+host binary on this machine introduces a spurious one-line diff. The golden for this pass was
+(correctly) regenerated via the container pg_dump 16 to match the canonical lineage; the golden
+gate must be exercised via the container path (or a pg_dump-16 host binary), which is what CI does.
+Suggested action: pin the golden test to the container pg_dump (or a 16.x host binary), or make
+the normalizer strip version-variable `SET ...` lines, so host-18 dev machines don't see phantom
+golden diffs.

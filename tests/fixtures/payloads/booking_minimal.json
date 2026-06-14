@@ -1,5 +1,7 @@
 {
   "request_id": "e2e-min-001",
+  "shipment_id": "ship-e2e-min-001",
+  "transaction_number": "txn-e2e-min-001",
   "customer": {"external_id": "e2e-cust-min"},
   "user": {"external_id": "e2e-user-min"},
   "source_ip": "192.0.2.10",
