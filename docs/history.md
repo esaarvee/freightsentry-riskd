@@ -1763,6 +1763,45 @@ file may happen in a future post-launch cleanup window.
 
 ---
 
+## Refactor pass — Platform-supplied `shipment_id` + `transaction_number`
+
+Post-Phase-8 pre-launch refactor making the upstream platform's shipment
+identifier the system of record (a future admin dashboard in a separate repo
+would be confused by a riskd-minted ID diverging from the platform's). Landed as
+migration `0006_platform_shipment_id` on top of the squashed `0001`–`0005` chain.
+
+- **Schema:** `shipments.id` serial → platform-supplied `text`; PK composite
+  `(tenant_id, id)` (cross-tenant collision defense); new `transaction_number
+  text NOT NULL`, **unindexed by design**; `decisions.shipment_id` int → `text`
+  with composite FK `(tenant_id, shipment_id)` → `shipments(tenant_id, id)`.
+  Golden schema regenerated; pre-launch clean redefinition, no backfill.
+- **Endpoints:** booking consumes `shipment_id` as identity (drops the
+  `RETURNING id` round-trip) and surfaces an intentional **409** on duplicate
+  `shipment_id`, discriminated from the `request_id` idempotency 409 by
+  constraint name. Modification cross-checks `shipment_id` + `transaction_number`
+  against the resolved/stored shipment (**422** on mismatch). Responses echo the
+  identity. Idempotency, feedback resolution, and modification cardinality were
+  left untouched (verified V3 / decision #10).
+- **Verification:** a Phase-1 codebase pass confirmed `shipment_id` type-opacity
+  (V1), that all four `decisions ↔ shipments` joins already carried the tenant
+  predicate (V2, hard gate — zero rewrites), feedback independence (V3),
+  `transaction_number` greenfield within the riskd domain (V4 — the only existing
+  references are the `freight_risk` calibration source, confirmatory), and the
+  golden-schema regen delta (V5).
+- **Calibration ETL:** `export_from_freight_risk.py` threads the source
+  `freight_risk` `shipment_id` / `transaction_number` straight through — riskd
+  adopts the upstream identifiers verbatim.
+- **Out of scope / flagged:** the admin dashboard and any read endpoint, the
+  `transaction_number` index and any timestamp index (intentional absences,
+  documented in `.ai/decisions.md`), and the platform team's payload-cutover
+  coordination. A pre-existing date-sensitive `test_case_2` failure and a host
+  vs. container `pg_dump` version skew were logged to `.claude/BUGS.md`.
+
+See `REFACTOR_PLAN_platform-shipment-id.md` and
+`REFACTOR_REPORT_platform-shipment-id.md` at repo root.
+
+---
+
 ## Closing pointer
 
 For ongoing operations, see [docs/](.) — the current-state operator

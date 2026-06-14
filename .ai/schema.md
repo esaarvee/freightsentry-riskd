@@ -1,4 +1,4 @@
-# schema.md — Current schema (post-squash, 5 migrations)
+# schema.md — Current schema (post-squash, 5 migrations + 0006)
 
 Single Postgres 16 database. No Redis, no MySQL, no streams. JSONB-heavy customer baselines. RLS-enforced multi-tenancy.
 
@@ -158,7 +158,9 @@ Creates `shipments`, `decisions`, `feedback`, all RLS-enabled. Folds in the Phas
 
 Inbound booking events. INSERT-only. Idempotency contract: `UNIQUE (tenant_id, request_id)`.
 
-- `id` serial PRIMARY KEY
+> **Superseded by `0006` (current state):** `id` is platform-supplied `text` (not serial), the PK is composite `(tenant_id, id)`, and a `transaction_number text NOT NULL` column is added. See [`0006_platform_shipment_id`](#0006_platform_shipment_id--platform-supplied-shipment-identity) for the current shape.
+
+- `id` serial PRIMARY KEY *(→ `text`, composite PK `(tenant_id, id)` in 0006)*
 - `tenant_id` int NOT NULL REFERENCES `tenants(id)`
 - `customer_id` int NOT NULL REFERENCES `customers(id)`
 - `user_id` int NOT NULL REFERENCES `users(id)`
@@ -190,7 +192,7 @@ Persisted output of each evaluation. The UNIQUE idempotency key is widened to `(
 
 - `id` serial PRIMARY KEY
 - `tenant_id` int NOT NULL REFERENCES `tenants(id)`
-- `shipment_id` int NOT NULL REFERENCES `shipments(id)`
+- `shipment_id` int NOT NULL REFERENCES `shipments(id)` *(→ `text`, composite FK `(tenant_id, shipment_id)` → `shipments(tenant_id, id)` in 0006)*
 - `request_id` text NOT NULL — mirrors the request's idempotency token
 - `score` numeric(5, 4) NOT NULL — final noisy-OR score
 - `decision` text NOT NULL — comment: "One of ALLOW | REVIEW | BLOCK; final routing outcome from the scorer"
@@ -435,6 +437,41 @@ Idempotent guard: `DO $$ ... duplicate_object` block so re-runs against an alrea
 ### What's NOT in this migration
 
 The original chain included `0009_drop_rls_on_auth_tables.py` (drop RLS on `api_tokens` and `app_users`). The squash skips this entirely — `0001_foundation` never creates RLS on those tables in the first place. Final-state schema is byte-equivalent to the pre-squash chain. The full reasoning is in the `0001_foundation` module docstring and cross-referenced from [`docs/history.md`](../docs/history.md).
+
+---
+
+## `0006_platform_shipment_id` — platform-supplied shipment identity
+
+Makes the upstream platform's shipment identifier the system of record. **Pre-launch redefinition, no backfill** (tables are empty). Forward migration on top of the squashed `0001`–`0005` chain.
+
+### `shipments` — changed
+
+- `id` **`text` NOT NULL** (was `serial`) — the platform-supplied `shipment_id` IS the shipment identity; the riskd-minted serial and its `shipments_id_seq` are removed.
+- **PK is composite `(tenant_id, id)`** (was `(id)`) — defends against a cross-tenant `shipment_id` collision leaking existence via a 409. Also indexes `shipment_id` for free under the tenant prefix.
+- `transaction_number` **`text` NOT NULL** — new. Platform-supplied operator-facing reference.
+  - **UNINDEXED BY DESIGN.** Not a riskd query key. The external admin dashboard (separate repo, later) reads by date range; there is **no riskd read endpoint** for it and **no timestamp/date-range index** belongs in this change. A dead-capability audit must NOT "fix" this absence or flag the column as half-built.
+  - **Name disambiguation:** this is the *same logical value* as `freight_risk.shipments.transaction_number` in the calibration source schema (`scripts/calibration/export_from_freight_risk.py`) — riskd adopts the upstream identifier verbatim. It is **not** a separate concept; the two live in different namespaces (riskd domain vs. the upstream ETL source).
+
+### `decisions` — changed
+
+- `shipment_id` **`text` NOT NULL** (was `int`).
+- FK is **composite `(tenant_id, shipment_id)` → `shipments(tenant_id, id)`** (was `shipment_id → shipments(id)`). Every `decisions ↔ shipments` join already carried `s.tenant_id = d.tenant_id`; the composite FK formalizes that invariant. `ix_decisions_tenant_shipment` survives the retype unchanged.
+
+### Preserved (unchanged by 0006)
+
+`ux_shipments_tenant_request (tenant_id, request_id)`, `ux_decisions_tenant_request_type (tenant_id, request_type, request_id)`, `ix_decisions_tenant_request_type_created`, all `ix_shipments_*`, RLS policies, grants.
+
+### Reversibility
+
+`downgrade()` is **one-way after launch**: the `id text → integer` cast (`USING id::integer`) is vacuous on empty pre-launch tables but hard-fails the moment any non-numeric platform `shipment_id` exists. Documented in the migration.
+
+### Platform-facing contract change (breaking)
+
+Booking and modification request payloads gain two **required** fields: `shipment_id` and `transaction_number` (`text`, `1..128` chars). For the platform team (their endpoint versioning / cutover is out of repo scope):
+
+- **Booking:** `shipment_id` is consumed as the shipment identity. A second booking POST reusing a `shipment_id` already booked for the tenant — with a *different* `request_id` — fails the composite PK and is surfaced as a **clear 409** ("shipment_id already booked for this tenant"), discriminated by constraint name from the `request_id` idempotency 409. `shipment_id` is single-use per tenant.
+- **Modification:** cross-checks `shipment_id` and `transaction_number` against the shipment resolved via `original_request_id`; **422** on either mismatch. Writes no shipment row; does not persist `transaction_number`.
+- **Responses:** `BookingResponse` echoes both fields; `ModificationResponse` echoes `shipment_id`. On a `request_id` idempotency replay the echo reflects the **request-supplied** identity (not the stored row) — a deliberate tradeoff to keep the replay query untouched; identity drift on replay is not validated.
 
 ---
 

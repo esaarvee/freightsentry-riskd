@@ -54,6 +54,17 @@ Tenant onboarding is an operator script (`scripts/tenant_onboard.py`). The scrip
 
 Customer / enterprise / user records auto-upsert from the first booking payload that references them. Booking payload carries optional metadata (`registered_address`, `business_name`, `enterprise_id`, `registered_country`) which populates the records on first sight and can update on subsequent bookings via a COALESCE-on-update pattern that protects operator-supplied values from being overwritten by payload nulls.
 
+### Platform-supplied shipment identity (system of record)
+
+As of migration `0006`, the upstream platform's shipment identifier is the system of record. `shipments.id` is the platform-supplied `shipment_id` (`text`, not a riskd-minted serial); the PK is composite `(tenant_id, id)` and `decisions.shipment_id` is `text` with a composite FK. Motivation: a future admin dashboard (separate repo) where a riskd-minted ID diverging from the platform's would create confusion. Booking and modification payloads carry `shipment_id` + `transaction_number` (both required `text`, `1..128`). See [`schema.md`](schema.md#0006_platform_shipment_id--platform-supplied-shipment-identity) for the full contract (intentional 409 on duplicate `shipment_id`; modification 422 cross-checks; response echoes).
+
+**Boundary notes (intentional absences — do not "fix" in a dead-capability audit):**
+
+- `shipments.transaction_number` is **stored unindexed by design.** It is an operator-facing reference, not a riskd query key. There is **no riskd read endpoint** for it.
+- The external **admin dashboard is a separate repo** (later); it reads by **date range**, so **no `transaction_number` index and no timestamp/date-range index** belong in riskd. This absence is deliberate.
+- `transaction_number` is the same logical value as `freight_risk.shipments.transaction_number` (the calibration ETL source) — the same identifier adopted from upstream, not a separate concept.
+- The platform team owns the breaking-payload-change coordination (versioned endpoint / cutover); that is out of repo scope.
+
 ---
 
 ## Scoring architecture — 3-layer noisy-OR
