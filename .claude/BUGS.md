@@ -615,6 +615,23 @@ Suggested action: investigation needed — determine whether the lock-gate / cus
 derivation has a date/decay edge at the seed boundary; do NOT tune weights. Out of scope
 for the platform-shipment-id pass (not caused by it).
 
+RESOLVED (test-harness artifact, not a detection regression): root-caused to a cross-timezone
+date-source mismatch in the test seed, NOT a Layer-2 logic bug. `_seed_established_customer`
+anchored `decay_anchor_date = current_date` (Postgres, UTC) with `value_n = 20` sitting exactly
+on the `customer_locked_cloud_api` gate's `value_n >= 20.0` boundary, while scoring decays to
+`as_of = date.today()` (Python, local tz). In the local-time window where the UTC date still
+lags local by a day (here ~00:00-05:30 IST), `decay_to` applied ~1 day of default-half-life
+(90d) decay: `value_n = 20 * exp(-ln2/90) ≈ 19.85 < 20.0`, dropping BOTH the lock gate and the
+`customer_observations >= 20` clause, so the two lock-in rules silently stopped firing. Proven
+empirically: the test FAILED at 00:01 IST (UTC=prev day) and PASSED at 09:32 IST (UTC=same day),
+with no code change. Fixed by anchoring the seed's `decay_anchor_date` to Python `date.today()`
+(the same source build_context uses), matching the existing convention documented in
+tests/conftest.py (`_seed_customer_with_baseline`) and test_context.py. Same one-line fix applied
+to the two sibling boundary seeds (test_baseline_gating.py, test_admin_endpoints.py) that used
+`current_date`. Detection logic was correct throughout. Swept the whole suite + `alembic/`:
+these three were the ONLY `decay_anchor_date = current_date` seed sites; no others remain (the
+residual `current_date` occurrences are explanatory comments). No further fix outstanding.
+
 ## 2026-06-15 — Golden-schema test pg_dump version skew (host 18 vs container 16)
 
 Discovered by: implementer during REFACTOR_PLAN_platform-shipment-id.md Commit 1

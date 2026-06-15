@@ -256,3 +256,43 @@ async def test_same_request_id_reuse_is_idempotent_replay_not_identity_409(
     second = await unauth_client.post(_BOOKING_PATH, json=payload, headers=_headers(token))
     assert second.status_code == 200, second.text
     _assert_decisions_equivalent(first.json(), second.json())
+
+
+async def test_replay_with_divergent_identity_echoes_request_not_stored(
+    unauth_client: AsyncClient,
+    seeded_api_token: tuple[str, int],
+) -> None:
+    """Documented replay-echo edge (#9 + #10): on a request_id idempotency
+    replay the response echoes the REQUEST-supplied shipment_id /
+    transaction_number, NOT the stored identity of the original booking. A
+    malformed retry that reuses request_id with different identity fields echoes
+    the new payload while returning the ORIGINAL decision — identity drift on
+    replay is intentionally NOT validated (keeps the replay query untouched,
+    #10). This pins the behavior as chosen, not implicit.
+
+    Note: the divergent shipment_id is never persisted — the replay SELECT
+    short-circuits before the shipments INSERT, so no composite-PK 409 fires."""
+    token, _ = seeded_api_token
+    first = await unauth_client.post(
+        _BOOKING_PATH,
+        json=_booking_payload(request_id="echo-edge"),
+        headers=_headers(token),
+    )
+    assert first.status_code == 200, first.text
+
+    # Same request_id (-> idempotent replay) but DIVERGENT identity fields.
+    divergent = _booking_payload(request_id="echo-edge")
+    divergent["shipment_id"] = "ship-DIVERGENT"
+    divergent["transaction_number"] = "txn-DIVERGENT"
+    replay = await unauth_client.post(_BOOKING_PATH, json=divergent, headers=_headers(token))
+    assert replay.status_code == 200, replay.text
+
+    body = replay.json()
+    # Echo reflects the REQUEST payload, not the stored original.
+    assert body["shipment_id"] == "ship-DIVERGENT"
+    assert body["transaction_number"] == "txn-DIVERGENT"
+    # ...while the decision envelope is the ORIGINAL (replay returns prior decision).
+    first_body = first.json()
+    assert body["decision"] == first_body["decision"]
+    assert body["score"] == pytest.approx(first_body["score"], abs=1e-4)
+    assert body["triggered_rules"] == first_body["triggered_rules"]

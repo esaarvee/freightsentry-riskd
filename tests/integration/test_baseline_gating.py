@@ -25,7 +25,7 @@ verify the gating.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import asyncpg
@@ -124,11 +124,16 @@ async def _seed_established_customer_with_tight_baseline(
             20, 250, 2000,
             now() - interval '6 days',
             'US',
-            current_date
+            $3
         )
         """,
         tenant_id,
         customer_id,
+        # Anchor decay to Python's date.today() (same source as build_context's
+        # as_of), NOT Postgres current_date — the two diverge by a day across the
+        # UTC date boundary, injecting a spurious 1-day decay on the boundary
+        # value_n=20. See tests/conftest.py / test_context.py for the convention.
+        date.today(),
     )
     return customer_id
 

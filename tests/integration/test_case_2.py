@@ -21,7 +21,7 @@ BLOCK failures on case-2 escalate to operator via .claude/STATUS.md —
 not to a weight tune.
 """
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -111,11 +111,19 @@ async def _seed_established_customer(
             20, 250, 2000,
             now() - interval '6 days',
             'US',
-            current_date
+            $3
         )
         """,
         tenant_id,
         customer_id,
+        # Anchor decay to Python's date.today() (same source as build_context's
+        # as_of), NOT Postgres current_date: the two diverge by a day when the
+        # run straddles the UTC date boundary (e.g. early-morning local time in a
+        # +HH timezone), injecting a spurious 1-day decay that pushes the
+        # boundary value_n=20 just under the customer_locked_cloud_api gate's
+        # `>= 20.0` and silently drops the lock-in rules. See tests/conftest.py
+        # _seed_customer_with_baseline and test_context.py for the convention.
+        date.today(),
     )
     return customer_id
 

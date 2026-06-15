@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import asyncpg
 import pytest
@@ -278,11 +278,14 @@ async def test_admin_customer_truncation_applied_with_15_entries(
     await db_conn.execute(
         """
         INSERT INTO customer_baselines (tenant_id, customer_id, origin_stats, decay_anchor_date)
-        VALUES ($1, $2, $3::jsonb, current_date)
+        VALUES ($1, $2, $3::jsonb, $4)
         """,
         seeded_tenant,
         cust_id,
         json.dumps(origin_stats),
+        # Python date.today() (not Postgres current_date) to anchor decay to the
+        # same source build_context uses as `as_of`, avoiding cross-TZ drift.
+        date.today(),
     )
 
     admin_token = await _seed_admin_token(db_conn, seeded_tenant)
