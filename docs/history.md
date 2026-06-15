@@ -1747,19 +1747,50 @@ suite audit, doc consolidation, plan-file teardown. Four batches landed:
   lines pre-Phase-8-close) created absorbing 48+ source docs; CLAUDE.md
   cross-references cleaned.
 
-- **Batch 8D — Phase 8 wrap** (commits `4671fd4` REPORT_PHASE_8.md,
+- **Batch 8D — Phase 8 wrap** (commits `4671fd4` Phase 8 report,
   `64f8f70` checklist verification, `881f3b9` final integration test
-  pass at 1116 passed + 91% coverage). REPORT_PHASE_8.md kept as the
-  canonical Phase 8 record. Production-launch checklist references all
-  resolve. Schema golden passes.
+  pass at 1116 passed + 91% coverage). Production-launch checklist
+  references all resolve. Schema golden passes.
 
 The squash never enabled RLS on `api_tokens` / `app_users` in
 `0001_foundation.py`, matching the Phase 5D 0009 RLS-drop outcome.
 
-For the full Phase 8 outcome record see `REPORT_PHASE_8.md` at repo
-root. `PLAN_PHASE_8A.md` through `PLAN_PHASE_8D.md` are retained
-through production launch per operator decision; absorption into this
-file may happen in a future post-launch cleanup window.
+The Phase 8 plan and report working files (`PLAN_PHASE_8A`–`8D`,
+`REPORT_PHASE_8`) were distilled into this section and removed in the
+pre-tag archival pass; the batch summaries above are the canonical
+Phase 8 record.
+
+---
+
+## Pattern B-lite — In-process enrichment refresh
+
+Post-Phase-8 pre-launch resolution of the enrichment-data launch blocker:
+the IP-enrichment sources had no in-process refresh path, so a deploy ran on
+whatever data the image baked in. Landed across commits `bfb12ca` (prep)
+through the C0–C6 sequence plus a D1–D6 follow-on, all on `feat/refactor`.
+
+- **Refresh module** (`app/enrichment_refresh.py`): an in-process async task,
+  spawned by the FastAPI lifespan, refreshes the nine sources (FireHOL L1/L2,
+  MaxMind City/ASN, IP2Proxy PX11, AWS/GCP/Azure/Cloudflare CIDR) on a 1×/24h
+  cadence. Each tick downloads with bounded jittered retry and two-stage sanity
+  floors (raw bytes, then extracted records) before an atomic replace —
+  `atomic_replace` for in-memory forms, `atomic_replace_stream` (1 MiB chunks)
+  for IP2Proxy's ~1.6 GB BIN.
+- **Copy-on-write swap**: a successful tick rebuilds the Enricher and swaps
+  `app.state.enricher` by reference, so in-flight `enrich()` callers finish on
+  the prior instance — no locks, no torn reads.
+- **Health**: `/health` gained an `enrichment: ok | degraded` field; a degraded
+  state (a source never loaded) is reported without flipping the endpoint to 503.
+- **Out of process**: `scripts/fetch_enrichment.py` is retained as a manual/cron
+  fallback; the in-process module is the recommended path.
+- **Calibration corrections / tangentials** (logged to `.claude/BUGS.md`):
+  IP2Proxy LITE BIN is ~1.6 GB (not the ~50 MB the brief assumed), the download
+  token allows ~5 fetches/24h, and `fetch_enrichment.py` saves cloud JSON / the
+  IP2Proxy archive in forms the loader does not read. The CFN README and deploy
+  runbook launch-blocker banners were demoted to historical notes.
+
+Subsystem detail lives in `.ai/enrichment.md` § Refresh module; verification
+facts in `docs/verification-pattern-b-lite.md`.
 
 ---
 
@@ -1797,8 +1828,72 @@ migration `0006_platform_shipment_id` on top of the squashed `0001`–`0005` cha
   coordination. A pre-existing date-sensitive `test_case_2` failure and a host
   vs. container `pg_dump` version skew were logged to `.claude/BUGS.md`.
 
-See `REFACTOR_PLAN_platform-shipment-id.md` and
-`REFACTOR_REPORT_platform-shipment-id.md` at repo root.
+Architectural rationale (platform identity as system of record, the
+unindexed-by-design `transaction_number`) lives in `.ai/decisions.md`; the
+`0006` schema contract in `.ai/schema.md`.
+
+---
+
+## Refactor pass — Test-suite soundness
+
+Pre-launch pass making the test suite deterministic and honest about its
+dependencies. Nine commits on `feat/refactor`.
+
+- **DB-free unit tier**: the unit tests no longer require a reachable database —
+  the asyncpg pool is opt-in, so the full unit tier runs (and passes) under an
+  unreachable `DATABASE_URL`. This exposed that the prior CI "green" was hollow:
+  the no-Postgres unit job could not have passed as written, because the unit
+  tests errored at import without a DB. (Operator to confirm the historical CI
+  job status via the GitHub UI; it does not block the tag.)
+- **Order-independence**: eliminated cross-test contamination — per-test
+  truncation of the global no-RLS `ip_enrichment` table plus a shared-enricher
+  reset (the keystone fix), and a structlog `capture_logs` cache-pollution fix.
+  The suite is deterministic and order-independent across ≥10 random seeds.
+- **Deadlock fix**: a real concurrent booking/feedback deadlock was fixed by
+  enforcing the canonical lock order **`customers` before `customer_baselines`**
+  (the feedback path was acquiring them in reverse). Regression-pinned; the
+  invariant is recorded in `.ai/conventions.md`.
+- **CI split**: the workflow now runs a DB-free unit job and a Postgres-backed
+  integration job separately.
+- **Observability**: added an `enrich.source_load_failed` EMF metric and made
+  `/health` reflect a degraded (still-200) enrichment state.
+
+---
+
+## Refactor pass — Documentation staleness audit
+
+Pre-launch sweep replacing superseded phrasing in docs and comments in place
+(no new files). Six doc commits plus a three-commit test-fix detour.
+
+- **In-place edits**: README "greenfield" → "pre-launch"; removed dead links to
+  the deleted `MASTER_PLAN` / `PLAN_PHASE_1` files; corrected references to the
+  deleted symmetric-triangle rule to its asymmetric replacement; clarified the
+  Phase-B migrate model (auto-on-every-deploy vs bootstrap-only-manual);
+  refreshed `.ai/system-status.md`; synced the `0001` column comment with
+  `.ai/schema.md` (operator-approved in-place edit).
+- **Test-fix detour**: fixed pre-existing unit failures (an alembic-env stub and
+  unguarded enrichment binary loads) so the gate could run — the enrichment
+  loader now graceful-degrades on missing binaries instead of raising.
+- **Not-actually-stale register (N1–N13)**: phrasings investigated and confirmed
+  current, recorded so the Phase-9 doc lens does not re-investigate them.
+- Nine pre-existing integration-isolation failures were surfaced and logged to
+  `.claude/BUGS.md` for a follow-up pass.
+
+---
+
+## Refactor pass — Dead-capability audit
+
+Pre-launch documentation-only audit (Part A; zero code change) of the unused
+capability surface. Two commits.
+
+- Classified all `ALLOWED_CONTEXT_FIELDS` and the rule catalogue: a small set of
+  genuinely-dead context fields (two of them cost-bearing "keep-and-wire"
+  candidates for post-launch), the inert-but-latent rule set enumerated, and
+  **zero** fix-eligible structural bugs found.
+- The full audit — consumption graph, per-field dispositions, and the Phase-9
+  keep-and-wire seed — is the deliverable and lives at
+  `docs/audits/dead-capability-audit.md` (retained). A phone_prefix /
+  email_domain population gap was logged to `.claude/BUGS.md`.
 
 ---
 
