@@ -1,10 +1,9 @@
 """Pattern B-lite enrichment refresh module.
 
 Per-source async downloaders + atomic file replacement + two-stage
-sanity floors + retry-with-jittered-backoff. The refresh loop and
-FastAPI lifespan integration land in a follow-up commit (see
-PLAN_PATTERN_B_LITE.md C2); this module exposes the per-source
-primitives + helpers consumed by the loop.
+sanity floors + retry-with-jittered-backoff. This module exposes the
+per-source primitives + helpers; the refresh loop and FastAPI lifespan
+integration consume them (see `.ai/enrichment.md` § Refresh module).
 
 License keys (MaxMind, IP2Proxy) flow through URL query strings.
 This module constructs the licensed URL inside per-source downloader

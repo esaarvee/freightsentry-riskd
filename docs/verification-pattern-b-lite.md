@@ -1,6 +1,6 @@
 # Verification — Pattern B-lite enrichment refresh
 
-Verification facts for the `PLAN_PATTERN_B_LITE.md` planning phase.
+Verification facts for the Pattern B-lite planning phase.
 Read-only discovery; no code, no decisions; raw observations only.
 
 Date: 2026-06-08
