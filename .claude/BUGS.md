@@ -565,6 +565,16 @@ dumps the live DB, which the edits do not touch).
 Suggested action: pin the test to the container pg_dump (or a pinned client version), or
 regenerate the golden with the supported client version, so the host path is deterministic.
 
+RESOLVED (golden-and-archival pass, 2026-06-15): `tests/integration/test_schema_golden.py`
+`_capture_schema_dump` now prefers the docker-compose `postgres` container (canonical pg16),
+using the host `pg_dump` only as a fallback, so the host major version is irrelevant on the
+primary path. Belt-and-suspenders: the normalizer also drops top-level session `SET <guc> = …;`
+preamble lines (the class pg18 varies via `SET transaction_timeout = 0;`), and the golden was
+regenerated to match (delta: 11 session-`SET` lines removed, zero DDL change). On a host-only
+fallback with a non-canonical major, the failure message now flags the possible version artifact
+and points to the container command. Verified green on both the container pg16 and host pg18 paths.
+See also the duplicate 2026-06-15 entry below.
+
 ## 2026-06-13 — stale test identifier: test_allowed_context_fields_count_is_76_after_6a8 asserts ==77
 
 Discovered by: test-reviewer + code-flow during comment-cleanliness pass (Commit 7)
@@ -647,3 +657,11 @@ gate must be exercised via the container path (or a pg_dump-16 host binary), whi
 Suggested action: pin the golden test to the container pg_dump (or a 16.x host binary), or make
 the normalizer strip version-variable `SET ...` lines, so host-18 dev machines don't see phantom
 golden diffs.
+
+RESOLVED (golden-and-archival pass, 2026-06-15): both suggested actions applied. `_capture_schema_dump`
+is now container-first (canonical pg16) with a host fallback, and `_normalize` drops top-level
+session `SET <guc> = …;` lines (including pg18's `SET transaction_timeout = 0;`). The golden was
+regenerated under the new normalizer — the only delta is removal of the 11 pg16 session-`SET` lines,
+no DDL change. A host-fallback dump with a non-canonical pg_dump major now emits a version-skew
+diagnostic instead of a raw diff. Verified normalized output identical on the container pg16 and
+host pg18 paths. (Same root cause as the 2026-06-13 entry above; both resolved by this fix.)
