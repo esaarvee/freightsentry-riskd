@@ -48,7 +48,7 @@ Plus two read-only admin endpoints under `/api/v1/admin/`:
 
 ### No tenant-registration endpoint
 
-Tenant onboarding is an operator script (`scripts/tenant_onboard.py`). The script is idempotent UPSERT-by-name with `pg_advisory_xact_lock(hashtext(external_id))` to serialize concurrent runs. The `--rotate-token` flag REVOKES prior tokens (in-transaction DELETE) before issuing a new one.
+Tenant onboarding is an operator script (`scripts/tenant_onboard.py`), run on ECS as a one-off task via `infra/ecs-task-definition-onboard.json`. The script is idempotent UPSERT-by-name with `pg_advisory_xact_lock(hashtext(external_id))` to serialize concurrent runs. The `--rotate-token` flag REVOKES prior tokens (in-transaction DELETE) before issuing a new one. `--token-secret-id` writes the issued token to AWS Secrets Manager (boto3, lazily imported) instead of stdout, keeping the plaintext token out of CloudWatch Logs on the ECS path; boto3 is a main dependency solely for this and ships in the shared runtime image.
 
 ### Implicit entity registration
 

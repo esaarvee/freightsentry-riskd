@@ -19,6 +19,7 @@ dependencies = [
     "maxminddb>=2.6",
     "ip2proxy>=3.4",
     "pytricia>=1.0",
+    "boto3>=1.35",
 ]
 
 [project.optional-dependencies]

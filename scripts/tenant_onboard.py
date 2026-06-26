@@ -12,23 +12,26 @@ Usage:
         --external-id tenant-alpha \\
         --display-name "Alpha Corp" \\
         [--config-json /path/to/config.json] \\
-        [--rotate-token]
+        [--rotate-token] \\
+        [--token-secret-id freightsentry-riskd/tenants/tenant-alpha/token]
 
-The script prints the token ONCE on stdout — operator must capture
-it immediately. Subsequent runs without `--rotate-token` print only
-the tenant id; no token is reprinted.
+Token delivery:
+- Default (local-dev): the token is printed ONCE on stdout — operator
+  must capture it immediately. Subsequent runs without `--rotate-token`
+  print only the tenant id; no token is reprinted.
+- `--token-secret-id <id>`: the token is written to the named AWS
+  Secrets Manager secret instead of stdout. This is the ECS one-off-task
+  path — it keeps the plaintext token out of CloudWatch Logs.
 
 Limitations:
 - No FK to `app_users.role` here — admin onboarding via this script
   is out of scope. Operator can INSERT into `app_users` manually for
   admin principals.
-- Token printed in plaintext to stdout. Production usage should pipe
-  to a secret manager rather than store the stdout output.
 
 Exit codes:
   0 — success
   1 — invalid arguments / config JSON
-  2 — DB error / multi-row tenant collision
+  2 — DB error / multi-row tenant collision / Secrets Manager write failure
 """
 
 from __future__ import annotations
@@ -71,6 +74,15 @@ def _parse_args() -> argparse.Namespace:
         "--rotate-token",
         action="store_true",
         help="Issue a new API token even if the tenant already exists.",
+    )
+    p.add_argument(
+        "--token-secret-id",
+        default=None,
+        help=(
+            "AWS Secrets Manager secret id (name or ARN) to write the issued "
+            "token to instead of stdout. Use on the ECS one-off-task path to "
+            "keep the plaintext token out of CloudWatch Logs."
+        ),
     )
     return p.parse_args()
 
@@ -117,11 +129,45 @@ def _validate_initial_config(config_dict: dict[str, Any]) -> None:
         sys.exit(1)
 
 
+def _store_token_secret(secret_id: str, plaintext: str) -> None:
+    """Write the freshly issued token to AWS Secrets Manager.
+
+    Used on the ECS one-off-task onboarding path so the plaintext token
+    never lands in CloudWatch Logs (the stdout fallback does). boto3 is
+    imported lazily so the pure-helper unit tests and the local-dev
+    stdout path don't require it.
+
+    `put_secret_value` updates an existing secret; if the secret does
+    not exist yet (first token for this id) we fall back to
+    `create_secret`. Any other ClientError is fatal (exit 2). The caller
+    invokes this INSIDE the onboarding transaction, so a fatal exit here
+    rolls back the tenant/token INSERT — a half-onboarded tenant whose
+    token nobody captured is worse than a loud failure the operator
+    re-runs with --rotate-token.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+
+    client = boto3.client("secretsmanager")
+    try:
+        client.put_secret_value(SecretId=secret_id, SecretString=plaintext)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ResourceNotFoundException":
+            client.create_secret(Name=secret_id, SecretString=plaintext)
+        else:
+            print(
+                f"error: failed to write token to secret {secret_id!r}: {e}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
 async def _onboard(
     external_id: str,
     display_name: str,
     initial_config: dict[str, Any],
     rotate_token: bool,
+    token_secret_id: str | None = None,
 ) -> None:
     settings = get_settings()
     conn = await asyncpg.connect(settings.database_url)
@@ -219,7 +265,11 @@ async def _onboard(
                     _hash_token(plaintext),
                 )
                 print(f"display_name={display_name!r}")
-                print(f"api_token={plaintext}  # CAPTURE NOW — not reprinted")
+                if token_secret_id is not None:
+                    _store_token_secret(token_secret_id, plaintext)
+                    print(f"api_token written to Secrets Manager secret={token_secret_id!r}")
+                else:
+                    print(f"api_token={plaintext}  # CAPTURE NOW — not reprinted")
             else:
                 print("api_token: existing (use --rotate-token to issue a new one)")
     finally:
@@ -236,6 +286,7 @@ def main() -> None:
             display_name=args.display_name,
             initial_config=initial_config,
             rotate_token=args.rotate_token,
+            token_secret_id=args.token_secret_id,
         )
     )
 
