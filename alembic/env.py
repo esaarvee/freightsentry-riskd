@@ -75,14 +75,21 @@ def _to_psycopg(raw: str) -> str:
     raise RuntimeError(msg)
 
 
-config.set_main_option("sqlalchemy.url", _build_url())
+# Resolve the URL once and pass it directly to the engine/configure calls.
+# We deliberately do NOT route it through config.set_main_option(): the
+# DB_MASTER path percent-encodes the password (URL.create.render_as_string),
+# and set_main_option writes via configparser, which treats '%' as
+# interpolation syntax and raises ValueError on encoded passwords.
+DATABASE_URL = _build_url()
 
 target_metadata = None
 
 
 def run_migrations_online() -> None:
+    section = config.get_section(config.config_ini_section, {})
+    section["sqlalchemy.url"] = DATABASE_URL
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        section,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
@@ -95,7 +102,7 @@ def run_migrations_online() -> None:
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=DATABASE_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
