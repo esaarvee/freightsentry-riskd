@@ -1,0 +1,43 @@
+{
+  "family": "freightsentry-riskd-onboard",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-exec",
+  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-onboard-task",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "X86_64"
+  },
+  "containerDefinitions": [
+    {
+      "name": "onboard",
+      "image": "${IMAGE_URI}",
+      "essential": true,
+      "command": ["python", "scripts/tenant_onboard.py", "--help"],
+      "environment": [
+        {"name": "LOG_LEVEL", "value": "INFO"}
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/DATABASE_URL"
+        },
+        {
+          "name": "HMAC_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:freightsentry-riskd/HMAC_SECRET"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/freightsentry-riskd",
+          "awslogs-region": "${REGION}",
+          "awslogs-stream-prefix": "onboard",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

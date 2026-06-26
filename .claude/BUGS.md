@@ -665,3 +665,18 @@ regenerated under the new normalizer — the only delta is removal of the 11 pg1
 no DDL change. A host-fallback dump with a non-canonical pg_dump major now emits a version-skew
 diagnostic instead of a raw diff. Verified normalized output identical on the container pg16 and
 host pg18 paths. (Same root cause as the 2026-06-13 entry above; both resolved by this fix.)
+
+## 2026-06-26 — Onboard task injects functionally-unused HMAC_SECRET
+
+Discovered by: security-auditor during onboard-task plan Commit 3 (ecs-task-definition-onboard.json)
+Location: infra/ecs-task-definition-onboard.json (secrets), app/config.py (Settings.hmac_secret)
+Severity: low
+Observation: The one-off onboarding task def injects HMAC_SECRET solely because
+app.config.Settings() hard-requires `hmac_secret: str` (no default) for construction via
+get_settings(); scripts/tenant_onboard.py never exercises HMAC. Injecting the egress-PII HMAC key
+into a task that doesn't use it slightly widens that key's blast radius (a compromise of the
+onboard container's env/logs would expose it). Acceptable for now: same key the long-running app
+container already holds, and the onboard task is non-internet-facing and short-lived.
+Suggested action: make hmac_secret optional/lazy in Settings (or add a script-scoped settings
+accessor that only requires database_url) so the onboard path need not carry HMAC_SECRET. Weigh
+against the app's current startup guarantee that HMAC is configured before serving.
