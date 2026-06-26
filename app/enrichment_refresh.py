@@ -372,19 +372,31 @@ async def _http_get_with_retries(
             body: bytes = response.content
             return body
         except httpx.HTTPStatusError as exc:
-            # 4xx → fatal, no retry. 5xx → retry below.
-            if 400 <= exc.response.status_code < 500:
+            # 4xx → fatal, no retry. 5xx → retry below. Anything else
+            # (a 3xx that wasn't followed, or any other unexpected
+            # non-2xx) → fatal: retrying a redirect or other terminal
+            # status never resolves, so surface it immediately instead
+            # of burning the retry budget.
+            status_code = exc.response.status_code
+            if 400 <= status_code < 500:
                 _log.warning(
                     "enrich.refresh.http_4xx",
                     source_name=source_name,
-                    status_code=exc.response.status_code,
+                    status_code=status_code,
+                )
+                raise
+            if not 500 <= status_code < 600:
+                _log.warning(
+                    "enrich.refresh.http_unexpected",
+                    source_name=source_name,
+                    status_code=status_code,
                 )
                 raise
             last_exc = exc
             _log.warning(
                 "enrich.refresh.http_5xx",
                 source_name=source_name,
-                status_code=exc.response.status_code,
+                status_code=status_code,
                 attempt=attempt,
             )
         except (httpx.HTTPError, OSError) as exc:
@@ -954,9 +966,14 @@ async def refresh_cloudflare(client: httpx.AsyncClient, target_dir: Path) -> Ref
 def _build_http_client() -> httpx.AsyncClient:
     """Construct the per-tick `httpx.AsyncClient`. Tests monkeypatch this
     module-level function to inject `httpx.MockTransport`, keeping the
-    refresh loop unit-testable without live network."""
+    refresh loop unit-testable without live network.
+
+    `follow_redirects=True` is required: the MaxMind and IP2Proxy
+    download endpoints answer with a 302 to a signed/CDN URL, and
+    several upstreams may redirect http→https. Without it those sources
+    fail every tick (httpx's default is no-follow)."""
     timeout = httpx.Timeout(_DEFAULT_HTTP_TIMEOUT, read=_DEFAULT_IP2P_TIMEOUT)
-    return httpx.AsyncClient(timeout=timeout)
+    return httpx.AsyncClient(timeout=timeout, follow_redirects=True)
 
 
 async def _run_all_sources(

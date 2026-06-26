@@ -291,6 +291,29 @@ class TestHttpRetry:
         assert body == b"recovered"
         assert len(attempts) == 2
 
+    async def test_build_http_client_follows_redirects(self) -> None:
+        """The production client MUST follow redirects — MaxMind/IP2Proxy
+        download endpoints 302 to a signed/CDN URL. Without this every
+        licensed-source refresh fails."""
+        async with er._build_http_client() as client:
+            assert client.follow_redirects is True
+
+    async def test_unfollowed_3xx_is_fatal_not_retried(self) -> None:
+        """A 3xx that reaches the classifier is terminal: raise on the
+        first attempt rather than burning the retry budget as if it were
+        a 5xx. (The handler returns the 302 directly with no Location
+        chain to follow, so it surfaces to `raise_for_status`.)"""
+        attempts: list[int] = []
+
+        def handler(_req: httpx.Request) -> httpx.Response:
+            attempts.append(1)
+            return httpx.Response(302, content=b"")
+
+        async with _make_client(handler) as client:
+            with pytest.raises(httpx.HTTPStatusError):
+                await er._http_get_with_retries(client, "https://example.com/x", source_name="test")
+        assert len(attempts) == 1
+
 
 # ---------------------------------------------------------------------------
 # FireHOL downloaders (level1 + level2)
@@ -375,9 +398,13 @@ class TestMaxMind:
         assert (tmp_path / "GeoLite2-ASN.mmdb").exists()
 
     async def test_missing_license_key_fails(self, tmp_path: Path, low_floors: None) -> None:
+        # `_env_file=None` keeps this test hermetic — without it the
+        # developer's `.env` (which may define MAXMIND_LICENSE_KEY) leaks
+        # in and the empty-key guard never fires.
         settings = Settings(
             database_url="postgresql://test:test@localhost:5432/test",
             hmac_secret="test",
+            _env_file=None,
         )  # type: ignore[call-arg]
         async with _make_client(_const_response(200, b"")) as client:
             result = await er.refresh_maxmind_city(client, tmp_path, settings)
@@ -527,9 +554,13 @@ class TestIp2Proxy:
         assert not (tmp_path / "IP2PROXY-LITE-PX11.BIN").exists()
 
     async def test_missing_token_fails(self, tmp_path: Path, low_floors: None) -> None:
+        # `_env_file=None` keeps this test hermetic — without it the
+        # developer's `.env` (which may define IP2PROXY_DOWNLOAD_TOKEN)
+        # leaks in and the empty-token guard never fires.
         settings = Settings(
             database_url="postgresql://test:test@localhost:5432/test",
             hmac_secret="test",
+            _env_file=None,
         )  # type: ignore[call-arg]
         async with _make_client(_const_response(200, b"")) as client:
             result = await er.refresh_ip2proxy(client, tmp_path, settings)
