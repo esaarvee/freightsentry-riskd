@@ -791,6 +791,45 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  # Dedicated task role for the one-off tenant-onboarding task
+  # (infra/ecs-task-definition-onboard.json). It is the ONLY task role
+  # in the stack with an AWS write permission: scripts/tenant_onboard.py
+  # --token-secret-id writes the freshly issued tenant API token to
+  # Secrets Manager so the plaintext never lands in CloudWatch Logs. Kept
+  # SEPARATE from the zero-permission runtime TaskRole above so the
+  # public request-serving container holds no Secrets-Manager write
+  # capability — the grant is confined to the non-internet-facing,
+  # operator-launched onboarding task. Scoped to the per-tenant token
+  # namespace freightsentry-riskd/tenants/* only.
+  OnboardTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-onboard-task-${Environment}'
+      Description: ECS task role for the one-off tenant-onboarding task - writes the issued tenant API token to Secrets Manager (freightsentry-riskd/tenants/* only); kept separate from the zero-permission runtime TaskRole.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: onboard-token-write
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: TenantTokenSecretWrite
+                Effect: Allow
+                Action:
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:CreateSecret
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:freightsentry-riskd/tenants/*'
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1084,6 +1123,15 @@ Outputs:
   TaskRoleArn:
     Description: ECS task role ARN (empty policy; referenced in task definition).
     Value: !GetAtt TaskRole.Arn
+
+  OnboardTaskRoleArn:
+    Description: >-
+      Task role ARN for the one-off tenant-onboarding task
+      (infra/ecs-task-definition-onboard.json). Grants
+      secretsmanager:PutSecretValue/CreateSecret on
+      freightsentry-riskd/tenants/* only. Operator substitutes this as
+      the taskRoleArn when registering the onboard task definition.
+    Value: !GetAtt OnboardTaskRole.Arn
 
   DeployRoleArn:
     Description: >-

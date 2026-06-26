@@ -680,3 +680,25 @@ container already holds, and the onboard task is non-internet-facing and short-l
 Suggested action: make hmac_secret optional/lazy in Settings (or add a script-scoped settings
 accessor that only requires database_url) so the onboard path need not carry HMAC_SECRET. Weigh
 against the app's current startup guarantee that HMAC is configured before serving.
+
+## 2026-06-26 — Role-name env-suffix mismatch: CFN (suffixed) vs task-def JSON / deploy workflow (env-less)
+
+Discovered by: implementer during onboard-task CloudFormation wiring
+Location: infra/cloudformation/freightsentry-riskd.yml (RoleName !Sub '...-${Environment}') vs
+  infra/ecs-task-definition*.json + .github/workflows/deploy.yml:136
+Severity: medium
+Observation: CFN names every IAM role with a `-${Environment}` suffix (e.g.
+freightsentry-riskd-migrate-exec-production), but the task-definition JSONs and the deploy
+workflow reference env-LESS names — the app/migrate/onboard task defs use
+`arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task[-exec]` and deploy.yml:136 hardcodes
+`freightsentry-riskd-migrate-exec` (no suffix). If the deployment uses the CFN-created (suffixed)
+roles, the task-def registration / iam:PassRole would reference non-existent role names. The system
+may currently run on the README's "legacy hand-applied" env-less roles, masking the gap. The new
+OnboardTaskRole follows the CFN file's own (suffixed) convention for internal consistency, and the
+onboard task def JSON follows the sibling app/migrate JSON (env-less) convention — i.e. it matches
+the existing pattern on both sides rather than introducing a new inconsistency.
+Suggested action: reconcile the two paths — either drop the `-${Environment}` suffix from CFN
+RoleName (single-env-per-account) or substitute the real CFN-output role ARNs into the task defs at
+register time (as migrate already does for its exec role via ${MIGRATION_TASK_EXEC_ROLE_ARN}, though
+that placeholder is itself populated with an env-less literal). Investigation needed to confirm which
+role set production actually uses before changing either side.
