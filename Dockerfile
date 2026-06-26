@@ -55,11 +55,27 @@ COPY --from=builder /install/bin /usr/local/bin
 
 WORKDIR /app
 
+# uvicorn and `python -m alembic` resolve the `app` package via cwd-on-sys.path
+# from WORKDIR /app. Running a script by PATH (the onboard task:
+# `python scripts/tenant_onboard.py`) does NOT put cwd on sys.path — Python uses
+# the script's own dir (/app/scripts) instead, so `from app.auth import ...`
+# fails with ModuleNotFoundError. Pin /app on the path explicitly so `app` is
+# importable regardless of how the interpreter is launched.
+ENV PYTHONPATH=/app
+
 # Project source lives ONLY in /app/app/ (not duplicated in site-packages).
 # uvicorn picks it up via cwd-on-sys.path from WORKDIR /app.
 COPY --chown=app:app app/ ./app/
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app alembic/ ./alembic/
+
+# Tenant-onboarding ECS task runs `python scripts/tenant_onboard.py` from this
+# WORKDIR (infra/ecs-task-definition-onboard.json). It imports only from app.*
+# + asyncpg/boto3 (already in site-packages), so the single script file is all
+# the runtime needs — the rest of scripts/ is dev/test tooling and stays out of
+# the production image. Without this COPY the task fails: "python: can't open
+# file '/app/scripts/tenant_onboard.py': [Errno 2] No such file or directory".
+COPY --chown=app:app scripts/tenant_onboard.py ./scripts/tenant_onboard.py
 
 # The enrichment refresh task writes downloaded source artifacts to
 # ENRICHMENT_DATA_DIR (/app/data/enrichment). WORKDIR creates /app as
