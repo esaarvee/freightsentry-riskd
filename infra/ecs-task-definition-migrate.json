@@ -5,7 +5,7 @@
   "cpu": "512",
   "memory": "1024",
   "executionRoleArn": "${MIGRATION_TASK_EXEC_ROLE_ARN}",
-  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
   "runtimePlatform": {
     "operatingSystemFamily": "LINUX",
     "cpuArchitecture": "X86_64"
