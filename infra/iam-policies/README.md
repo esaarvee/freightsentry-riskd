@@ -1,9 +1,10 @@
 # IAM policies for freightsentry-riskd deploy
 
-Three IAM policy JSON documents the operator pastes into the AWS
+Four IAM policy JSON documents the operator pastes into the AWS
 IAM console at infrastructure setup time. Each is least-privileged
 against a specific principal: the ECS task-execution role, the
-container-runtime task role, and the GitHub Actions deploy role.
+container-runtime task role, the one-off onboarding task role, and
+the GitHub Actions deploy role.
 
 The detailed AWS GUI runbook at `docs/aws-deploy-runbook.md`
 (Phase 6D.4) walks through console-side role creation and
@@ -33,7 +34,8 @@ at attach time:
 
 Project-scoped identifiers are hardcoded throughout — IAM role
 names (`freightsentry-riskd-task-exec`, `freightsentry-riskd-task`,
-`freightsentry-riskd-deploy`) and ECS resource names
+`freightsentry-riskd-onboard-task`, `freightsentry-riskd-deploy`)
+and ECS resource names
 (`freightsentry-riskd-cluster`, `freightsentry-riskd-service`).
 These match the names referenced by `infra/ecs-task-definition.json`.
 
@@ -88,6 +90,38 @@ is the documented project posture, NOT an omission.
 If a future feature lands an explicit AWS API call from the
 application (e.g. calling SQS, S3, KMS), expand this policy to
 match. Document the addition in `.ai/decisions.md`.
+
+The onboarding one-off task does NOT reuse this role — it carries a
+separate, narrower task role (`onboard-task-role.json` below) so the
+app process keeps its zero-permission posture.
+
+## onboard-task-role.json
+
+**Principal**: ECS task IAM role `freightsentry-riskd-onboard-task`
+(referenced as `taskRoleArn` only in
+`infra/ecs-task-definition-onboard.json`, NOT in the app task def).
+
+**Purpose**: identity the one-off tenant-onboarding task assumes.
+`scripts/tenant_onboard.py --token-secret-id <id>` writes the freshly
+issued tenant API token to AWS Secrets Manager so the plaintext never
+lands in CloudWatch Logs. This is the ONLY AWS API call the project
+makes from a task role; it is deliberately isolated to the onboarding
+task rather than added to the shared app `task-role.json`, so the
+public request-serving container retains zero AWS privileges.
+
+**Permissions**:
+
+| Sid | Action | Resource |
+|---|---|---|
+| TenantTokenSecretWrite | `secretsmanager:PutSecretValue` + `secretsmanager:CreateSecret` | `arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:freightsentry-riskd/tenants/*` (scoped to per-tenant token secrets only) |
+
+`PutSecretValue` covers `--rotate-token` re-issues against an existing
+secret; `CreateSecret` covers the first token for a tenant (the script
+falls back to create on `ResourceNotFoundException`). The wildcard
+suffix matches the random 6-character suffix AWS appends to secret
+ARNs. New-secret default encryption uses the AWS-managed
+`aws/secretsmanager` KMS key, which grants Secrets-Manager-mediated
+access without an explicit `kms:*` statement here.
 
 ## github-actions-deploy-role.json
 
