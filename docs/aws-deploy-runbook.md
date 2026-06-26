@@ -442,10 +442,30 @@ console procedure documented above with operator AWS credentials.
 
 ### B.2 Tenant bootstrap
 
-The application onboards tenants via `scripts/tenant_onboard.py`.
-Run it as a one-off ECS task against the production tenant.
+The application onboards tenants via `scripts/tenant_onboard.py`,
+run as a one-off ECS task using the dedicated
+`freightsentry-riskd-onboard` task definition
+(`infra/ecs-task-definition-onboard.json`). That task def carries the
+narrow `freightsentry-riskd-onboard-task` role (Secrets-Manager write
+only) so the token can be delivered straight to Secrets Manager instead
+of landing in CloudWatch Logs.
 
-- [ ] Prepare a tenant config JSON locally:
+- [ ] **Register the onboard task def** (one-time, then on image
+      bumps): substitute `${ACCOUNT_ID}`, `${REGION}`, `${IMAGE_URI}`
+      in `infra/ecs-task-definition-onboard.json` and
+      `aws ecs register-task-definition --cli-input-json file://…`.
+- [ ] **Create the onboard task role** `freightsentry-riskd-onboard-task`
+      from `infra/iam-policies/onboard-task-role.json` (see that
+      directory's README). Ensure the principal that will call
+      `aws ecs run-task` (operator IAM user/role, or the deploy role
+      if automated) holds `iam:PassRole` for BOTH
+      `freightsentry-riskd-task-exec` and
+      `freightsentry-riskd-onboard-task`, plus `ecs:RunTask` on the
+      `freightsentry-riskd-onboard` task-def family.
+- [ ] **Pre-create the token secret** (so the write is a
+      `PutSecretValue`; the script also falls back to `CreateSecret`):
+      `aws secretsmanager create-secret --name freightsentry-riskd/tenants/<TENANT_EXTERNAL_ID>/token --secret-string placeholder`
+- [ ] Prepare a tenant config JSON:
       ```json
       {
         "allowed_currencies": ["CAD"],
@@ -455,19 +475,28 @@ Run it as a one-off ECS task against the production tenant.
       }
       ```
       (Phase 6B set CAD as the project default. Add USD here if
-      the tenant accepts USD payments.)
-- [ ] Upload the file to a temporary location accessible from
-      the ECS task — easiest is to bake it into the runtime image
-      under `/app/configs/`, or use an S3 bucket + `aws s3 cp` in
-      the container override.
-- [ ] **ECS console** → **Run task**:
-  - Task definition: same `freightsentry-riskd` placeholder
-  - Command: `python,scripts/tenant_onboard.py,--external-id,<TENANT_EXTERNAL_ID>,--display-name,<TENANT_DISPLAY_NAME>,--config-json,/app/configs/tenant.json,--rotate-token`
-- [ ] After the task completes, retrieve the printed token from
-      CloudWatch Logs and store in:
-  - Secrets Manager (for operator reference)
-  - GitHub Secret `SMOKE_TENANT_TOKEN` (for the deploy workflow
-    smoke test)
+      the tenant accepts USD payments.) Deliver it to the task by
+      either baking it into the runtime image under `/app/configs/`,
+      or staging it in S3 and prefixing the command with
+      `aws s3 cp s3://…/tenant.json /tmp/tenant.json &&` (the latter
+      needs `s3:GetObject` added to the onboard task role — not
+      granted by default).
+- [ ] **ECS console** → **Run task** (or `aws ecs run-task`):
+  - Task definition: `freightsentry-riskd-onboard`
+  - Command override (Secrets-Manager delivery — preferred):
+    `python,scripts/tenant_onboard.py,--external-id,<TENANT_EXTERNAL_ID>,--display-name,<TENANT_DISPLAY_NAME>,--config-json,/app/configs/tenant.json,--token-secret-id,freightsentry-riskd/tenants/<TENANT_EXTERNAL_ID>/token,--rotate-token`
+    (The `--config-json` path above assumes the image-bake delivery
+    at `/app/configs/tenant.json`; if you used the S3 branch, point it
+    at the path you copied to, e.g. `/tmp/tenant.json`.)
+  - The default task-def command is `--help` (safe no-op); a real
+    onboard MUST pass the command override above (ECS replaces the
+    command entirely).
+- [ ] Read the token from Secrets Manager
+      (`freightsentry-riskd/tenants/<TENANT_EXTERNAL_ID>/token`) — it is
+      NOT printed to CloudWatch on the `--token-secret-id` path — and
+      store it in GitHub Secret `SMOKE_TENANT_TOKEN` (for the deploy
+      workflow smoke test). Omit `--token-secret-id` only for local
+      dev, where the token prints to stdout instead.
 
 ### B.3 RLS verification
 

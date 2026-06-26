@@ -72,9 +72,12 @@
       `shipment_route_rare_for_tenant`) are no-ops until these
       structured fields flow. Until then, the case-3b compound rules
       cannot fire on real traffic.
-- [ ] Run `python scripts/tenant_onboard.py --slug <first-tenant>` via
-      one-off ECS task; capture returned tenant token; store in
-      Secrets Manager; update `SMOKE_TENANT_TOKEN` GitHub Secret.
+- [ ] Onboard the first tenant via the `freightsentry-riskd-onboard`
+      one-off ECS task: `python scripts/tenant_onboard.py
+      --external-id <first-tenant> --display-name <name>
+      --token-secret-id freightsentry-riskd/tenants/<first-tenant>/token`
+      (see runbook B.2). Token is written to Secrets Manager (not
+      CloudWatch); update `SMOKE_TENANT_TOKEN` GitHub Secret from it.
 - [ ] **RLS verification (existing tables)**: connect to RDS as
       `riskd_app_login`, run `SELECT * FROM customers` WITHOUT setting
       `app.tenant_id`. Confirm 0 rows returned.
