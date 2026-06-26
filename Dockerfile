@@ -61,6 +61,14 @@ COPY --chown=app:app app/ ./app/
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app alembic/ ./alembic/
 
+# The enrichment refresh task writes downloaded source artifacts to
+# ENRICHMENT_DATA_DIR (/app/data/enrichment). WORKDIR creates /app as
+# root, and the task def mounts no volume there, so without this the
+# non-root `app` user cannot create the dir — atomic_replace's
+# mkdir(parents=True) fails with PermissionError and every source that
+# reaches disk fails with failure_class="other". Create + chown it.
+RUN mkdir -p /app/data/enrichment && chown -R app:app /app/data
+
 USER app
 
 EXPOSE 8000
