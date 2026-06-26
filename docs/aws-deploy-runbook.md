@@ -283,8 +283,11 @@ matches.
     - TLS certificate: ACM certificate for your domain (create one
       in ACM console if you don't have one — `app.example.com`
       etc.)
-- [ ] Note the ALB DNS name; this becomes the `SMOKE_TEST_URL`
-      GitHub Secret + the operator-facing endpoint
+- [ ] Note the ALB DNS name. Point your domain's DNS (Route 53 alias
+      or CNAME) at it; `SMOKE_TEST_URL` must be `https://<your-domain>`,
+      NOT the raw ALB DNS — the HTTPS listener serves the ACM cert for
+      your domain, so hitting the ALB DNS directly fails TLS hostname
+      validation (see the A.11 caveat).
 
 ### A.10 ECS service (shell — first deploy populates the task def)
 
@@ -316,24 +319,43 @@ matches.
     - Target group: `freightsentry-riskd-tg`
 - [ ] Service health check grace period: 60 seconds
 
-### A.11 GitHub Secrets
+### A.11 GitHub Environments + Secrets
 
-Configure the following secrets in **GitHub repo → Settings →
-Secrets and variables → Actions**:
+The deploy workflow (`.github/workflows/deploy.yml`) is
+environment-aware: a `v*` tag push auto-deploys to the `test`
+environment; production deploys via **Run workflow** (manual
+`workflow_dispatch`) targeting `production`. The selected GitHub
+Environment scopes the AWS/ECS/smoke secrets AND the IAM role-name
+suffix (`...-${ENVIRONMENT}`), so one account can host test + prod in
+different regions.
 
-- [ ] `AWS_ROLE_TO_ASSUME` — the `freightsentry-riskd-deploy` role
-      ARN from A.7.3
-- [ ] `AWS_REGION` — your region (e.g. `ca-central-1`)
-- [ ] `AWS_ACCOUNT_ID` — your 12-digit account number
-- [ ] `ECR_REPOSITORY` — `freightsentry-riskd`
-- [ ] `ECS_CLUSTER` — `freightsentry-riskd-cluster`
-- [ ] `ECS_SERVICE` — `freightsentry-riskd-service`
-- [ ] `SNYK_TOKEN` — from snyk.io (free for OSS; required for the
-      test.yml Snyk dependency-scan step)
-- [ ] `SMOKE_TEST_URL` — `https://<your-alb-dns-or-domain>`
-- [ ] `SMOKE_TENANT_TOKEN` — the first production tenant token
-      from B.2 below; reset after first deploy if a v1 token
-      placeholder was used
+- [ ] **Create two GitHub Environments** (repo → Settings →
+      Environments): `test` and `production`. On `production`, add a
+      **Required reviewers** protection rule so prod deploys pause for
+      human approval before any AWS call.
+- [ ] **Set these secrets PER ENVIRONMENT** (Settings → Environments →
+      `<env>` → Environment secrets) — values differ by env:
+  - `AWS_ROLE_TO_ASSUME` — that env's DeployRole ARN, i.e. the stack's
+    `DeployRoleArn` output (`freightsentry-riskd-deploy-<env>`).
+  - `AWS_REGION` — that environment's region (test and prod may differ,
+    e.g. `us-east-2` vs `ca-central-1`).
+  - `AWS_ACCOUNT_ID` — 12-digit account number.
+  - `ECS_CLUSTER` — the CFN cluster name for that env
+    (`freightsentry-riskd-cluster-<env>`).
+  - `ECS_SERVICE` — `freightsentry-riskd-service`.
+  - `SMOKE_TEST_URL` — `https://<your-domain>` (see caveat below).
+  - `SMOKE_TENANT_TOKEN` — that env's smoke-tenant token from B.2.
+- [ ] **Repo-level secrets** (Settings → Secrets, shared across envs):
+  - `ECR_REPOSITORY` — `freightsentry-riskd`.
+  - `SNYK_TOKEN` — from snyk.io (free for OSS; required for the
+    test.yml Snyk dependency-scan step).
+
+> **Caveat — `SMOKE_TEST_URL` must be your domain, not the raw ALB
+> DNS.** The ALB HTTPS listener serves the ACM cert issued for your
+> domain; `https://<alb-dns-name>` fails TLS hostname validation. Point
+> DNS at the ALB (A.9) and use `https://<your-domain>`. On a cold first
+> deploy `SMOKE_TENANT_TOKEN` may be empty — the smoke step skips with a
+> warning until you onboard a smoke tenant (B.2) and populate it.
 
 ---
 
@@ -451,17 +473,31 @@ only) so the token can be delivered straight to Secrets Manager instead
 of landing in CloudWatch Logs.
 
 - [ ] **Register the onboard task def** (one-time, then on image
-      bumps): substitute `${ACCOUNT_ID}`, `${REGION}`, `${IMAGE_URI}`
-      in `infra/ecs-task-definition-onboard.json` and
-      `aws ecs register-task-definition --cli-input-json file://…`.
-- [ ] **Create the onboard task role** `freightsentry-riskd-onboard-task`
-      from `infra/iam-policies/onboard-task-role.json` (see that
-      directory's README). Ensure the principal that will call
-      `aws ecs run-task` (operator IAM user/role, or the deploy role
-      if automated) holds `iam:PassRole` for BOTH
-      `freightsentry-riskd-task-exec` and
-      `freightsentry-riskd-onboard-task`, plus `ecs:RunTask` on the
-      `freightsentry-riskd-onboard` task-def family.
+      bumps). The JSON uses placeholders for the image, account/region,
+      and BOTH role ARNs; substitute them with `envsubst`. The role ARNs
+      are env-suffixed to match the CFN-created roles (the stack's
+      `TaskExecutionRoleArn` + `OnboardTaskRoleArn` outputs):
+      ```bash
+      export ACCOUNT_ID=<id> REGION=<region> ENVIRONMENT=<test|production>
+      export IMAGE_URI=<ecr-repo>:<tag>
+      export TASK_EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-exec-${ENVIRONMENT}"
+      export ONBOARD_TASK_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-onboard-task-${ENVIRONMENT}"
+      envsubst '${ACCOUNT_ID} ${REGION} ${IMAGE_URI} ${TASK_EXEC_ROLE_ARN} ${ONBOARD_TASK_ROLE_ARN}' \
+          < infra/ecs-task-definition-onboard.json > onboard-task-def.json
+      aws ecs register-task-definition --cli-input-json file://onboard-task-def.json
+      ```
+- [ ] **Onboard task role**: provisioned by CloudFormation as
+      `freightsentry-riskd-onboard-task-<env>` (OnboardTaskRole;
+      `secretsmanager:PutSecretValue`/`CreateSecret` on
+      `freightsentry-riskd/tenants/*`). For the hand-applied path use
+      `infra/iam-policies/onboard-task-role.json` (see that directory's
+      README). The principal that runs `aws ecs run-task` (operator IAM
+      user/role) must hold `iam:PassRole` for BOTH
+      `freightsentry-riskd-task-exec-<env>` and
+      `freightsentry-riskd-onboard-task-<env>`, plus `ecs:RunTask` on the
+      `freightsentry-riskd-onboard` task-def family. (The CI DeployRole
+      intentionally lacks these — onboarding is operator-run, not part of
+      the automated deploy.)
 - [ ] **Pre-create the token secret** (so the write is a
       `PutSecretValue`; the script also falls back to `CreateSecret`):
       `aws secretsmanager create-secret --name freightsentry-riskd/tenants/<TENANT_EXTERNAL_ID>/token --secret-string placeholder`
@@ -494,9 +530,16 @@ of landing in CloudWatch Logs.
 - [ ] Read the token from Secrets Manager
       (`freightsentry-riskd/tenants/<TENANT_EXTERNAL_ID>/token`) — it is
       NOT printed to CloudWatch on the `--token-secret-id` path — and
-      store it in GitHub Secret `SMOKE_TENANT_TOKEN` (for the deploy
-      workflow smoke test). Omit `--token-secret-id` only for local
-      dev, where the token prints to stdout instead.
+      store it in the environment's `SMOKE_TENANT_TOKEN` secret (for the
+      deploy workflow smoke test). Omit `--token-secret-id` only for
+      local dev, where the token prints to stdout instead.
+- [ ] **Seed a smoke tenant per environment (resolves the smoke
+      chicken-and-egg).** Onboard a dedicated long-lived tenant (e.g.
+      `--external-id smoke`) in each environment once, and store its
+      token as that environment's `SMOKE_TENANT_TOKEN`. Every subsequent
+      deploy then smoke-tests against it. Until this is done the deploy's
+      smoke step skips with a warning (it does not fail), so the first
+      rollout can complete before any tenant exists.
 
 ### B.3 RLS verification
 

@@ -702,3 +702,10 @@ RoleName (single-env-per-account) or substitute the real CFN-output role ARNs in
 register time (as migrate already does for its exec role via ${MIGRATION_TASK_EXEC_ROLE_ARN}, though
 that placeholder is itself populated with an env-less literal). Investigation needed to confirm which
 role set production actually uses before changing either side.
+
+RESOLVED (commits 4777a8a + this docs commit, 2026-06-26): chose the substitute-CFN-suffixed-ARNs
+path (operator confirmed one-account/two-regions, so the CFN suffix must stay — role names are
+account-global). All task-def JSONs (app/migrate/onboard) now use `${...ROLE_ARN}` placeholders;
+deploy.yml builds them env-suffixed (`...-${ENVIRONMENT}`) for the app+migrate registers, and runbook
+B.2 documents the operator-side envsubst for the onboard register. deploy.yml:136's env-less migrate
+ARN is fixed. The "legacy hand-applied env-less roles" question is moot under the chosen topology.

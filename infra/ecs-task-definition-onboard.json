@@ -4,8 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-exec",
-  "taskRoleArn": "arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-onboard-task",
+  "executionRoleArn": "${TASK_EXEC_ROLE_ARN}",
+  "taskRoleArn": "${ONBOARD_TASK_ROLE_ARN}",
   "runtimePlatform": {
     "operatingSystemFamily": "LINUX",
     "cpuArchitecture": "X86_64"
