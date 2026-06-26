@@ -272,6 +272,17 @@ jobs:
           SMOKE_TEST_URL: ${{ secrets.SMOKE_TEST_URL }}
           SMOKE_TENANT_TOKEN: ${{ secrets.SMOKE_TENANT_TOKEN }}
         run: |
+          set -euo pipefail
+          # First-deploy chicken-and-egg: the smoke test needs an onboarded
+          # tenant token, but onboarding happens against the running app —
+          # so on a cold environment SMOKE_TENANT_TOKEN may not be set yet.
+          # Skip (don't fail) when it's empty, so the initial rollout can
+          # complete; once a (smoke) tenant is onboarded and the secret is
+          # populated, every subsequent deploy runs the smoke test for real.
+          if [ -z "${SMOKE_TENANT_TOKEN:-}" ]; then
+              echo "::warning::SMOKE_TENANT_TOKEN is empty — skipping smoke test (expected only on the first deploy before a tenant is onboarded). Set it for this environment to enable smoke coverage."
+              exit 0
+          fi
           # Stdlib-only smoke test (6D.5) — no third-party deps
           # required in the runner.
           python3 scripts/smoke_test.py \
