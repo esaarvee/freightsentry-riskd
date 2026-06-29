@@ -1,8 +1,10 @@
 """Settings — pydantic-settings, no env prefix.
 
 Env var names match field names verbatim (uppercased). `Settings()` is
-constructed once at app lifespan via `get_settings()` (lru_cache); tests
-override by `monkeypatch.setenv(...)` then `get_settings.cache_clear()`.
+constructed once via `get_settings()` (lru_cache) — first read at module
+import (app/main.py reads `environment` to gate the docs endpoints), then
+reused at lifespan and per-request. Tests override by
+`monkeypatch.setenv(...)` then `get_settings.cache_clear()`.
 """
 
 from functools import lru_cache
@@ -28,6 +30,11 @@ class Settings(BaseSettings):
     enrichment_data_dir: Path = Path("/app/data/enrichment")
     log_level: str = "INFO"
     auth_enabled: bool = True
+    # Deployment environment. Gates exposure of the interactive API docs
+    # (/docs, /redoc, /openapi.json) — see app/main.py. Fail closed: any
+    # value other than an explicit dev marker is treated as production, so
+    # an unset/misspelled value never exposes the schema surface.
+    environment: str = "production"
 
 
 @lru_cache

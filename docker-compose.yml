@@ -46,6 +46,10 @@ services:
       ENRICHMENT_DATA_DIR: ${ENRICHMENT_DATA_DIR:-/app/data/enrichment}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      # Local dev keeps the interactive API docs (/docs, /redoc,
+      # /openapi.json) reachable. Production sets ENVIRONMENT=production
+      # (ECS task def) which disables them. See app/main.py:_docs_kwargs.
+      ENVIRONMENT: ${ENVIRONMENT:-development}
     ports:
       - "8000:8000"
     volumes:

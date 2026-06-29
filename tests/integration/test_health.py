@@ -21,14 +21,24 @@ async def test_health_returns_ok(unauth_client: AsyncClient) -> None:
     body = response.json()
     assert body["ok"] is True
     assert body["db"] == "ok"
-    assert body["pool"]["min_size"] == 2
-    assert body["pool"]["max_size"] == 10
+    # Pool internals are intentionally NOT exposed on this unauthenticated
+    # endpoint — only coarse db/enrichment signals.
+    assert "pool" not in body
 
 
 async def test_health_no_auth_required(unauth_client: AsyncClient) -> None:
     """/health/ must succeed without an Authorization header."""
     response = await unauth_client.get("/health/")
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+async def test_docs_endpoints_disabled_by_default(unauth_client: AsyncClient, path: str) -> None:
+    """The app is built with the default (production) environment in the
+    test/CI env, so the interactive docs + schema endpoints must not be
+    mounted — a scanner hitting the public ALB gets 404, not the schema."""
+    response = await unauth_client.get(path)
+    assert response.status_code == 404
 
 
 async def test_health_enrichment_degraded_on_cold_start(

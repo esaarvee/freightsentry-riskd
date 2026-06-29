@@ -23,8 +23,9 @@ async def health(enricher: Annotated[Enricher, Depends(get_enricher)]) -> JSONRe
     """1s liveness check against the asyncpg pool + enrichment readiness.
 
     Returns:
-      * 200 with `{ok: True, db: "ok", enrichment: "ok" | "degraded",
-        pool: {...}}` on DB success. The `enrichment` field reports
+      * 200 with `{ok: True, db: "ok", enrichment: "ok" | "degraded"}`
+        on DB success (no pool internals — unauthenticated endpoint, see
+        the response-construction comment). The `enrichment` field reports
         whether every Pattern B-lite source (per
         `enrichment_refresh._ALL_SOURCE_NAMES`) has either successfully
         refreshed at least once OR was present on disk at startup
@@ -63,16 +64,16 @@ async def health(enricher: Annotated[Enricher, Depends(get_enricher)]) -> JSONRe
     # status code, so enrichment health must never flip it to non-2xx.
     enrichment_ok = all_sources_loaded_at_least_once() and not enricher.degraded_sources()
     enrichment = "ok" if enrichment_ok else "degraded"
+    # Deliberately minimal body: this endpoint is unauthenticated (the ALB
+    # probes it and keys rotation off the status code). asyncpg pool sizing
+    # used to ship here — that's gratuitous internal detail for a public
+    # endpoint, so it's dropped. `db` + `enrichment` are coarse operational
+    # signals operators alarm on; they don't reveal sizing or topology.
     return JSONResponse(
         status_code=200,
         content={
             "ok": result == 1,
             "db": "ok",
             "enrichment": enrichment,
-            "pool": {
-                "size": pool.get_size(),
-                "min_size": pool.get_min_size(),
-                "max_size": pool.get_max_size(),
-            },
         },
     )

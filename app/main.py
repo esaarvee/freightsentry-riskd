@@ -63,7 +63,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("lifespan.shutdown")
 
 
-app = FastAPI(title="freightsentry-riskd", lifespan=lifespan)
+def _docs_kwargs(environment: str) -> dict[str, str | None]:
+    """Decide whether the interactive API docs are exposed.
+
+    FastAPI mounts `/docs`, `/redoc`, and `/openapi.json` by default,
+    unauthenticated. Behind the internet-facing ALB that publishes the
+    entire route + schema surface — including the `/api/v1` admin routes
+    and the Bearer auth scheme — to any scanner. We expose them only in
+    local/dev. Fail closed: any value other than an explicit dev marker
+    (including unset → "production") disables all three. Setting
+    `openapi_url=None` also disables the Swagger/ReDoc UIs, which depend
+    on the schema; the explicit None on each is belt-and-suspenders.
+    """
+    if environment.strip().lower() in {"dev", "development", "local"}:
+        return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+_docs = _docs_kwargs(get_settings().environment)
+app = FastAPI(
+    title="freightsentry-riskd",
+    lifespan=lifespan,
+    docs_url=_docs["docs_url"],
+    redoc_url=_docs["redoc_url"],
+    openapi_url=_docs["openapi_url"],
+)
 app.include_router(health_router, prefix="/health", tags=["health"])
 app.include_router(booking_router, prefix="/api/v1/shipments", tags=["shipments"])
 app.include_router(modification_router, prefix="/api/v1/shipments", tags=["shipments"])

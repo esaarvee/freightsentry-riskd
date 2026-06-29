@@ -25,7 +25,8 @@
         {"name": "LOG_LEVEL", "value": "INFO"},
         {"name": "AUTH_ENABLED", "value": "true"},
         {"name": "API_TOKEN_PREFIX", "value": "rsk_"},
-        {"name": "ENRICHMENT_DATA_DIR", "value": "/app/data/enrichment"}
+        {"name": "ENRICHMENT_DATA_DIR", "value": "/app/data/enrichment"},
+        {"name": "ENVIRONMENT", "value": "production"}
       ],
       "secrets": [
         {
