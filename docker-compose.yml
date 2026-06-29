@@ -30,8 +30,15 @@ services:
       # superuser via ALEMBIC_DATABASE_URL — wired into the env so
       # `docker compose exec app alembic upgrade head` works without
       # an external -e override.
-      DATABASE_URL: ${DATABASE_URL:-postgresql://riskd_app_login:riskd_app_login_dev@postgres:5432/riskd}
-      ALEMBIC_DATABASE_URL: ${ALEMBIC_DATABASE_URL:-postgresql://riskd:riskd@postgres:5432/riskd}
+      #
+      # Hardcoded to the `postgres` service host (NOT ${DATABASE_URL:-...}):
+      # Compose auto-loads .env, where DATABASE_URL points at localhost:5432
+      # for host-side pytest. A ${VAR:-default} fallback is defeated by that
+      # injection — the container would inherit `localhost` and fail to reach
+      # Postgres (Connection refused). The in-container app always talks to
+      # the `postgres` service, so the DSN is fixed here.
+      DATABASE_URL: postgresql://riskd_app_login:riskd_app_login_dev@postgres:5432/riskd
+      ALEMBIC_DATABASE_URL: postgresql://riskd:riskd@postgres:5432/riskd
       HMAC_SECRET: ${HMAC_SECRET}
       API_TOKEN_PREFIX: ${API_TOKEN_PREFIX:-rsk_}
       MAXMIND_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:-}

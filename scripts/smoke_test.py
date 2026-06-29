@@ -39,6 +39,8 @@ from typing import Any
 
 _SMOKE_PAYLOAD: dict[str, Any] = {
     "request_id": "smoke-test",
+    "shipment_id": "smoke-shipment",
+    "transaction_number": "smoke-txn",
     "customer": {
         "external_id": "smoke-customer",
         "business_name": "Smoke Test Co.",
