@@ -236,16 +236,14 @@ matches.
   - Audience: `sts.amazonaws.com`
   - GitHub organization: `<your-org>`
   - Repository: `<your-repo>` (e.g. `esaarvee/freightsentry-riskd`)
-  - Branch: leave wildcard for now; tightened to `main` + `v*`
-    tags via trust-policy edit below
+  - Branch: leave wildcard for now; tightened to `v*` tags
+    via trust-policy edit below
 - [ ] Permissions: inline policy from
       `infra/iam-policies/github-actions-deploy-role.json` with
       placeholders substituted
 - [ ] Role name: `freightsentry-riskd-deploy`
-- [ ] **Edit trust policy** after creation to scope `sub` to:
-      `repo:<org>/<repo>:ref:refs/heads/main` (for build.yml) AND
-      `repo:<org>/<repo>:ref:refs/tags/v*` (for deploy.yml). Use a
-      `StringLike` condition with both patterns in an array.
+- [ ] **Edit trust policy** after creation to scope `sub` to
+      `repo:<org>/<repo>:ref:refs/tags/v*` (for deploy.yml).
 - [ ] Note the role ARN — this goes into GitHub Secrets as
       `AWS_ROLE_TO_ASSUME`
 

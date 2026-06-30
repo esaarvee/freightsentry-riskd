@@ -155,8 +155,8 @@ Tightly bounded to:
 permissions JSON above): the operator configures the role's
 trust-policy to trust the GitHub OIDC provider with a `sub`
 condition matching the project repository path
-(`repo:<org>/<repo>:ref:refs/heads/main` or `:ref:refs/tags/v*`
-per the workflow's trigger). The runbook in 6D.4 walks through
+(`repo:<org>/<repo>:ref:refs/tags/v*` per the deploy
+workflow's tag-push trigger). The runbook in 6D.4 walks through
 the trust-policy console steps.
 
 ## Attachment order (per the 6D.4 runbook)

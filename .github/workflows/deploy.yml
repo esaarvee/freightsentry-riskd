@@ -22,9 +22,9 @@
 # docs/aws-deploy-runbook.md "Rollback" section — v1 has no
 # auto-rollback).
 #
-# Build-fresh-on-tag-push (rather than reusing the Level 2 dev image)
-# handles all branch topologies cleanly: hotfix tags on release
-# branches, direct-to-version-branch deploys, etc. The single image
+# Build-fresh-on-tag-push handles all branch topologies cleanly:
+# hotfix tags on release branches, direct-to-version-branch deploys,
+# etc. The single image
 # digest with two tag aliases gives both readability (version) and
 # forensic traceability (SHA).
 #

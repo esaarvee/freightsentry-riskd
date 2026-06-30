@@ -725,3 +725,30 @@ Location: .github/workflows/build.yml:12-15 + infra/cloudformation/freightsentry
 Severity: low
 Observation: build.yml documents/uses a sub-claim shaped like `repo:<org>/<repo>:ref:refs/heads/main` (push-to-main, no `environment:`). The CFN template defines only one OIDC-assumable role, `DeployRole` (`freightsentry-riskd-deploy-<env>`), whose trust policy matches neither the old nor the new build.yml token shape. This is pre-existing — the tightening did NOT regress build.yml; build.yml's token was already unsatisfiable against DeployRole. Needs reconciliation between build.yml's role expectation and the CFN-managed role set.
 Suggested action: investigation needed — either build.yml shouldn't assume DeployRole, or a separate build-scoped role is missing from the template.
+
+RESOLVED (2026-06-30, drop-build.yml): operator chose to remove the dev-image
+build workflow entirely rather than add a build-scoped role.
+`.github/workflows/build.yml` deleted; with no branch-push OIDC caller the
+unsatisfiable-token mismatch against DeployRole is moot. deploy.yml (tag-push,
+environment-scoped) is now the only OIDC-assumed path. Dangling references
+scrubbed from .ai/system-status.md, infra/iam-policies/README.md,
+docs/aws-deploy-runbook.md A.7 (build.yml/refs-heads-main clause removed),
+and the deploy.yml "Level 2 dev image" design-rationale comment;
+docs/history.md left as frozen phase-6D narrative. The residual env-scoped-sub
+doc drift is logged separately below.
+
+## 2026-06-30 — DeployRole trust docs still describe ref-scoped `sub`; CFN is environment-scoped
+
+Discovered by: implementer during drop-build.yml (main/v0.1.0 restructure)
+Location: docs/aws-deploy-runbook.md A.7 (~L245) + infra/iam-policies/README.md (~L158)
+Severity: low
+Observation: b3ea9d2 moved the DeployRole OIDC `sub` from `:ref:refs/tags/v*`
+(StringLike) to `repo:<repo>:environment:<env>` (StringEquals) plus a separate
+`ref` StringLike gate. The runbook A.7 manual-role steps and the iam-policies
+README still document the old ref-scoped `sub`. The drop-build.yml commit only
+removed the build.yml/refs-heads-main clause from both; the residual deploy-side
+`sub` description remains pre-b3ea9d2. Not corrected inline to keep the
+build.yml-drop scope tight.
+Suggested action: reconcile both docs with the environment-scoped `sub` model
+(the CFN DeployRole resource is the source of truth; runbook A.11 already
+documents the GitHub Environments secrets flow).

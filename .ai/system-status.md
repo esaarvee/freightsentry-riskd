@@ -45,7 +45,7 @@ Established in Phase 8A/8B to prevent silent regression as the codebase matures:
 - **Config**: `pydantic-settings`. No `env_prefix` — env var names match field names verbatim (e.g. `DATABASE_URL`, `HMAC_SECRET`). Sourced from `.env` locally; from the platform secret manager in production.
 - **External data**: MaxMind GeoLite2-Country + GeoLite2-ASN (geo lookup); IP2Proxy PX11 (VPN / Tor / threat tagging); FireHOL Level 1 + Level 2 (IP threat feeds). All cached locally via `ip_enrichment` table.
 - **Container**: Multi-stage Dockerfile (build vs runtime separation, per Phase 6D). Runtime image strips build-tools.
-- **CI**: GitHub Actions with three-level pipeline ([`.github/workflows/test.yml`](../.github/workflows/test.yml), `build.yml`, `deploy.yml`).
+- **CI**: GitHub Actions two-stage pipeline ([`.github/workflows/test.yml`](../.github/workflows/test.yml) on PRs to `v*`/`release/*`, [`deploy.yml`](../.github/workflows/deploy.yml) on `v*` tag push).
 - **Production target**: ECS Fargate (`ca-central-1`). OIDC for AWS auth (no long-lived access keys).
 
 ## Pre-launch readiness
