@@ -1,7 +1,7 @@
 # Phase 6D.7 — Level 2 CI workflow (Docker build + ECR push).
 #
-# Runs on push to main. Builds the multi-stage runtime image
-# (Dockerfile from 6D.1) and pushes it to ECR tagged
+# Runs on push to a version branch (vX.Y.Z). Builds the multi-stage
+# runtime image (Dockerfile from 6D.1) and pushes it to ECR tagged
 # `dev-<short_sha>` so operators have a buildable artifact for
 # staging-environment testing between tagged releases.
 #
@@ -11,7 +11,7 @@
 #
 # AWS auth via GitHub OIDC; no long-lived access keys. The deploy
 # role's trust policy must permit the `repo:<org>/<repo>:ref:refs/
-# heads/main` sub-claim — see infra/iam-policies/README.md and
+# heads/v*` sub-claim — see infra/iam-policies/README.md and
 # docs/aws-deploy-runbook.md A.7.3.
 
 name: Build
@@ -19,7 +19,7 @@ name: Build
 on:
   push:
     branches:
-      - main
+      - "v*"
 
 # Workflow-level least-privilege baseline. id-token: write is
 # required for GitHub OIDC → AWS STS AssumeRoleWithWebIdentity.
