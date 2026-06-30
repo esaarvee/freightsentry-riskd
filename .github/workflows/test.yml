@@ -1,0 +1,135 @@
+# Phase 6D.6 — CI workflow (lint/types + tests + Snyk dependency scan).
+#
+# Two test jobs (split in the test-soundness pass):
+#   * unit        — ruff + ruff format + mypy + pytest tests/unit/ with NO
+#                   Postgres service. The unit suite is genuinely DB-free
+#                   (the asyncpg pool is opt-in; see tests/conftest.py), so
+#                   this is the fast gate. A dummy unreachable DATABASE_URL
+#                   is set only because pydantic-settings requires the field
+#                   to construct — no connection is ever attempted.
+#   * integration — the full suite against a real postgres:16 service. The
+#                   runtime role `riskd_app_login` + RLS are created by
+#                   `alembic upgrade head` (migration 0005 sources the role
+#                   password from DATABASE_URL). Runs under a pinned
+#                   pytest-randomly seed so CI order matches the canonical
+#                   harness; order-independence was validated across many
+#                   seeds in the test-soundness pass.
+# Snyk runs in parallel as an independent gate.
+
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "release/*"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: ruff + ruff format + mypy + pytest (unit, DB-free)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Unreachable dummy — the DB-free unit suite never connects, but
+      # pydantic-settings requires the field to build Settings().
+      DATABASE_URL: "postgresql://nobody:nobody@127.0.0.1:1/none"
+      HMAC_SECRET: "ci-unit-hmac-secret"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install runtime + dev/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: ruff check
+        run: ruff check app/ tests/ scripts/
+
+      - name: ruff format --check
+        run: ruff format --check app/ tests/ scripts/
+
+      - name: mypy --strict
+        run: mypy app/
+
+      - name: pytest (unit tests only, DB-free)
+        # No Postgres service: the unit tier must not require a database.
+        run: pytest tests/unit/ -x --no-header -q --asyncio-mode=auto
+
+  integration:
+    name: pytest (full suite, Postgres-backed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: riskd
+          POSTGRES_PASSWORD: riskd
+          POSTGRES_DB: riskd
+        ports:
+          - 5432:5432
+        # Wait for the DB to accept connections before the job's steps run.
+        options: >-
+          --health-cmd "pg_isready -U riskd -d riskd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Superuser DSN for migrations (creates roles, RLS, schema).
+      ALEMBIC_DATABASE_URL: "postgresql://riskd:riskd@localhost:5432/riskd"
+      # Runtime role DSN. Migration 0005 sources the riskd_app_login
+      # password from this URL, so `alembic upgrade head` provisions the
+      # role to match what the test pool connects with.
+      DATABASE_URL: "postgresql://riskd_app_login:ci_app_login_pw@localhost:5432/riskd"
+      HMAC_SECRET: "ci-integration-hmac-secret"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install runtime + dev/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,test]"
+
+      - name: Apply migrations (schema + RLS + runtime role)
+        run: alembic upgrade head
+
+      - name: pytest (full suite)
+        # Full suite under a pinned pytest-randomly seed for reproducible CI
+        # ordering. Order-independence was validated across multiple seeds
+        # in the test-soundness pass; developers run randomized locally.
+        run: pytest tests/ --no-header -q --asyncio-mode=auto -p randomly --randomly-seed=20260613
+
+  snyk:
+    name: Snyk dependency scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Snyk to check for dependency vulnerabilities
+        uses: snyk/actions/python@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          # High-severity threshold: workflow fails on critical/high
+          # findings. Medium and low surface as PR-comment warnings
+          # but do not block merge.
+          args: --severity-threshold=high

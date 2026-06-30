@@ -1,0 +1,290 @@
+# Phase 6D.8 — Level 3 CI workflow (environment-aware ECS deploy).
+#
+# A tag push matching `v*` (e.g. `v1.0.0`) auto-deploys to the `test`
+# GitHub Environment. Production is deployed via manual workflow_dispatch
+# selecting the `production` environment (protect it with a required-
+# reviewer rule in repo settings). The selected environment scopes the
+# AWS_* / ECS_* / SMOKE_* secrets AND the IAM role-name suffix
+# (`...-${ENVIRONMENT}`), so a single account can host test and prod in
+# different regions without role-name collisions.
+#
+# Builds a
+# fresh Docker image from the tagged commit, pushes it to ECR with
+# TWO tags pointing at the same image digest:
+#   - <version> (e.g. v1.0.0)        for operator-readable rollback
+#   - <short_sha> (e.g. a1b2c3d)      for forensic traceability
+#
+# Then registers a new ECS task definition revision against that
+# image, calls ecs:UpdateService --force-new-deployment, waits for
+# service stability, and runs scripts/smoke_test.py against the
+# deployed ALB endpoint. Smoke failure surfaces as workflow failure;
+# the operator handles rollback manually via the ECS console (per
+# docs/aws-deploy-runbook.md "Rollback" section — v1 has no
+# auto-rollback).
+#
+# Build-fresh-on-tag-push (rather than reusing the Level 2 dev image)
+# handles all branch topologies cleanly: hotfix tags on release
+# branches, direct-to-version-branch deploys, etc. The single image
+# digest with two tag aliases gives both readability (version) and
+# forensic traceability (SHA).
+#
+# Required GitHub Secrets, scoped PER ENVIRONMENT (test / production) per
+# docs/aws-deploy-runbook.md section A.11: AWS_ROLE_TO_ASSUME, AWS_REGION,
+# AWS_ACCOUNT_ID, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE, SMOKE_TEST_URL,
+# SMOKE_TENANT_TOKEN. Each environment's AWS_REGION + AWS_ROLE_TO_ASSUME
+# select the target region and the matching env-suffixed DeployRole.
+
+name: Deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment for a manual deploy.
+        type: choice
+        options:
+          - test
+          - production
+        default: test
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build + push tagged image + ECS rollout + smoke
+    runs-on: ubuntu-24.04
+    # Tag push (v*) -> `test`; manual workflow_dispatch -> the chosen
+    # environment. Declaring `environment:` makes GitHub resolve the
+    # env-scoped secrets (AWS_REGION, AWS_ROLE_TO_ASSUME, ECS_*, SMOKE_*)
+    # and apply any protection rule (required reviewers on production).
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'test' }}
+    env:
+      # Same selector, surfaced as a shell var so the register steps can
+      # build the env-suffixed IAM role ARNs (`...-${ENVIRONMENT}`).
+      ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'test' }}
+    # Bound the blast radius of a hung build/push/ECS-stability-wait.
+    # Service stability waits are the longest leg (up to 10 min on a
+    # cold rollout); cap at 30 min total to surface a stuck deploy.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Extract version + short SHA
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "extracted version=$VERSION short_sha=$SHORT_SHA"
+
+      - name: Build image + push with version + short_sha tags
+        env:
+          ECR_URL: ${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          SHORT_SHA: ${{ steps.meta.outputs.short_sha }}
+        run: |
+          # Build once; tag twice; push each tag. Docker resolves the
+          # two tags to the same image digest in ECR — operators get
+          # both the version (v1.0.0) and the SHA (a1b2c3d) pointing
+          # at one image, no double upload.
+          # --platform linux/amd64 pins the image arch to match the
+          # ECS task definition's cpuArchitecture=X86_64. Currently the
+          # ubuntu-24.04 runner is x86_64 so the default would work,
+          # but a future runner image rotation to ARM would silently
+          # break task launch — explicit is safer.
+          docker build \
+              --platform linux/amd64 \
+              -t "$ECR_URL:$VERSION" \
+              -t "$ECR_URL:$SHORT_SHA" \
+              .
+          docker push "$ECR_URL:$VERSION"
+          docker push "$ECR_URL:$SHORT_SHA"
+          echo "pushed digest tags: $VERSION + $SHORT_SHA"
+
+      - name: Register new ECS task definition revision
+        id: register-task-def
+        env:
+          ECR_URL: ${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          # Substitute placeholders in infra/ecs-task-definition.json. The
+          # template uses explicit ${VAR} form throughout; envsubst with an
+          # allowlist expands ONLY the named vars (leaving any other
+          # $-token literal). Single-tool substitution avoids the previous
+          # envsubst+sed split that silently no-op'd on bare tokens.
+          # Role ARNs are env-suffixed (`...-${ENVIRONMENT}`) to match the
+          # CFN-created roles; one account hosts test + prod role sets.
+          export ACCOUNT_ID REGION
+          export IMAGE_URI="$ECR_URL:$VERSION"
+          export TASK_EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-exec-${ENVIRONMENT}"
+          export TASK_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-${ENVIRONMENT}"
+          envsubst '${ACCOUNT_ID} ${REGION} ${IMAGE_URI} ${TASK_EXEC_ROLE_ARN} ${TASK_ROLE_ARN}' \
+              < infra/ecs-task-definition.json \
+              > task-def.json
+          REVISION_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file://task-def.json \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+          echo "revision_arn=$REVISION_ARN" >> "$GITHUB_OUTPUT"
+          echo "registered: $REVISION_ARN"
+
+      - name: Register migrate task definition revision (PBL D5)
+        id: register-migrate-task-def
+        env:
+          ECR_URL: ${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          # Same envsubst pattern as the app task-def step. The role names
+          # are CFN-created and deterministic, so we string-build the ARNs
+          # here (env-suffixed to match the per-environment roles) instead
+          # of a describe-stacks round-trip. MIGRATION_TASK_EXEC_ROLE_ARN
+          # is the migrate execution role (PBL D3); TASK_ROLE_ARN is the
+          # shared empty task role the migrate container also assumes.
+          export ACCOUNT_ID REGION
+          export IMAGE_URI="$ECR_URL:$VERSION"
+          export MIGRATION_TASK_EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-migrate-exec-${ENVIRONMENT}"
+          export TASK_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/freightsentry-riskd-task-${ENVIRONMENT}"
+          envsubst '${ACCOUNT_ID} ${REGION} ${IMAGE_URI} ${MIGRATION_TASK_EXEC_ROLE_ARN} ${TASK_ROLE_ARN}' \
+              < infra/ecs-task-definition-migrate.json \
+              > migrate-task-def.json
+          MIGRATE_REVISION_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file://migrate-task-def.json \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+          echo "migrate_revision_arn=$MIGRATE_REVISION_ARN" >> "$GITHUB_OUTPUT"
+          echo "registered migrate: $MIGRATE_REVISION_ARN"
+
+      - name: Run migrate task + gate on exit 0 (PBL D5)
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          SERVICE: ${{ secrets.ECS_SERVICE }}
+          MIGRATE_REVISION_ARN: ${{ steps.register-migrate-task-def.outputs.migrate_revision_arn }}
+        run: |
+          set -euo pipefail
+          # Derive awsvpcConfiguration from the running app service so
+          # the migrate task lands in the same private subnets and
+          # security group as the runtime. Avoids adding subnets/SG
+          # GitHub secrets that would drift from the CFN-managed VPC.
+          NETCFG=$(aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --query 'services[0].networkConfiguration' \
+              --output json)
+          if [ -z "$NETCFG" ] || [ "$NETCFG" = "null" ]; then
+              echo "ERROR: could not read networkConfiguration from service $SERVICE" >&2
+              exit 1
+          fi
+
+          TASK_ARN=$(aws ecs run-task \
+              --cluster "$CLUSTER" \
+              --task-definition "$MIGRATE_REVISION_ARN" \
+              --launch-type FARGATE \
+              --network-configuration "$NETCFG" \
+              --query 'tasks[0].taskArn' \
+              --output text)
+          if [ -z "$TASK_ARN" ] || [ "$TASK_ARN" = "None" ]; then
+              echo "ERROR: run-task returned no taskArn" >&2
+              exit 1
+          fi
+          echo "migrate task: $TASK_ARN"
+
+          # Block until the task stops. tasks-stopped polls every 6s
+          # for up to 100 attempts = 10-min ceiling, comfortably
+          # inside the workflow's 30-min timeout-minutes.
+          aws ecs wait tasks-stopped \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN"
+
+          # Surface the migrate-container exit code. Any non-zero
+          # fails the deploy job BEFORE update-service runs — the app
+          # service keeps serving the previous revision until the next
+          # successful deploy.
+          EXIT=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].containers[0].exitCode' \
+              --output text)
+          STOP_REASON=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].stoppedReason' \
+              --output text)
+          echo "migrate exit code: $EXIT (stoppedReason: $STOP_REASON)"
+          if [ "$EXIT" != "0" ]; then
+              echo "ERROR: migrate task exited $EXIT — aborting deploy. Service not updated; previous revision continues to serve." >&2
+              exit 1
+          fi
+          echo "migrate succeeded; proceeding to app service update"
+
+      - name: Update ECS service + wait for stability
+        env:
+          CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          SERVICE: ${{ secrets.ECS_SERVICE }}
+          REVISION_ARN: ${{ steps.register-task-def.outputs.revision_arn }}
+        run: |
+          # Pin update-service to the exact revision just registered.
+          # Family-name resolution would default to the latest ACTIVE
+          # revision, which is correct in serial deploys but races
+          # against any concurrent registration. Explicit ARN is
+          # immune to that race and matches the runbook's pattern.
+          # Per PBL D5 this step runs ONLY after the migrate task
+          # above reported exit 0 — a migration failure short-circuits
+          # the deploy without touching the app service.
+          aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$SERVICE" \
+              --task-definition "$REVISION_ARN" \
+              --force-new-deployment
+          # services-stable blocks until rollout completes
+          # (steady-state desiredCount == runningCount). Polls every
+          # 15s with up to 40 attempts = 10-minute ceiling, which
+          # comfortably fits inside the 30-min timeout-minutes.
+          aws ecs wait services-stable \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE"
+          echo "service stable"
+
+      - name: Smoke test against deployed endpoint
+        env:
+          SMOKE_TEST_URL: ${{ secrets.SMOKE_TEST_URL }}
+          SMOKE_TENANT_TOKEN: ${{ secrets.SMOKE_TENANT_TOKEN }}
+        run: |
+          set -euo pipefail
+          # First-deploy chicken-and-egg: the smoke test needs an onboarded
+          # tenant token, but onboarding happens against the running app —
+          # so on a cold environment SMOKE_TENANT_TOKEN may not be set yet.
+          # Skip (don't fail) when it's empty, so the initial rollout can
+          # complete; once a (smoke) tenant is onboarded and the secret is
+          # populated, every subsequent deploy runs the smoke test for real.
+          if [ -z "${SMOKE_TENANT_TOKEN:-}" ]; then
+              echo "::warning::SMOKE_TENANT_TOKEN is empty — skipping smoke test (expected only on the first deploy before a tenant is onboarded). Set it for this environment to enable smoke coverage."
+              exit 0
+          fi
+          # Stdlib-only smoke test (6D.5) — no third-party deps
+          # required in the runner.
+          python3 scripts/smoke_test.py \
+              --base-url "$SMOKE_TEST_URL" \
+              --tenant-token "$SMOKE_TENANT_TOKEN"
