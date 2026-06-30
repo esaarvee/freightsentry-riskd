@@ -40,6 +40,11 @@ Metadata:
           - GitHubOidcProviderArn
           - GitHubRepo
           - GitHubOidcRefPattern
+      - Label:
+          default: Bastion (optional break-glass RDS access)
+        Parameters:
+          - EnableBastion
+          - BastionInstanceType
     ParameterLabels:
       Environment:
         default: Deployment environment (test or production)
@@ -67,6 +72,10 @@ Metadata:
         default: GitHub org/repo allowed to assume DeployRole (exact; no wildcards)
       GitHubOidcRefPattern:
         default: Git ref pattern the deploy workflow must run from (tag gate)
+      EnableBastion:
+        default: Create the optional SSM-accessed bastion host
+      BastionInstanceType:
+        default: Bastion EC2 instance type
 
 Parameters:
 
@@ -196,6 +205,33 @@ Parameters:
       (`v*` semver tags). This is a second, independent gate on top of the
       environment-scoped `sub`: the caller must be the exact repo, running
       in the matching Environment, AND triggered from a `v*` tag.
+
+  EnableBastion:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Create the optional break-glass bastion host for ad-hoc RDS access.
+      Default false — the box (and its always-on cost + RDS-reachable
+      attack surface) only exists when you flip this to true and redeploy
+      ("if and when needed"). Flip back to false and redeploy to tear it
+      down; the generated key secret is Retain-protected and survives.
+
+  BastionInstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+    Description: >-
+      Bastion EC2 instance type. t2.micro is the intentional small default;
+      t3 options are fallbacks for AZs where the t2 family is unavailable.
+      Only consumed when EnableBastion is true.
+
+Conditions:
+
+  CreateBastion: !Equals [!Ref EnableBastion, 'true']
 
 Resources:
 
@@ -1068,6 +1104,172 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  # ---------------------------------------------------------------
+  # Bastion host (optional; gated on CreateBastion / EnableBastion=true)
+  # Break-glass operator access to the private-subnet RDS instance.
+  # Reached via SSM Session Manager ONLY — no public IP and no inbound
+  # SSH rule. The box sits in PrivateSubnet1 and talks to the SSM
+  # endpoints + RDS through the existing NAT gateway. On first boot it
+  # generates an ed25519 keypair, installs the public half into
+  # ec2-user's authorized_keys, and pushes the PRIVATE half to
+  # BastionKeySecret so an operator can retrieve it for SSH-over-SSM
+  # port-forwarding to RDS:5432. Default deploys (EnableBastion=false)
+  # provision none of these resources.
+  # ---------------------------------------------------------------
+
+  BastionKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreateBastion
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: freightsentry-riskd/BASTION_SSH_KEY
+      Description: >-
+        Bastion private SSH key (ed25519), written by the instance on first
+        boot via user-data. Retrieve with `aws secretsmanager get-secret-value`
+        to SSH-over-SSM into the bastion and port-forward to RDS:5432.
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateBastion
+    Properties:
+      GroupName: !Sub 'freightsentry-riskd-bastion-${Environment}'
+      GroupDescription: >-
+        Bastion host. No inbound rules (SSM Session Manager only); default
+        egress reaches RDS 5432, the SSM endpoints, and dnf via the NAT.
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-bastion-sg-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  # RDS ingress from the bastion lives in a standalone rule (not inline on
+  # RdsSecurityGroup) so it can carry the CreateBastion condition without
+  # making the unconditional RDS SG conditional.
+  BastionToRdsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: CreateBastion
+    Properties:
+      GroupId: !Ref RdsSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: PostgreSQL from the optional bastion host (break-glass; EnableBastion=true)
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Condition: CreateBastion
+    Properties:
+      RoleName: !Sub 'freightsentry-riskd-bastion-${Environment}'
+      Description: Bastion instance role - SSM Session Manager core + write the generated private key to BastionKeySecret only.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: bastion-key-write
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BastionKeySecretWrite
+                Effect: Allow
+                Action: secretsmanager:PutSecretValue
+                Resource: !Ref BastionKeySecret
+      Tags:
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateBastion
+    Properties:
+      Roles:
+        - !Ref BastionRole
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Condition: CreateBastion
+    Properties:
+      InstanceType: !Ref BastionInstanceType
+      # Latest Amazon Linux 2023 (x86_64) resolved at deploy time from the
+      # public SSM parameter — ships ssm-agent + AWS CLI v2 preinstalled.
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      SubnetId: !Ref PrivateSubnet1
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      SecurityGroupIds:
+        - !Ref BastionSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 8
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          KEYDIR=/home/ec2-user/.ssh
+          KEYFILE="$KEYDIR/id_ed25519"
+          install -d -m 700 -o ec2-user -g ec2-user "$KEYDIR"
+          # Critical path: generate the keypair and store the PRIVATE half in
+          # Secrets Manager BEFORE granting the public half access. If the push
+          # fails (e.g. transient IAM propagation), remove the local key and
+          # exit non-zero so the box fails closed — authorized_keys must never
+          # hold a key whose private half the operator can't retrieve. Recovery
+          # is `rm $KEYFILE && reboot` (or replace the instance); the failure is
+          # visible in /var/log/cloud-init-output.log and the empty secret.
+          if [ ! -f "$KEYFILE" ]; then
+            sudo -u ec2-user ssh-keygen -t ed25519 -N '' \
+              -f "$KEYFILE" \
+              -C "freightsentry-riskd-bastion-${Environment}"
+            if aws secretsmanager put-secret-value \
+                 --region ${AWS::Region} \
+                 --secret-id ${BastionKeySecret} \
+                 --secret-string "file://$KEYFILE"; then
+              cat "$KEYFILE.pub" >> "$KEYDIR/authorized_keys"
+              chmod 600 "$KEYDIR/authorized_keys"
+              chown ec2-user:ec2-user "$KEYDIR/authorized_keys"
+            else
+              rm -f "$KEYFILE" "$KEYFILE.pub"
+              echo "bastion: private-key push to Secrets Manager failed; removed local key for retry on next boot" >&2
+              exit 1
+            fi
+          fi
+          # Optional convenience: Postgres client for psql over the SSM
+          # port-forward. Non-load-bearing — runs AFTER the key flow so a
+          # package miss can't strand the break-glass key; operators can also
+          # psql from their own workstation through the tunnel.
+          dnf install -y postgresql16 2>/dev/null \
+            || dnf install -y postgresql15 2>/dev/null \
+            || echo "bastion: no postgresql client package available; psql from your workstation over the port-forward" >&2
+      Tags:
+        - Key: Name
+          Value: !Sub 'freightsentry-riskd-bastion-${Environment}'
+        - Key: Project
+          Value: freightsentry-riskd
+        - Key: Environment
+          Value: !Ref Environment
+
 Outputs:
 
   EcrRepositoryUri:
@@ -1171,3 +1373,19 @@ Outputs:
       step (per D16; service stays outside CFN to avoid conflict with the
       deploy workflow's register-task-definition / update-service ownership).
     Value: !Ref EcsCluster
+
+  BastionInstanceId:
+    Condition: CreateBastion
+    Description: >-
+      Bastion instance ID (only when EnableBastion=true). Open a shell with
+      `aws ssm start-session --target <id>`, or port-forward to RDS via the
+      AWS-StartPortForwardingSessionToRemoteHost SSM document.
+    Value: !Ref BastionInstance
+
+  BastionKeySecretArn:
+    Condition: CreateBastion
+    Description: >-
+      ARN of the bastion private SSH key secret (only when EnableBastion=true).
+      Retrieve with `aws secretsmanager get-secret-value` for SSH-over-SSM
+      tunneling to RDS:5432.
+    Value: !Ref BastionKeySecret
