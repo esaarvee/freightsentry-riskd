@@ -38,7 +38,8 @@ Metadata:
           default: IAM and GitHub OIDC
         Parameters:
           - GitHubOidcProviderArn
-          - GitHubOidcSubject
+          - GitHubRepo
+          - GitHubOidcRefPattern
     ParameterLabels:
       Environment:
         default: Deployment environment (test or production)
@@ -62,8 +63,10 @@ Metadata:
         default: ACM certificate ARN (required; HTTPS listener)
       GitHubOidcProviderArn:
         default: GitHub OIDC provider ARN (account-level; from platform-app)
-      GitHubOidcSubject:
-        default: GitHub OIDC subject pattern (controls which workflows can assume DeployRole)
+      GitHubRepo:
+        default: GitHub org/repo allowed to assume DeployRole (exact; no wildcards)
+      GitHubOidcRefPattern:
+        default: Git ref pattern the deploy workflow must run from (tag gate)
 
 Parameters:
 
@@ -169,14 +172,30 @@ Parameters:
       `aws iam list-open-id-connect-providers` to obtain. NOT created by
       this template (would conflict with platform-app).
 
-  GitHubOidcSubject:
+  GitHubRepo:
     Type: String
-    Default: 'repo:esaarvee/freightsentry-riskd:ref:refs/tags/v*'
+    Default: 'esaarvee/freightsentry-riskd'
+    AllowedPattern: '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+    ConstraintDescription: >-
+      Must be an exact 'org/repo' slug — no wildcards. Wildcards in the
+      org or repo would let look-alike repositories assume DeployRole.
     Description: >-
-      GitHub OIDC subject pattern controlling which repository / branch /
-      tag pushes can assume DeployRole. Default matches the deploy.yml
-      tag-push trigger (`v*` semver tags). Override per env if forking or
-      using a different ref pattern.
+      Exact GitHub org/repo whose workflows may assume DeployRole. Combined
+      with the deploying Environment to form the OIDC `sub` claim
+      `repo:<org/repo>:environment:<Environment>`. Secrets are managed via
+      GitHub Environments, so the workflow job runs under an environment and
+      the `sub` claim is environment-scoped (not ref-scoped). Override only
+      when forking to a different repository.
+
+  GitHubOidcRefPattern:
+    Type: String
+    Default: 'refs/tags/v*'
+    Description: >-
+      Git ref the deploy workflow must run from, matched against the OIDC
+      `ref` claim (StringLike). Defaults to the deploy.yml tag-push trigger
+      (`v*` semver tags). This is a second, independent gate on top of the
+      environment-scoped `sub`: the caller must be the exact repo, running
+      in the matching Environment, AND triggered from a `v*` tag.
 
 Resources:
 
@@ -843,10 +862,17 @@ Resources:
               Federated: !Ref GitHubOidcProviderArn
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
+              # Exact `sub` match (no wildcards): the token must come from the
+              # named repo running under the GitHub Environment matching the
+              # CFN Environment param. Secrets moved to GitHub Environments, so
+              # the `sub` is environment-scoped — the ref/tag is gated below via
+              # the separate `ref` claim.
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepo}:environment:${Environment}'
+              # Second, independent gate: workflow must run from a v* tag.
               StringLike:
-                token.actions.githubusercontent.com:sub: !Ref GitHubOidcSubject
+                token.actions.githubusercontent.com:ref: !Ref GitHubOidcRefPattern
       Policies:
         - PolicyName: deploy
           PolicyDocument:

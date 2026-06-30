@@ -329,6 +329,19 @@ Environment scopes the AWS/ECS/smoke secrets AND the IAM role-name
 suffix (`...-${ENVIRONMENT}`), so one account can host test + prod in
 different regions.
 
+> **DeployRole trust gate (two conditions, both required).** The
+> `DeployRole` trust policy matches the OIDC token on:
+> 1. `sub` = `repo:<org>/<repo>:environment:<env>` (exact) — the deploy
+>    job MUST declare `environment:`. If that key is ever removed from
+>    `deploy.yml`, GitHub mints a `:ref:`/`:pull_request` `sub` instead
+>    and **every** deploy fails `AssumeRole` (fails closed — safe, but a
+>    full deploy outage).
+> 2. `ref` matches `refs/tags/v*` — the run MUST originate from a `v*`
+>    tag. The tag-push path satisfies this automatically. **For a manual
+>    production deploy (Run workflow → `workflow_dispatch`), select a
+>    `v*` tag — not a branch — in the ref picker**, otherwise the `ref`
+>    claim is `refs/heads/<branch>` and `AssumeRole` is rejected.
+
 - [ ] **Create two GitHub Environments** (repo → Settings →
       Environments): `test` and `production`. On `production`, add a
       **Required reviewers** protection rule so prod deploys pause for

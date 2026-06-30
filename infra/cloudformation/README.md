@@ -76,7 +76,8 @@ Production = `ca-central-1`. Test = `us-east-2`. The template uses the `AWS::Reg
 | `DbDeletionProtection` | String | `true` | test → `false` | Prevents accidental destroy on production. |
 | `AcmCertificateArn` | String | (none) | **yes** | ACM cert ARN for HTTPS:443. Region-scoped. |
 | `GitHubOidcProviderArn` | String | (none) | **yes** | Account-level OIDC provider ARN; from platform-app. |
-| `GitHubOidcSubject` | String | `repo:esaarvee/freightsentry-riskd:ref:refs/tags/v*` | maybe (fork / different ref) | Restricts which workflow can assume DeployRole. |
+| `GitHubRepo` | String | `esaarvee/freightsentry-riskd` | maybe (fork) | Exact org/repo (no wildcards) allowed to assume DeployRole. Combined with `Environment` to form the OIDC `sub` claim `repo:<repo>:environment:<env>` — secrets are managed via GitHub Environments. |
+| `GitHubOidcRefPattern` | String | `refs/tags/v*` | maybe (different ref) | Second gate matched against the OIDC `ref` claim; restricts DeployRole to `v*` tag pushes. |
 
 ---
 

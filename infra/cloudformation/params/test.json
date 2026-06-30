@@ -5,5 +5,6 @@
   "DbDeletionProtection": "false",
   "AcmCertificateArn": "arn:aws:acm:us-east-2:000000000000:certificate/REPLACE-WITH-CERT-UUID",
   "GitHubOidcProviderArn": "arn:aws:iam::000000000000:oidc-provider/token.actions.githubusercontent.com",
-  "GitHubOidcSubject": "repo:esaarvee/freightsentry-riskd:ref:refs/tags/v*"
+  "GitHubRepo": "esaarvee/freightsentry-riskd",
+  "GitHubOidcRefPattern": "refs/tags/v*"
 }

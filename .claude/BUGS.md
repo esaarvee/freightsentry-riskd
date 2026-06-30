@@ -709,3 +709,19 @@ account-global). All task-def JSONs (app/migrate/onboard) now use `${...ROLE_ARN
 deploy.yml builds them env-suffixed (`...-${ENVIRONMENT}`) for the app+migrate registers, and runbook
 B.2 documents the operator-side envsubst for the onboard register. deploy.yml:136's env-less migrate
 ARN is fixed. The "legacy hand-applied env-less roles" question is moot under the chosen topology.
+
+## 2026-06-26 — readonlyRootFilesystem would break enrichment data dir
+
+Discovered by: security-auditor + senior-engineer during enrichment-refresh fix (Commit 2, Dockerfile data-dir)
+Location: infra/ecs-task-definition.json + Dockerfile:70
+Severity: low
+Observation: The enrichment refresh writes to /app/data/enrichment, now pre-created + chowned in the image and served off the container's writable rootfs (task def sets no volume, no readonlyRootFilesystem). If readonlyRootFilesystem: true is ever adopted for container hardening, atomic_replace's writes will fail again — the dir would need a paired writable mount (tmpfs/EFS/ephemeral) owned by uid:gid 1000.
+Suggested action: If/when adopting readonlyRootFilesystem, add a writable volume+mountPoint at /app/data with uid:gid 1000 ownership; note in the deploy runbook.
+
+## 2026-06-30 — build.yml expects a role not granted by the CFN template
+
+Discovered by: senior-engineer during OIDC trust-policy tightening (DeployRole environment-scoped sub + ref gate)
+Location: .github/workflows/build.yml:12-15 + infra/cloudformation/freightsentry-riskd.yml (DeployRole)
+Severity: low
+Observation: build.yml documents/uses a sub-claim shaped like `repo:<org>/<repo>:ref:refs/heads/main` (push-to-main, no `environment:`). The CFN template defines only one OIDC-assumable role, `DeployRole` (`freightsentry-riskd-deploy-<env>`), whose trust policy matches neither the old nor the new build.yml token shape. This is pre-existing — the tightening did NOT regress build.yml; build.yml's token was already unsatisfiable against DeployRole. Needs reconciliation between build.yml's role expectation and the CFN-managed role set.
+Suggested action: investigation needed — either build.yml shouldn't assume DeployRole, or a separate build-scoped role is missing from the template.
